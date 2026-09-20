@@ -1,0 +1,147 @@
+// Prisma schema — ClientForge CRM
+// Postgres. Works on Neon / Supabase / any managed Postgres free tier.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------- auth
+model AdminUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String?
+  passwordHash String
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+// ---------------------------------------------------------------- leads
+model Lead {
+  id String @id @default(cuid())
+
+  // company
+  companyName      String
+  businessCategory String? // "Dental Clinic", "Plumber", "Marketing Agency"
+  industry         String?
+  country          String  @default("UK") // UK | USA | UAE | AU | CA | other
+  city             String?
+  region           String?
+  address          String?
+  postcode         String?
+  companyNumber    String? // Companies House / registry number
+  companyUrl       String?
+
+  // website analysis (from qualify_leads.py)
+  website        String?
+  websiteStatus  String? // likely | check | unverified | none
+  segment        String? // NO_SITE | BROKEN | OUTDATED | OK | UNCHECKED
+  score          Int      @default(0)
+  issues         String?
+  hookLine       String? // the personalised opening line
+
+  // contact person
+  contactName  String?
+  contactRole  String?
+  email        String?
+  phone        String?
+  whatsapp     String?
+  linkedin     String?
+
+  // pipeline
+  source          String? // companies_house | apollo | referral | manual | inbound
+  status          String  @default("NEW")
+  // NEW | QUALIFIED | CONTACTED | REPLIED | CALL_BOOKED | PROPOSAL_SENT
+  // | WON | LOST | NURTURE
+  priority        String  @default("MEDIUM") // LOW | MEDIUM | HIGH
+  dealValueCents  Int? // in USD cents, avoids float issues
+  quotedCurrency  String? @default("GBP")
+
+  // compliance — set these BEFORE any outreach
+  optedInEmail    Boolean @default(false)
+  optedInWhatsapp Boolean @default(false)
+  doNotContact    Boolean @default(false)
+
+  // counters & dates
+  emailSentCount    Int       @default(0)
+  whatsappSentCount Int       @default(0)
+  lastEmailAt       DateTime?
+  lastWhatsappAt    DateTime?
+  lastInboundAt     DateTime? // last time THEY contacted us (drives the 24h window)
+  lastReplyAt       DateTime?
+  nextFollowUpAt    DateTime?
+
+  notes String?
+  tags  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  activities Activity[]
+
+  @@index([status])
+  @@index([country])
+  @@index([segment])
+  @@index([nextFollowUpAt])
+  @@index([companyName])
+}
+
+// ---------------------------------------------------------------- timeline
+model Activity {
+  id      String @id @default(cuid())
+  leadId  String
+  lead    Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  type      String // EMAIL | WHATSAPP | CALL | NOTE | STATUS | TASK
+  direction String @default("OUT") // OUT | IN
+  channel   String? // smtp | resend | whatsapp | manual
+  subject   String?
+  body      String?
+  templateName String?
+  status    String? // queued | sent | delivered | read | failed | received
+  externalId String?
+  error     String?
+  meta      String? // JSON string for extra data
+
+  createdAt DateTime @default(now())
+
+  @@index([leadId])
+  @@index([createdAt])
+  @@index([type])
+}
+
+// ---------------------------------------------------------------- settings
+model Setting {
+  key       String   @id
+  value     String
+  isSecret  Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------- suppression
+model Suppression {
+  id        String   @id @default(cuid())
+  value     String   @unique // email or phone, normalised lowercase
+  reason    String?
+  createdAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------------- templates
+model Template {
+  id      String @id @default(cuid())
+  name    String
+  channel String // EMAIL | WHATSAPP
+  subject String?
+  body    String
+  // WhatsApp Cloud API specific
+  waTemplateName String?
+  waLanguage     String? @default("en_US")
+  createdAt      DateTime @default(now())
+}

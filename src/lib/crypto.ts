@@ -12,12 +12,17 @@ import crypto from "node:crypto";
 const ALGO = "aes-256-gcm";
 
 function key(): Buffer {
-  const raw = process.env.SETTINGS_ENCRYPTION_KEY;
+  let raw = process.env.SETTINGS_ENCRYPTION_KEY;
   if (!raw) throw new Error("SETTINGS_ENCRYPTION_KEY is not set");
+  // Vercel UI sometimes pastes with quotes or whitespace — strip them
+  raw = raw.trim().replace(/^["']|["']$/g, "").trim();
+  // Also handle accidental HTML encoding &amp; in connection strings that leaks into env
+  raw = raw.replace(/&amp;/g, "&");
   const buf = Buffer.from(raw, "base64");
   if (buf.length !== 32) {
+    // Try to give a helpful error with actual length
     throw new Error(
-      "SETTINGS_ENCRYPTION_KEY must be 32 bytes base64. Generate with: openssl rand -base64 32"
+      `SETTINGS_ENCRYPTION_KEY must be 32 bytes base64 (got ${buf.length} bytes). Generate with: openssl rand -base64 32 — current value starts with: ${raw.slice(0, 8)}...`
     );
   }
   return buf;

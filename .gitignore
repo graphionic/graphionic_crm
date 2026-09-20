@@ -25,3 +25,7 @@ yarn-error.log*
 .vercel
 next-env.d.ts
 *.tsbuildinfo
+
+# local postgres
+.pgdata/
+init.log

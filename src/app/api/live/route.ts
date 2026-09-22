@@ -83,28 +83,39 @@ export async function GET() {
       });
       if (collectors.length) status = "running";
     } catch (e) {
-      // On Vercel, ps not available, check Setting heartbeat and last lead time
-      try {
-        const hb = await prisma.setting.findUnique({ where: { key: "collector_heartbeat" } });
-        if (hb) {
+      // ps not available on some platforms
+    }
+
+    // Always check heartbeat Setting for Vercel (even if ps returned none)
+    try {
+      const hb = await prisma.setting.findUnique({ where: { key: "collector_heartbeat" } });
+      if (hb) {
+        try {
           heartbeat = JSON.parse(hb.value);
           const lastBeat = new Date(heartbeat.timestamp);
           const diffMin = (Date.now() - lastBeat.getTime()) / 60000;
           if (diffMin < 10) {
             status = "running";
-            collectors = [{
-              pid: heartbeat.pid || "vercel",
-              cmd: heartbeat.message || `Last beat ${diffMin.toFixed(1)} min ago - ${heartbeat.fileRows || crmTotal} rows`,
-              running: true,
-            }];
+            // If ps found nothing, use heartbeat as collector
+            if (!collectors.length) {
+              collectors = [{
+                pid: heartbeat.pid?.toString() || "vercel",
+                cmd: heartbeat.message || `Last beat ${diffMin.toFixed(1)} min ago - ${heartbeat.fileRows || crmTotal} rows`,
+                running: true,
+              }];
+            }
           }
+        } catch (parseErr) {
+          // ignore parse error
         }
-        // Fallback: check last lead created time
-        if (status === "stopped" && dbLastLeads.length) {
-          const lastLeadTime = new Date(dbLastLeads[0].createdAt || Date.now());
-          const diffMin = (Date.now() - lastLeadTime.getTime()) / 60000;
-          if (diffMin < 15) {
-            status = "running";
+      }
+      // Fallback: check last lead created time if still stopped
+      if (status === "stopped" && dbLastLeads.length) {
+        const lastLeadTime = new Date((dbLastLeads[0] as any).createdAt || Date.now());
+        const diffMin = (Date.now() - lastLeadTime.getTime()) / 60000;
+        if (diffMin < 15) {
+          status = "running";
+          if (!collectors.length) {
             collectors = [{
               pid: "db",
               cmd: `Last lead ${diffMin.toFixed(1)} min ago - auto-detected running`,
@@ -112,9 +123,9 @@ export async function GET() {
             }];
           }
         }
-      } catch (e2) {
-        // ignore
       }
+    } catch (e2) {
+      // ignore
     }
 
     // If still no collectors, mark stopped

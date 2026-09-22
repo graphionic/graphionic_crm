@@ -36,6 +36,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <NavLink href="/import" icon="⇪" label="Import CSV" />
           <NavLink href="/leads/new" icon="＋" label="New lead" />
 
+          <div className="sect">Brand</div>
+          <NavLink href="/brand-guidelines" icon="🎨" label="Brand Guidelines" />
+          <NavLink href="/brand-guidelines/assets" icon="📦" label="Assets & Theme" />
+
           <div className="sect">Setup</div>
           <NavLink href="/settings" icon="⚙" label="Settings" />
           <NavLink href="/settings/email" icon="✉" label="Email & DNS" />

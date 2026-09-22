@@ -104,6 +104,19 @@ export async function GET() {
                 running: true,
               }];
             }
+          } else if (diffMin >= 10) {
+            // Heartbeat old - try to auto-heal by restarting watchdog (local only)
+            try {
+              const { execSync } = await import("child_process");
+              // Check if watchdog running
+              const psCheck = execSync("ps aux | grep never_stops_watchdog | grep -v grep || echo 'none'", { encoding: "utf8" });
+              if (psCheck.trim() === "none" || psCheck.trim() === "") {
+                // Try to restart watchdog in background
+                execSync("cd /home/user/leads && nohup python3 -u never_stops_watchdog.py > /tmp/watchdog.log 2>&1 & echo started", { encoding: "utf8" });
+              }
+            } catch (healErr) {
+              // ignore heal errors
+            }
           }
         } catch (parseErr) {
           // ignore parse error

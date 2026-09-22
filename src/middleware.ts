@@ -18,6 +18,7 @@ export function middleware(req: NextRequest) {
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/webhooks") ||
     pathname.startsWith("/api/live") ||
+    pathname.startsWith("/api/restart") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/privacy") ||
     pathname.startsWith("/terms") ||

@@ -1,130 +1,145 @@
 /**
- * Design Tokens - Colors
- * Foundation for ClientForge Admin Theme
+ * ClientForge Design Tokens - Colors
+ * Professional, Precise, Modern, Technical, Premium SaaS
+ * Primary hierarchy: Navy → Forge Blue → Cyan → Violet
  */
 
 export const colors = {
-  // Primary
-  primary: {
-    50: "#eff6ff",
-    100: "#dbeafe",
-    200: "#bfdbfe",
-    300: "#93c5fd",
-    400: "#60a5fa",
-    500: "#2563eb", // main
-    600: "#1d4ed8",
-    700: "#1e40af",
-    800: "#1e3a8a",
-    900: "#1e3a5f",
+  // Brand - Forge
+  forge: {
+    navy: "#0B1224", // Forge Navy - primary brand, headers, text
+    midnight: "#111B33", // Midnight - darker navy
+    blue: "#315BE8", // Forge Blue - primary interactive
+    electric: "#4C73FF", // Electric Blue - hover, active
+    sky: "#38BDF8", // Sky Blue - secondary
+    cyan: "#22D3EE", // Signal Cyan - energetic highlights
+    violet: "#7C5CFC", // Violet - AI, automation, special
   },
-  // Secondary
-  secondary: {
-    50: "#f8fafc",
-    100: "#f1f5f9",
-    200: "#e2e8f0",
-    300: "#cbd5e1",
-    400: "#94a3b8",
-    500: "#64748b",
-    600: "#475569",
-    700: "#334155",
-    800: "#1e293b",
-    900: "#0f172a",
+  // Brand scale for Forge Blue
+  brand: {
+    50: "#EEF3FF", // Soft Blue
+    100: "#D9E4FF",
+    200: "#B3C8FF",
+    300: "#8CABFF",
+    400: "#658EFF",
+    500: "#315BE8", // Forge Blue main
+    600: "#2548C0",
+    700: "#1D3898",
+    800: "#111B33", // Midnight
+    900: "#0B1224", // Forge Navy
   },
-  // Accent
-  accent: {
-    50: "#f0fdf4",
-    100: "#dcfce7",
-    200: "#bbf7d0",
-    300: "#86efac",
-    400: "#4ade80",
-    500: "#22c55e",
-    600: "#16a34a",
-    700: "#15803d",
-  },
-  // Semantic
-  success: {
-    50: "#f0fdf4",
-    100: "#dcfce7",
-    500: "#22c55e",
-    600: "#16a34a",
-    700: "#15803d",
-  },
-  warning: {
-    50: "#fffbeb",
-    100: "#fef3c7",
-    500: "#f59e0b",
-    600: "#d97706",
-    700: "#b45309",
-  },
-  error: {
-    50: "#fef2f2",
-    100: "#fee2e2",
-    500: "#ef4444",
-    600: "#dc2626",
-    700: "#b91c1c",
-  },
-  info: {
-    50: "#eff6ff",
-    100: "#dbeafe",
-    500: "#3b82f6",
-    600: "#2563eb",
-    700: "#1d4ed8",
-  },
-  // Neutral
+  // Neutral - Ink to Canvas
   neutral: {
-    0: "#ffffff",
-    50: "#f9fafb",
-    100: "#f3f4f6",
-    200: "#e5e7eb",
-    300: "#d1d5db",
-    400: "#9ca3af",
-    500: "#6b7280",
-    600: "#4b5563",
-    700: "#374151",
-    800: "#1f2937",
-    900: "#111827",
-    950: "#030712",
+    0: "#FFFFFF", // Surface
+    50: "#F6F8FC", // Canvas
+    100: "#EEF3FF", // Soft Blue
+    200: "#DDE3EE", // Border
+    300: "#C2CAD9",
+    400: "#94A3B8",
+    500: "#667085", // Slate
+    600: "#475467",
+    700: "#344054",
+    800: "#1D2939",
+    900: "#101828", // Ink
+    950: "#0B1224", // Forge Navy
   },
-  // Background
-  background: {
-    default: "#ffffff",
-    subtle: "#f9fafb",
-    muted: "#f3f4f6",
-    inverse: "#111827",
+  // Semantic - primarily for status
+  semantic: {
+    success: {
+      50: "#ECFDF5",
+      100: "#D1FAE5",
+      500: "#16A36A",
+      600: "#15803D",
+      700: "#166534",
+    },
+    warning: {
+      50: "#FFFBEB",
+      100: "#FEF3C7",
+      500: "#F59E0B",
+      600: "#D97706",
+      700: "#B45309",
+    },
+    danger: {
+      50: "#FEF2F2",
+      100: "#FEE2E2",
+      500: "#E5484D",
+      600: "#DC2626",
+      700: "#B91C1C",
+    },
+    info: {
+      50: "#EEF3FF",
+      100: "#D9E4FF",
+      500: "#315BE8",
+      600: "#2548C0",
+    },
   },
   // Surface
   surface: {
-    default: "#ffffff",
-    hover: "#f9fafb",
-    active: "#f3f4f6",
-    selected: "#eff6ff",
-    disabled: "#f3f4f6",
+    canvas: "#F6F8FC",
+    default: "#FFFFFF",
+    subtle: "#F6F8FC",
+    muted: "#EEF3FF",
+    hover: "#F6F8FC",
+    active: "#EEF3FF",
+    selected: "#EEF3FF",
+    disabled: "#F6F8FC",
+    overlay: "rgba(11, 18, 36, 0.5)",
+    inverse: "#0B1224",
   },
   // Border
   border: {
-    default: "#e5e7eb",
-    strong: "#d1d5db",
-    subtle: "#f3f4f6",
-    focus: "#2563eb",
-    error: "#ef4444",
+    default: "#DDE3EE",
+    strong: "#C2CAD9",
+    subtle: "#EEF3FF",
+    focus: "#315BE8",
+    error: "#E5484D",
+    success: "#16A36A",
   },
   // Text
   text: {
-    primary: "#111827",
-    secondary: "#4b5563",
-    tertiary: "#6b7280",
-    disabled: "#9ca3af",
-    inverse: "#ffffff",
-    link: "#2563eb",
-    linkHover: "#1d4ed8",
+    primary: "#101828", // Ink
+    secondary: "#475467",
+    tertiary: "#667085", // Slate
+    disabled: "#98A2B3",
+    inverse: "#FFFFFF",
+    brand: "#0B1224", // Forge Navy
+    link: "#315BE8",
+    linkHover: "#2548C0",
+    onBrand: "#FFFFFF",
+  },
+  // For backward compat
+  primary: {
+    50: "#EEF3FF",
+    100: "#D9E4FF",
+    200: "#B3C8FF",
+    300: "#8CABFF",
+    400: "#4C73FF",
+    500: "#315BE8",
+    600: "#2548C0",
+    700: "#1D3898",
+    800: "#111B33",
+    900: "#0B1224",
+  },
+  secondary: {
+    50: "#F6F8FC",
+    100: "#EEF3FF",
+    200: "#DDE3EE",
+    300: "#C2CAD9",
+    400: "#94A3B8",
+    500: "#667085",
+    600: "#475467",
+    700: "#344054",
+    800: "#1D2939",
+    900: "#101828",
   },
 } as const;
 
 export const semanticColors = {
-  success: colors.success[500],
-  warning: colors.warning[500],
-  error: colors.error[500],
-  info: colors.info[500],
+  success: colors.semantic.success[500],
+  warning: colors.semantic.warning[500],
+  error: colors.semantic.danger[500],
+  info: colors.semantic.info[500],
+  brand: colors.forge.blue,
+  cyan: colors.forge.cyan,
+  violet: colors.forge.violet,
 } as const;
-
-export type ColorToken = typeof colors;

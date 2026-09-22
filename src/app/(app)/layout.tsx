@@ -37,8 +37,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <NavLink href="/leads/new" icon="＋" label="New lead" />
 
           <div className="sect">Brand</div>
-          <NavLink href="/brand-guidelines" icon="🎨" label="Brand Guidelines" />
-          <NavLink href="/brand-guidelines/assets" icon="📦" label="Assets & Theme" />
+          <NavLink href="/design-system" icon="🎨" label="Design System" />
+          <NavLink href="/design-system/foundations/colors" icon="◍" label="Tokens" />
 
           <div className="sect">Setup</div>
           <NavLink href="/settings" icon="⚙" label="Settings" />

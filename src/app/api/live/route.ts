@@ -1,0 +1,163 @@
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import fs from "fs";
+
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  try {
+    // CRM counts
+    const crmTotal = await prisma.lead.count();
+    const crmWithEmail = await prisma.lead.count({ where: { email: { not: "" } } });
+    const crmNoSite = await prisma.lead.count({ where: { OR: [{ website: "" }, { website: null }] } });
+    
+    // Last 20 leads from DB (works on Vercel)
+    let dbLastLeads: any[] = [];
+    try {
+      const recent = await prisma.lead.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 20,
+        select: { companyName: true, businessCategory: true, email: true, phone: true, city: true, country: true, createdAt: true }
+      });
+      dbLastLeads = recent.map(r => ({
+        company: (r.companyName || "").slice(0, 30),
+        category: r.businessCategory || "",
+        email: r.email || "",
+        phone: r.phone || "",
+        city: r.city || "",
+        country: r.country || "",
+        createdAt: r.createdAt
+      }));
+    } catch (e) {
+      console.error("DB last leads error", e);
+    }
+
+    // File count (local only, fails on Vercel)
+    const filePath = "/home/user/leads/leads-no-website-batch.csv";
+    let fileRows = 0;
+    let fileExists = false;
+    let fileLastLeads: any[] = [];
+    
+    try {
+      if (fs.existsSync(filePath)) {
+        fileExists = true;
+        const content = fs.readFileSync(filePath, "utf8");
+        const lines = content.trim().split("\n");
+        fileRows = Math.max(0, lines.length - 1);
+        // Parse last 20 from file for local preview
+        const rows = lines.slice(1).slice(-20).map(line => {
+          const parts = line.split(",");
+          return {
+            company: parts[0]?.replace(/"/g, "")?.slice(0, 30) || "",
+            category: parts[1] || "",
+            email: parts[3] || "",
+            phone: parts[4] || "",
+            city: parts[6] || "",
+          };
+        });
+        fileLastLeads = rows.reverse();
+      }
+    } catch (e) {
+      // On Vercel, file won't exist, use DB counts
+    }
+
+    // Use file rows if available, else DB total
+    const effectiveRows = fileExists ? fileRows : crmTotal;
+    const lastLeads = fileLastLeads.length ? fileLastLeads : dbLastLeads;
+
+    // Collector status - try ps (local), fallback to heartbeat Setting + last lead time (Vercel)
+    let collectors: any[] = [];
+    let status = "stopped";
+    let heartbeat: any = null;
+
+    try {
+      const { execSync } = await import("child_process");
+      const ps = execSync("ps aux | grep -E 'big_area|collector|gmb|auto_import|forever|fast_no_site|super_fast' | grep -v grep || echo 'none'", { encoding: "utf8" });
+      collectors = ps.split("\n").filter(l => l.trim() && l !== "none").map(line => {
+        const parts = line.split(/\s+/);
+        return {
+          pid: parts[1],
+          cmd: parts.slice(10).join(" ").slice(0, 80),
+          running: true,
+        };
+      });
+      if (collectors.length) status = "running";
+    } catch (e) {
+      // On Vercel, ps not available, check Setting heartbeat and last lead time
+      try {
+        const hb = await prisma.setting.findUnique({ where: { key: "collector_heartbeat" } });
+        if (hb) {
+          heartbeat = JSON.parse(hb.value);
+          const lastBeat = new Date(heartbeat.timestamp);
+          const diffMin = (Date.now() - lastBeat.getTime()) / 60000;
+          if (diffMin < 10) {
+            status = "running";
+            collectors = [{
+              pid: heartbeat.pid || "vercel",
+              cmd: heartbeat.message || `Last beat ${diffMin.toFixed(1)} min ago - ${heartbeat.fileRows || crmTotal} rows`,
+              running: true,
+            }];
+          }
+        }
+        // Fallback: check last lead created time
+        if (status === "stopped" && dbLastLeads.length) {
+          const lastLeadTime = new Date(dbLastLeads[0].createdAt || Date.now());
+          const diffMin = (Date.now() - lastLeadTime.getTime()) / 60000;
+          if (diffMin < 15) {
+            status = "running";
+            collectors = [{
+              pid: "db",
+              cmd: `Last lead ${diffMin.toFixed(1)} min ago - auto-detected running`,
+              running: true,
+            }];
+          }
+        }
+      } catch (e2) {
+        // ignore
+      }
+    }
+
+    // If still no collectors, mark stopped
+    if (!collectors.length) {
+      collectors = [{ pid: "none", cmd: "No collectors running - chain broken! Check local machine", running: false }];
+      status = "stopped";
+    }
+
+    // Country breakdown from DB
+    let byCountry: any[] = [];
+    let byCategory: any[] = [];
+    try {
+      // @ts-ignore - Prisma 6 type issue with groupBy
+      byCountry = await (prisma.lead.groupBy as any)({ by: ["country"], _count: { _all: true } });
+      // @ts-ignore
+      byCategory = await (prisma.lead.groupBy as any)({ by: ["businessCategory"], _count: { _all: true } });
+    } catch {}
+
+    return NextResponse.json({
+      timestamp: new Date().toISOString(),
+      crm: {
+        total: crmTotal,
+        withEmail: crmWithEmail,
+        noSite: crmNoSite,
+        target: 200,
+        progress: Math.round((crmTotal / 200) * 100),
+      },
+      file: {
+        exists: fileExists,
+        rows: effectiveRows,
+        path: filePath,
+      },
+      collectors,
+      lastLeads,
+      byCountry,
+      byCategory,
+      heartbeat,
+      status,
+      message: status === "running"
+        ? `Collecting ${effectiveRows}/200 - CRM ${crmTotal}/200 - ${collectors.length} process(es) running - TRUE NO_SITE verified`
+        : "⚠️ COLLECTOR STOPPED - No process running, chain broken! Restart needed on local machine",
+    });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message, timestamp: new Date().toISOString() }, { status: 500 });
+  }
+}

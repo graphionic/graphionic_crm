@@ -27,6 +27,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <nav className="nav">
           <div className="sect">Workspace</div>
           <NavLink href="/dashboard" icon="▦" label="Dashboard" />
+          <NavLink href="/live" icon="●" label="Live Collection" />
           <NavLink href="/leads" icon="◉" label="Leads" badge={leadCount} />
           <NavLink href="/follow-ups" icon="◷" label="Follow-ups" badge={dueCount || undefined} tone="amber" />
           <NavLink href="/outbox" icon="✉" label="Outbox" />

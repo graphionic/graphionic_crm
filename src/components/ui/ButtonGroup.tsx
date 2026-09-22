@@ -39,10 +39,11 @@ export function ButtonGroup({ children, size = "md", variant = "standard", fullW
         if (!React.isValidElement(child)) return child;
         const isFirst = idx === 0;
         const isLast = idx === React.Children.count(children) - 1;
+        const cProps = child.props as any;
 
         return React.cloneElement(child as any, {
           style: {
-            ...(child.props.style || {}),
+            ...(cProps.style || {}),
             height: s.height,
             fontSize: s.fontSize,
             padding: s.padding,

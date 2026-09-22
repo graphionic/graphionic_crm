@@ -1,8 +1,14 @@
 "use client";
 import { useState } from "react";
+import { FormField, FieldLabel, FieldDescription, FieldError, FieldSuccess } from "@/components/ui/FormField";
+import { Input, CharacterCounter } from "@/components/ui/Input";
+import { Button } from "@/components/ui/Button";
+import { IconButton } from "@/components/ui/IconButton";
 
 export default function InputsPage() {
-  const [focused, setFocused] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
+  const [search, setSearch] = useState("");
 
   return (
     <div style={{ maxWidth: 1100, fontFamily: "'Poppins', system-ui, sans-serif" }}>
@@ -11,88 +17,214 @@ export default function InputsPage() {
       <div style={{ marginBottom: 28 }}>
         <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "#49339A", background: "#F0ECFA", padding: "4px 10px", borderRadius: 6 }}>14 / 74 · FORM CONTROLS</span>
         <h1 style={{ fontSize: 32, fontWeight: 600, letterSpacing: "-0.02em", color: "#151927", marginTop: 16, marginBottom: 8 }}>Text Inputs</h1>
-        <p style={{ fontSize: 14, color: "#60697A", lineHeight: 1.6, maxWidth: 640 }}>Height SM 36 / MD 42 / LG 48, radius 8px, white bg, border #E5E3DF, focus indigo with subtle ring.</p>
+        <p style={{ fontSize: 14, color: "#60697A", lineHeight: 1.6, maxWidth: 680 }}>Clean, compact, professional, fast, predictable, accessible. Persistent labels above fields, 4px base, Poppins, Royal Indigo focus, 8px radius.</p>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, marginBottom: 24 }}>
-        <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 24 }}>
-          <h3 style={{ fontWeight: 600, fontSize: 13, letterSpacing: "0.02em", marginBottom: 16, color: "#151927" }}>INPUT TYPES</h3>
-          <div style={{ display: "grid", gap: 16 }}>
-            {[
-              { label: "Company Name", placeholder: "Glow Dentistry", helper: "Full legal company name", type: "text" },
-              { label: "Email", placeholder: "info@glowdentistry.co.uk", helper: "Business email with domain", type: "email" },
-              { label: "Phone", placeholder: "+44 20 7123 4567", helper: "Optional, with country code", type: "tel" },
-              { label: "Search Leads", placeholder: "Search by company, email, city...", helper: "Global search with highlighting", type: "search", icon: "⌕" },
-            ].map((field) => (
-              <div key={field.label}>
-                <label style={{ fontSize: 13, fontWeight: 500, color: "#151927" }}>{field.label}</label>
-                <div style={{ position: "relative", marginTop: 6 }}>
-                  {field.icon && <span style={{ position: "absolute", left: 12, top: 11, color: "#9299A8", fontSize: 13 }}>{field.icon}</span>}
-                  <input
-                    placeholder={field.placeholder}
-                    onFocus={() => setFocused(field.label)}
-                    onBlur={() => setFocused(null)}
-                    style={{
-                      width: "100%",
-                      height: 42,
-                      padding: field.icon ? "0 14px 0 36px" : "0 14px",
-                      border: `1px solid ${focused === field.label ? "#49339A" : "#E5E3DF"}`,
-                      borderRadius: 8,
-                      fontSize: 14,
-                      outline: "none",
-                      boxShadow: focused === field.label ? "0 0 0 3px #F0ECFA" : "none",
-                      transition: "all 0.15s",
-                      fontFamily: "Poppins",
-                      background: "white",
-                    }}
-                  />
-                </div>
-                <div style={{ fontSize: 12, color: "#9299A8", marginTop: 6 }}>{field.helper}</div>
-              </div>
-            ))}
+      {/* Anatomy */}
+      <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 24, marginBottom: 16 }}>
+        <h3 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 16 }}>Standard Field Anatomy</h3>
+        <div style={{ maxWidth: 400 }}>
+          <FormField>
+            <FieldLabel required>Email address</FieldLabel>
+            <Input placeholder="john@acme.com" defaultValue="john@acme.com" />
+            <FieldDescription>Used for campaign communication.</FieldDescription>
+          </FormField>
+        </div>
+        <div style={{ marginTop: 12, fontSize: 11, color: "#9299A8" }}>Label 13px/500 • Required * danger subtle • Input MD 42px • Helper 12px • Gap label→input 8px • Field gap 20px</div>
+      </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 8 }}>
-              <div>
-                <label style={{ fontSize: 13, fontWeight: 500, color: "#151927" }}>With Prefix</label>
-                <div style={{ display: "flex", marginTop: 6 }}>
-                  <span style={{ background: "#FAF9F7", border: "1px solid #E5E3DF", borderRight: "none", padding: "0 12px", height: 42, display: "flex", alignItems: "center", borderRadius: "8px 0 0 8px", fontSize: 13, color: "#60697A" }}>https://</span>
-                  <input placeholder="example.com" style={{ flex: 1, height: 42, padding: "0 14px", border: "1px solid #E5E3DF", borderRadius: "0 8px 8px 0", fontSize: 14, outline: "none", fontFamily: "Poppins" }} />
-                </div>
-              </div>
-              <div>
-                <label style={{ fontSize: 13, fontWeight: 500, color: "#151927" }}>Currency</label>
-                <div style={{ position: "relative", marginTop: 6 }}>
-                  <span style={{ position: "absolute", left: 12, top: 11, fontSize: 13, color: "#9299A8" }}>₹</span>
-                  <input placeholder="8,42,500" style={{ width: "100%", height: 42, padding: "0 14px 0 28px", border: "1px solid #E5E3DF", borderRadius: 8, fontSize: 14, outline: "none", fontFamily: "Poppins" }} />
-                </div>
-              </div>
-            </div>
-          </div>
+      {/* Sizes */}
+      <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 24, marginBottom: 16 }}>
+        <h3 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 16 }}>Sizes — SM 36px/13px • MD 42px/14px (default) • LG 48px/15px • Radius 8px</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, maxWidth: 700 }}>
+          <div><div style={{ fontSize: 11, color: "#9299A8", marginBottom: 6 }}>SM 36px</div><Input size="sm" placeholder="Small input" /></div>
+          <div><div style={{ fontSize: 11, color: "#9299A8", marginBottom: 6 }}>MD 42px — DEFAULT</div><Input size="md" placeholder="Default input" /></div>
+          <div><div style={{ fontSize: 11, color: "#9299A8", marginBottom: 6 }}>LG 48px</div><Input size="lg" placeholder="Large input" /></div>
+        </div>
+      </div>
 
-          <h4 style={{ fontWeight: 600, fontSize: 11, marginTop: 24, marginBottom: 12, color: "#9299A8", letterSpacing: "0.06em" }}>STATES</h4>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-            <div><div style={{ fontSize: 10, color: "#9299A8", marginBottom: 4, fontWeight: 500 }}>Default</div><input placeholder="Default" style={{ width: "100%", height: 36, padding: "0 12px", border: "1px solid #E5E3DF", borderRadius: 8, fontSize: 13, fontFamily: "Poppins" }} /></div>
-            <div><div style={{ fontSize: 10, color: "#49339A", marginBottom: 4, fontWeight: 500 }}>Focus</div><input placeholder="Focused" style={{ width: "100%", height: 36, padding: "0 12px", border: "1px solid #49339A", borderRadius: 8, fontSize: 13, boxShadow: "0 0 0 3px #F0ECFA", outline: "none", fontFamily: "Poppins" }} /></div>
-            <div><div style={{ fontSize: 10, color: "#60697A", marginBottom: 4, fontWeight: 500 }}>Filled</div><input defaultValue="Glow Dentistry" style={{ width: "100%", height: 36, padding: "0 12px", border: "1px solid #E5E3DF", borderRadius: 8, fontSize: 13, background: "#FAF9F7", fontFamily: "Poppins" }} /></div>
-            <div><div style={{ fontSize: 10, color: "#EC6262", marginBottom: 4, fontWeight: 500 }}>Error</div><input defaultValue="invalid@" style={{ width: "100%", height: 36, padding: "0 12px", border: "1px solid #EC6262", borderRadius: 8, fontSize: 13, fontFamily: "Poppins" }} /><div style={{ fontSize: 10, color: "#EC6262", marginTop: 4 }}>Invalid email format</div></div>
-            <div><div style={{ fontSize: 10, color: "#4FAE91", marginBottom: 4, fontWeight: 500 }}>Success</div><input defaultValue="info@glowdentistry.co.uk" style={{ width: "100%", height: 36, padding: "0 12px", border: "1px solid #4FAE91", borderRadius: 8, fontSize: 13, fontFamily: "Poppins" }} /><div style={{ fontSize: 10, color: "#4FAE91", marginTop: 4 }}>✓ Valid email</div></div>
-            <div><div style={{ fontSize: 10, color: "#9299A8", marginBottom: 4, fontWeight: 500 }}>Disabled</div><input disabled placeholder="Disabled" style={{ width: "100%", height: 36, padding: "0 12px", border: "1px solid #E5E3DF", borderRadius: 8, fontSize: 13, background: "#FAF9F7", color: "#B8BDC8", fontFamily: "Poppins" }} /></div>
-          </div>
+      {/* States */}
+      <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 24, marginBottom: 16 }}>
+        <h3 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 16 }}>States — Default / Hover / Focus / Filled / Success / Warning / Error / Disabled / ReadOnly</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, maxWidth: 800 }}>
+          <FormField><FieldLabel>Default</FieldLabel><Input placeholder="Placeholder" /></FormField>
+          <FormField><FieldLabel>Focus — Indigo #49339A + #F0ECFA ring</FieldLabel><Input placeholder="Focused" autoFocus style={{ borderColor: "#49339A", boxShadow: "0 0 0 3px #F0ECFA" }} /></FormField>
+          <FormField><FieldLabel>Filled</FieldLabel><Input defaultValue="Glow Dentistry" /></FormField>
+          <FormField><FieldLabel>Success</FieldLabel><Input state="success" defaultValue="john@acme.com" /><FieldSuccess>Valid email</FieldSuccess></FormField>
+          <FormField><FieldLabel>Warning</FieldLabel><Input state="warning" defaultValue="john@ac" /><FieldDescription>Did you mean john@acme.com?</FieldDescription></FormField>
+          <FormField><FieldLabel>Error</FieldLabel><Input state="error" defaultValue="invalid@" /><FieldError>Enter a valid email address.</FieldError></FormField>
+          <FormField><FieldLabel>Disabled</FieldLabel><Input disabled placeholder="Disabled" /></FormField>
+          <FormField><FieldLabel>Read Only — distinct from disabled</FieldLabel><Input readOnly defaultValue="Read-only, can select & copy" /></FormField>
+        </div>
+        <div style={{ marginTop: 12, fontSize: 11, color: "#9299A8" }}>Default white + #E5E3DF border, Hover slightly stronger neutral, Focus indigo border + subtle ring (not electric blue), Success green #4FAE91, Warning orange #F29B38, Error coral #EC6262, Disabled readable, ReadOnly selectable</div>
+      </div>
+
+      {/* Label System */}
+      <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 24, marginBottom: 16 }}>
+        <h3 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 16 }}>Label System — Required * vs Optional (Optional)</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, maxWidth: 700 }}>
+          <FormField><FieldLabel required>Company Name</FieldLabel><Input placeholder="Acme Inc" /></FormField>
+          <FormField><FieldLabel optional>Website</FieldLabel><Input placeholder="https://acme.com" /></FormField>
+        </div>
+        <div style={{ marginTop: 12, fontSize: 11, color: "#9299A8" }}>Label 13px/500 • Required * uses danger subtle #EC6262 • Optional (Optional) not asterisk • Consistent placement above field</div>
+      </div>
+
+      {/* Helper + Validation */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+        <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 20 }}>
+          <h4 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 12 }}>Helper Text</h4>
+          <FormField>
+            <FieldLabel>Company website</FieldLabel>
+            <Input prefix="https://" placeholder="acme.com" />
+            <FieldDescription>Include https:// when available.</FieldDescription>
+          </FormField>
+        </div>
+        <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 20 }}>
+          <h4 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 12 }}>Validation Message — Icon + Text + Color</h4>
+          <FormField>
+            <FieldLabel required>Email address</FieldLabel>
+            <Input state="error" defaultValue="invalid-email" />
+            <FieldError>Enter a valid email address.</FieldError>
+          </FormField>
+          <div style={{ marginTop: 10, fontSize: 11, color: "#9299A8" }}>Directly beneath field, not only border color, icon + text + color</div>
+        </div>
+      </div>
+
+      {/* Leading Icon, Trailing Action, Prefix/Suffix */}
+      <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 24, marginBottom: 16 }}>
+        <h3 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 16 }}>Leading Icon / Trailing Action / Prefix / Suffix</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, maxWidth: 800 }}>
+          <FormField>
+            <FieldLabel>Search</FieldLabel>
+            <Input leadingIcon={<span>⌕</span>} placeholder="Search leads..." />
+          </FormField>
+          <FormField>
+            <FieldLabel>Email</FieldLabel>
+            <Input leadingIcon={<span>✉</span>} placeholder="Email address" />
+          </FormField>
+          <FormField>
+            <FieldLabel>Password</FieldLabel>
+            <Input type={showPassword ? "text" : "password"} defaultValue="password123" trailingAction={<IconButton size="xs" variant="ghost" icon={<span>{showPassword ? "🙈" : "👁"}</span>} label={showPassword ? "Hide" : "Show"} onClick={() => setShowPassword(!showPassword)} />} />
+          </FormField>
+          <FormField>
+            <FieldLabel>Search with clear</FieldLabel>
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search leads" trailingAction={search ? <IconButton size="xs" variant="ghost" icon={<span>×</span>} label="Clear" onClick={() => setSearch("")} /> : undefined} />
+          </FormField>
+          <FormField>
+            <FieldLabel>URL — Prefix / Suffix belong to field</FieldLabel>
+            <Input prefix="https://" suffix=".com" placeholder="company" />
+          </FormField>
+          <FormField>
+            <FieldLabel>Currency — configurable symbol</FieldLabel>
+            <Input prefix="₹" placeholder="50,000" />
+          </FormField>
+          <FormField>
+            <FieldLabel>Percentage</FieldLabel>
+            <Input suffix="%" placeholder="24.8" />
+          </FormField>
+          <FormField>
+            <FieldLabel>Domain</FieldLabel>
+            <Input prefix="company" suffix=".com" placeholder="" />
+          </FormField>
+        </div>
+        <div style={{ marginTop: 12, fontSize: 11, color: "#9299A8" }}>Professional line icons, NO emojis, prefix/suffix visually belong to field #FAF9F7 bg, trailing actions reuse IconButton</div>
+      </div>
+
+      {/* Phone, Password, Search, Number, Currency, OTP */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+        <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 20 }}>
+          <h4 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 12 }}>Phone Input — Country selector + code</h4>
+          <FormField>
+            <FieldLabel>Phone</FieldLabel>
+            <Input prefix={<span>IN ▾ | +91</span>} placeholder="98765 43210" />
+          </FormField>
+          <div style={{ fontSize: 11, color: "#9299A8", marginTop: 8 }}>Visual structure only — searchable country selection will use Select system later</div>
         </div>
 
-        <div style={{ background: "#FAF9F7", border: "1px solid #E5E3DF", borderRadius: 12, padding: 20 }}>
-          <h3 style={{ fontWeight: 600, fontSize: 12, letterSpacing: "0.04em", marginBottom: 16, color: "#151927" }}>INPUT SPEC</h3>
-          <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 16, marginBottom: 16 }}>
-            <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8, color: "#151927" }}>Company Name</div>
-            <input defaultValue="Glow Dentistry" style={{ width: "100%", height: 42, padding: "0 14px", border: "1px solid #49339A", borderRadius: 8, fontSize: 14, boxShadow: "0 0 0 3px #F0ECFA", outline: "none", fontFamily: "Poppins" }} />
-            <div style={{ fontSize: 11, color: "#9299A8", marginTop: 6 }}>Helper text • 0/100 characters</div>
+        <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 20 }}>
+          <h4 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 12 }}>Password — Show/Hide + Requirements</h4>
+          <FormField>
+            <FieldLabel>Password</FieldLabel>
+            <Input type={showPassword ? "text" : "password"} defaultValue="Password123" trailingAction={<IconButton size="xs" variant="ghost" icon={<span>{showPassword ? "🙈" : "👁"}</span>} label="Toggle" onClick={() => setShowPassword(!showPassword)} />} />
+            <div style={{ fontSize: 11, color: "#60697A", marginTop: 8, lineHeight: 1.6 }}>
+              <div>✓ 8+ characters</div><div>✓ one number</div><div style={{ color: "#9299A8" }}>○ one uppercase</div>
+            </div>
+          </FormField>
+        </div>
+
+        <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 20 }}>
+          <h4 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 12 }}>Search Input — Critical for CRM</h4>
+          <div style={{ display: "grid", gap: 10 }}>
+            <Input leadingIcon={<span>⌕</span>} placeholder="Search..." />
+            <Input leadingIcon={<span>⌕</span>} placeholder="Search leads, companies or emails..." />
+            <Input leadingIcon={<span>⌕</span>} placeholder="Search ClientForge..." suffix="⌘K" />
           </div>
-          <div style={{ display: "grid", gap: 8, fontSize: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #F0EEEA" }}><span style={{ color: "#9299A8" }}>Height MD</span><span style={{ fontFamily: "monospace", fontWeight: 500 }}>42px</span></div>
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #F0EEEA" }}><span style={{ color: "#9299A8" }}>Radius</span><span style={{ fontFamily: "monospace", fontWeight: 500 }}>8px</span></div>
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #F0EEEA" }}><span style={{ color: "#9299A8" }}>Border</span><span style={{ fontFamily: "monospace", fontWeight: 500 }}>1px #E5E3DF</span></div>
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #F0EEEA" }}><span style={{ color: "#9299A8" }}>Focus</span><span style={{ fontFamily: "monospace", fontWeight: 500 }}>#49339A + #F0ECFA ring</span></div>
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}><span style={{ color: "#9299A8" }}>Font</span><span style={{ fontFamily: "monospace", fontWeight: 500 }}>14px / Poppins</span></div>
+          <div style={{ fontSize: 11, color: "#9299A8", marginTop: 8 }}>States: empty, typing, results, no results, loading — overlay later</div>
+        </div>
+
+        <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 20 }}>
+          <h4 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 12 }}>Number / Currency / Stepper</h4>
+          <div style={{ display: "grid", gap: 12 }}>
+            <FormField>
+              <FieldLabel>Employees — Stepper reuses Button</FieldLabel>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <Button size="sm" variant="secondary">−</Button>
+                <Input size="sm" style={{ width: 80, textAlign: "center" }} defaultValue="25" />
+                <Button size="sm" variant="secondary">+</Button>
+              </div>
+            </FormField>
+            <FormField>
+              <FieldLabel>Estimated Deal Value — configurable</FieldLabel>
+              <Input prefix="₹" defaultValue="50,000" />
+            </FormField>
+          </div>
+        </div>
+      </div>
+
+      {/* OTP */}
+      <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 24, marginBottom: 16 }}>
+        <h3 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 16 }}>OTP / PIN — Segmented code input 4/6 digit, paste support</h3>
+        <div style={{ display: "flex", gap: 8 }}>
+          {otp.map((v, i) => (
+            <input
+              key={i}
+              value={v}
+              onChange={(e) => {
+                const newOtp = [...otp];
+                newOtp[i] = e.target.value.slice(-1);
+                setOtp(newOtp);
+                if (e.target.value && i < 5) {
+                  const next = document.getElementById(`otp-${i + 1}`) as HTMLInputElement;
+                  next?.focus();
+                }
+              }}
+              id={`otp-${i}`}
+              style={{ width: 44, height: 44, textAlign: "center", border: "1px solid #E5E3DF", borderRadius: 8, fontSize: 16, fontWeight: 500, fontFamily: "Poppins" }}
+              maxLength={1}
+            />
+          ))}
+        </div>
+        <div style={{ fontSize: 11, color: "#9299A8", marginTop: 8 }}>States: empty, filled, focus #49339A + #F0ECFA ring, error #EC6262, disabled • Allow paste behavior</div>
+      </div>
+
+      {/* Input Group */}
+      <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 24 }}>
+        <h3 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 16 }}>Input Group — Grouped controls, do not overuse</h3>
+        <div style={{ display: "grid", gap: 16, maxWidth: 600 }}>
+          <div>
+            <FieldLabel>Website — https:// | acme.com | .com</FieldLabel>
+            <div style={{ display: "flex", marginTop: 6 }}>
+              <div style={{ background: "#FAF9F7", border: "1px solid #E5E3DF", borderRight: "none", padding: "0 12px", height: 42, display: "flex", alignItems: "center", borderRadius: "8px 0 0 8px", fontSize: 13, color: "#60697A" }}>https://</div>
+              <input placeholder="acme" style={{ flex: 1, height: 42, border: "1px solid #E5E3DF", borderRight: "none", padding: "0 12px", fontSize: 14, fontFamily: "Poppins" }} />
+              <div style={{ background: "#FAF9F7", border: "1px solid #E5E3DF", padding: "0 12px", height: 42, display: "flex", alignItems: "center", borderRadius: "0 8px 8px 0", fontSize: 13, color: "#60697A" }}>.com</div>
+            </div>
+          </div>
+          <div>
+            <FieldLabel>Search — [ Search leads... ][ Search ]</FieldLabel>
+            <div style={{ display: "flex", marginTop: 6 }}>
+              <input placeholder="Search leads..." style={{ flex: 1, height: 42, border: "1px solid #E5E3DF", borderRight: "none", borderRadius: "8px 0 0 8px", padding: "0 12px", fontSize: 14, fontFamily: "Poppins" }} />
+              <Button style={{ borderRadius: "0 8px 8px 0" }}>Search</Button>
+            </div>
           </div>
         </div>
       </div>

@@ -42,10 +42,10 @@ export const lightTheme = {
     primaryHover: colors.primary[600],
     primaryActive: colors.primary[700],
     // Semantic
-    success: colors.success[500],
-    warning: colors.warning[500],
-    error: colors.error[500],
-    info: colors.info[500],
+    success: colors.semantic.success[500],
+    warning: colors.semantic.warning[500],
+    error: colors.semantic.danger[500],
+    info: colors.semantic.info[500],
   },
   shadows: {
     sm: "0 1px 2px 0 rgb(0 0 0 / 0.05)",

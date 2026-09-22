@@ -1,0 +1,93 @@
+# ClientForge CRM — Phase 4B Dynamic Collector Worker
+# Node.js + Prisma production collector
+# Schedule: every 3 hours (conservative, fits GitHub free tier)
+# GitHub cron = when worker wakes up
+# CollectorConfig.collectionFrequencyMinutes = whether assignment is eligible (DB)
+# These are different concepts — documented in PHASE_4B_COLLECTOR_WORKER.md
+
+name: Collector Worker
+
+on:
+  schedule:
+    - cron: '0 */3 * * *'  # every 3 hours
+  workflow_dispatch: {}     # manual trigger only, no push trigger
+
+concurrency:
+  group: clientforge-collector
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: crm/package-lock.json
+
+      - name: Install dependencies
+        working-directory: crm
+        run: |
+          npm ci --ignore-scripts
+          ./node_modules/.bin/prisma generate
+
+      - name: Run collector worker
+        working-directory: crm
+        run: |
+          echo "[collector] Starting Phase 4B worker"
+          echo "[collector] GitHub Run ID: $GITHUB_RUN_ID"
+          echo "[collector] GitHub Run Attempt: $GITHUB_RUN_ATTEMPT"
+          node scripts/collector-worker.mjs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # COLLECTOR_DRY_RUN: "false"  # set true for testing without mutations
+          # COLLECTOR_DEBUG_CSV: "true" # set true to create collector-debug.csv artifact
+
+      - name: Upload debug CSV if enabled
+        if: always()
+        working-directory: crm
+        run: |
+          if [ -f collector-debug.csv ]; then
+            echo "Debug CSV found, will upload"
+            ls -lh collector-debug.csv
+            cat collector-debug.csv | head -20
+          else
+            echo "No debug CSV (COLLECTOR_DEBUG_CSV not enabled or no leads)"
+          fi
+
+      - name: Upload debug artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: collector-debug-${{ github.run_id }}
+          path: crm/collector-debug.csv
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Summary
+        if: always()
+        working-directory: crm
+        run: |
+          echo "## Collector Worker Run" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run ID**: $GITHUB_RUN_ID" >> $GITHUB_STEP_SUMMARY
+          echo "- **Attempt**: $GITHUB_RUN_ATTEMPT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check logs above for:" >> $GITHUB_STEP_SUMMARY
+          echo "- assignment (location / category / source)" >> $GITHUB_STEP_SUMMARY
+          echo "- candidates, accepted, inserted counts" >> $GITHUB_STEP_SUMMARY
+          echo "- websiteRejected, duplicateRejected" >> $GITHUB_STEP_SUMMARY
+          echo "- run status SUCCESS/PARTIAL/FAILED" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Next: Inspect CollectorRun and CollectorState in ClientForge UI /settings/lead-collection" >> $GITHUB_STEP_SUMMARY

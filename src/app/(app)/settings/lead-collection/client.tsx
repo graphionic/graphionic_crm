@@ -279,35 +279,68 @@ export default function LeadCollectionClient({
 
           <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16 }}>
             <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 20 }}>
-              <h3 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 12 }}>Recent Runs</h3>
+              <h3 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 12 }}>Recent Runs — Phase 4B Worker</h3>
               {runs.length === 0 ? (
-                <div style={{ fontSize: 12, color: "#9299A8", padding: "20px 0", textAlign: "center" }}>No runs yet. Future workers will create CollectorRun records here instead of relying on ps aux / /tmp logs / CSV counts.</div>
+                <div style={{ fontSize: 12, color: "#9299A8", padding: "20px 0", textAlign: "center" }}>No runs yet. Phase 4B Node worker (collector-worker.mjs) will create CollectorRun records here. Each GitHub Actions execution = 1 assignment (Location + Category + Source). SUCCESS means worker completed, not necessarily leads found.</div>
               ) : (
                 <div style={{ display: "grid", gap: 8 }}>
                   {runs.map((run: any) => (
-                    <div key={run.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", border: "1px solid #F0EEEA", borderRadius: 8, background: "#FAF9F7" }}>
-                      <div>
-                        <div style={{ fontSize: 12, fontWeight: 500, color: "#151927" }}>{run.status} — {run.location?.city || "—"} / {run.category?.name || "—"}</div>
-                        <div style={{ fontSize: 11, color: "#9299A8" }}>{new Date(run.startedAt).toLocaleString()} — {run.leadsAccepted} accepted, {run.leadsInserted} inserted</div>
+                    <div key={run.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", border: "1px solid #F0EEEA", borderRadius: 8, background: run.status === "SUCCESS" ? "#FAF9F7" : run.status === "FAILED" ? "#FDF2F2" : "#FFF9F0" }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, fontWeight: 500, color: "#151927" }}>{run.status} — {run.location?.city || "—"} / {run.category?.slug || run.category?.name || "—"} / {run.source?.name?.split("/")[0] || "—"}</div>
+                        <div style={{ fontSize: 11, color: "#9299A8", marginTop: 2 }}>{new Date(run.startedAt).toLocaleString()} — {run.candidatesFound} candidates → {run.leadsAccepted} accepted → {run.leadsInserted} inserted — {run.websiteRejected} websiteRejected, {run.duplicateRejected} dup — {run.durationMs ? `${Math.round(run.durationMs/1000)}s` : ""} {run.metadata?.githubRunId ? `— GH#${run.metadata.githubRunId}` : ""}</div>
+                        {run.metadata?.bbox && <div style={{ fontSize: 10, color: "#9299A8", marginTop: 2, fontFamily: "monospace" }}>bbox: {run.metadata.bbox} — tags: {(run.metadata.osmTags || []).join(", ").slice(0, 80)}</div>}
                       </div>
-                      <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: run.status === "SUCCESS" ? "#EEF8F4" : run.status === "FAILED" ? "#FDECEC" : "#FFF6E3", color: run.status === "SUCCESS" ? "#4FAE91" : run.status === "FAILED" ? "#EC6262" : "#F29B38" }}>{run.status}</span>
+                      <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: run.status === "SUCCESS" ? "#EEF8F4" : run.status === "FAILED" ? "#FDECEC" : "#FFF6E3", color: run.status === "SUCCESS" ? "#4FAE91" : run.status === "FAILED" ? "#EC6262" : "#F29B38", marginLeft: 12, whiteSpace: "nowrap" }}>{run.status}</span>
                     </div>
                   ))}
                 </div>
               )}
+              <div style={{ marginTop: 12, padding: "10px 12px", background: "#F0ECFA", border: "1px solid #E0D6F5", borderRadius: 8, fontSize: 11, color: "#49339A" }}>
+                <strong>Phase 4B:</strong> Worker = Node.js + Prisma, 1 assignment per GitHub run, fair rotation via CollectorState (nextEligible → lastRun → priority → failures). GitHub cron every 3h, DB frequency {overview.config.collectionFrequencyMinutes}min. Concurrency min(config.concurrent, source.concurrency, {3}). User-Agent ClientForge-Collector/1.0. CSV optional debug only.
+              </div>
             </div>
-            <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 20 }}>
-              <h3 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 12 }}>Architecture</h3>
-              <div style={{ fontSize: 11, color: "#60697A", lineHeight: 1.6 }}>
-                ClientForge Configuration ↓<br />
-                Neon PostgreSQL ↓<br />
-                Scheduled Worker ↓<br />
-                Read active config ↓<br />
-                Collect leads ↓<br />
-                Verify leads ↓<br />
-                Store in Neon ↓<br />
-                AI verification later<br /><br />
-                <strong>Foundation only:</strong> This phase builds config + persistence, not AI execution, not worker rewrite, not GitHub Actions change.
+            <div style={{ display: "grid", gap: 16 }}>
+              <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 20 }}>
+                <h3 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 12 }}>Phase 4B Architecture</h3>
+                <div style={{ fontSize: 11, color: "#60697A", lineHeight: 1.6 }}>
+                  Admin UI /settings/lead-collection ↓<br />
+                  Neon (Config, Locations, Categories, Sources, Rules) ↓<br />
+                  GitHub Actions every 3h (Node 20) ↓<br />
+                  collector-worker.mjs ↓<br />
+                  Prisma — read active config ↓<br />
+                  selectNextAssignment (fair rotation) ↓<br />
+                  compute BBOX from lat/lng/radius ↓<br />
+                  build Overpass QL from osmTags ↓<br />
+                  fetch Overpass (safe, retry, backoff) ↓<br />
+                  parse node/way/relation ↓<br />
+                  apply CollectionRules ↓<br />
+                  verify website (Emma Clinic fix) ↓<br />
+                  dedup email + company+city ↓<br />
+                  insert Lead + update State + finalize Run ↓<br />
+                  heartbeat (legacy) + CSV debug optional<br /><br />
+                  <strong>Phase 4B:</strong> Dynamic DB-backed, no hardcoded cities/categories/endpoints. Changing enabled location/category in UI affects future runs without deploy.
+                </div>
+              </div>
+              <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 16 }}>
+                <h3 style={{ fontSize: 12, fontWeight: 600, color: "#151927", marginBottom: 8 }}>Next Eligible States</h3>
+                {states.length === 0 ? (
+                  <div style={{ fontSize: 11, color: "#9299A8" }}>No states yet. Worker will lazily create states for selected assignments only, not full Cartesian product.</div>
+                ) : (
+                  <div style={{ display: "grid", gap: 6 }}>
+                    {states.slice(0, 5).map((st: any) => {
+                      const next = st.nextEligibleRunAt ? new Date(st.nextEligibleRunAt) : null;
+                      const isNow = !next || next <= new Date();
+                      return (
+                        <div key={st.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "6px 8px", background: isNow ? "#EEF8F4" : "#FAF9F7", borderRadius: 6, border: `1px solid ${isNow ? "#D5F0E5" : "#F0EEEA"}` }}>
+                          <span style={{ color: "#151927" }}>{st.location?.city || "?"} / {st.category?.slug || "?"}</span>
+                          <span style={{ color: isNow ? "#4FAE91" : "#9299A8", fontWeight: isNow ? 600 : 400 }}>{isNow ? "Now" : next?.toLocaleTimeString()}</span>
+                        </div>
+                      );
+                    })}
+                    <div style={{ fontSize: 10, color: "#9299A8", marginTop: 4 }}>{states.filter((s: any) => !s.nextEligibleRunAt || new Date(s.nextEligibleRunAt) <= new Date()).length} eligible now / {states.length} total states</div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -612,24 +645,31 @@ export default function LeadCollectionClient({
       {/* Runs Tab */}
       {activeTab === "runs" && (
         <div style={{ display: "grid", gap: 16 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, color: "#151927" }}>Collector Run History — Every execution produces a run record, instead of ps aux / /tmp logs / CSV counts</h3>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: "#151927" }}>Collector Run History — Phase 4B Worker</h3>
+              <p style={{ fontSize: 12, color: "#60697A", marginTop: 4 }}>Every GitHub Actions execution creates 1 run. SUCCESS = worker completed without fatal error (0 leads still SUCCESS). PARTIAL = some queries failed but useful work done. FAILED = fatal error. Metadata contains GitHub run ID, bbox, OSM tags, endpoint, retries, warnings.</p>
+            </div>
+          </div>
           <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead><tr style={{ background: "#FAF9F7", borderBottom: "1px solid #E5E3DF", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}><th style={{ padding: "10px 14px" }}>Started</th><th style={{ padding: "10px 14px" }}>Status</th><th style={{ padding: "10px 14px" }}>Location / Category / Source</th><th style={{ padding: "10px 14px" }}>Queries / Candidates</th><th style={{ padding: "10px 14px" }}>Rejected (noEmail/generic/website/dup/invalid)</th><th style={{ padding: "10px 14px" }}>Accepted / Inserted</th><th style={{ padding: "10px 14px" }}>Duration / Error</th></tr></thead>
-              <tbody>
-                {runs.length === 0 ? <tr><td colSpan={7} style={{ padding: "20px", textAlign: "center", color: "#9299A8" }}>No runs yet. Future GitHub/scheduled workers will be stateless and create CollectorRun records here. Possible statuses: QUEUED RUNNING SUCCESS PARTIAL FAILED. Fields: queriesAttempted candidatesFound noEmailRejected genericEmailRejected websiteRejected duplicateRejected invalidRejected leadsAccepted leadsInserted durationMs errorMessage metadata JSON</td></tr> : runs.map((run: any) => (
-                  <tr key={run.id} style={{ borderBottom: "1px solid #F0EEEA" }}>
-                    <td style={{ padding: "10px 14px", color: "#60697A" }}>{new Date(run.startedAt).toLocaleString()}</td>
-                    <td style={{ padding: "10px 14px" }}><span style={{ padding: "3px 8px", borderRadius: 6, background: run.status === "SUCCESS" ? "#EEF8F4" : run.status === "FAILED" ? "#FDECEC" : "#FFF6E3", color: run.status === "SUCCESS" ? "#4FAE91" : run.status === "FAILED" ? "#EC6262" : "#F29B38", fontSize: 11 }}>{run.status}</span></td>
-                    <td style={{ padding: "10px 14px", fontSize: 11, color: "#151927" }}>{run.location?.city || "—"} / {run.category?.name || "—"} / {run.source?.name || "—"}</td>
-                    <td style={{ padding: "10px 14px", color: "#60697A" }}>{run.queriesAttempted} / {run.candidatesFound}</td>
-                    <td style={{ padding: "10px 14px", fontSize: 11, color: "#9299A8" }}>{run.noEmailRejected}/{run.genericEmailRejected}/{run.websiteRejected}/{run.duplicateRejected}/{run.invalidRejected}</td>
-                    <td style={{ padding: "10px 14px", color: "#4FAE91", fontWeight: 500 }}>{run.leadsAccepted} / {run.leadsInserted}</td>
-                    <td style={{ padding: "10px 14px", color: "#60697A" }}>{run.durationMs ? `${run.durationMs}ms` : "—"} {run.errorMessage ? <span style={{ color: "#EC6262" }}>{run.errorMessage.slice(0, 50)}</span> : ""}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 900 }}>
+                <thead><tr style={{ background: "#FAF9F7", borderBottom: "1px solid #E5E3DF", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}><th style={{ padding: "10px 14px" }}>Started</th><th style={{ padding: "10px 14px" }}>Status</th><th style={{ padding: "10px 14px" }}>Location / Category / Source</th><th style={{ padding: "10px 14px" }}>Queries / Candidates</th><th style={{ padding: "10px 14px" }}>Rejected (noEmail/generic/website/dup/invalid)</th><th style={{ padding: "10px 14px" }}>Accepted / Inserted</th><th style={{ padding: "10px 14px" }}>Duration / GitHub / BBOX</th></tr></thead>
+                <tbody>
+                  {runs.length === 0 ? <tr><td colSpan={7} style={{ padding: "20px", textAlign: "center", color: "#9299A8" }}>No runs yet. Phase 4B worker will create runs with metadata: githubRunId, bbox, osmTags, endpoint, retry info, warnings, query failures. Stale RUNNING recovery threshold {20}min. Concurrency min(config.concurrent, source.concurrency, SAFE_CAP=3). User-Agent ClientForge-Collector/1.0</td></tr> : runs.map((run: any) => (
+                    <tr key={run.id} style={{ borderBottom: "1px solid #F0EEEA" }}>
+                      <td style={{ padding: "10px 14px", color: "#60697A", fontSize: 11 }}>{new Date(run.startedAt).toLocaleString()}<br /><span style={{ fontSize: 10, color: "#9299A8" }}>{run.metadata?.githubRunId ? `GH#${run.metadata.githubRunId}` : ""}</span></td>
+                      <td style={{ padding: "10px 14px" }}><span style={{ padding: "3px 8px", borderRadius: 6, background: run.status === "SUCCESS" ? "#EEF8F4" : run.status === "FAILED" ? "#FDECEC" : "#FFF6E3", color: run.status === "SUCCESS" ? "#4FAE91" : run.status === "FAILED" ? "#EC6262" : "#F29B38", fontSize: 11 }}>{run.status}</span>{run.errorMessage ? <div style={{ fontSize: 10, color: "#EC6262", marginTop: 4, maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis" }}>{run.errorMessage.slice(0, 80)}</div> : null}</td>
+                      <td style={{ padding: "10px 14px", fontSize: 11, color: "#151927" }}><div style={{ fontWeight: 500 }}>{run.location?.city || "—"} / {run.category?.slug || "—"}</div><div style={{ fontSize: 10, color: "#9299A8" }}>{run.source?.name?.slice(0, 25) || "—"}</div></td>
+                      <td style={{ padding: "10px 14px", color: "#60697A" }}>{run.queriesAttempted} / {run.candidatesFound}{run.metadata?.fetchResult?.retryDelays?.length ? <span style={{ fontSize: 10, color: "#F29B38" }}> ({run.metadata.fetchResult.retryDelays.length} retries)</span> : null}</td>
+                      <td style={{ padding: "10px 14px", fontSize: 11, color: "#9299A8" }}>{run.noEmailRejected}/{run.genericEmailRejected}/{run.websiteRejected}/{run.duplicateRejected}/{run.invalidRejected}</td>
+                      <td style={{ padding: "10px 14px", color: "#4FAE91", fontWeight: 500 }}>{run.leadsAccepted} / {run.leadsInserted}</td>
+                      <td style={{ padding: "10px 14px", color: "#60697A", fontSize: 11 }}>{run.durationMs ? `${Math.round(run.durationMs/1000)}s` : "—"}<br /><span style={{ fontSize: 10, fontFamily: "monospace", color: "#9299A8" }}>{run.metadata?.bbox ? run.metadata.bbox.slice(0, 35) : ""}</span>{run.metadata?.warnings?.length ? <div style={{ fontSize: 10, color: "#F29B38" }}>{run.metadata.warnings.length} warnings</div> : null}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -637,22 +677,31 @@ export default function LeadCollectionClient({
       {/* States Tab */}
       {activeTab === "states" && (
         <div style={{ display: "grid", gap: 16 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, color: "#151927" }}>Collector State — Neon must remember progress because GitHub/scheduled workers will be stateless</h3>
+          <div>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: "#151927" }}>Collector State — Phase 4B Fair Rotation & Lazy Init</h3>
+            <p style={{ fontSize: 12, color: "#60697A", marginTop: 4 }}>Neon remembers progress because GitHub workers are stateless. Fair rotation: nextEligible ASC nulls first → lastRun ASC nulls first (least recently run) → failures ASC → priority sum DESC. Priority affects selection only, not frequency. Frequency = collectionFrequencyMinutes. Lazy init: only create state for selected combo, not full Cartesian product (scalable to 1000+ locations × 50+ categories). NextEligible = now + frequency on success, exponential backoff capped 2h on failure.</p>
+          </div>
           <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead><tr style={{ background: "#FAF9F7", borderBottom: "1px solid #E5E3DF", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}><th style={{ padding: "10px 14px" }}>Location / Category / Source</th><th style={{ padding: "10px 14px" }}>Last Run / Last Success / Next Eligible</th><th style={{ padding: "10px 14px" }}>Cycle / Failures</th><th style={{ padding: "10px 14px" }}>Candidates / Accepted / Rejected</th><th style={{ padding: "10px 14px" }}>Cursor</th></tr></thead>
-              <tbody>
-                {states.length === 0 ? <tr><td colSpan={5} style={{ padding: "20px", textAlign: "center", color: "#9299A8" }}>No state yet. Supports location, category, source, lastRunAt, lastSuccessfulRunAt, nextEligibleRunAt, cursor/progress metadata, cycle, consecutiveFailures, totalCandidates, totalAccepted, totalRejected, createdAt, updatedAt. Relations to Location/Category/DataSource. Unique [locationId, categoryId, sourceId]</td></tr> : states.map((st: any) => (
-                  <tr key={st.id} style={{ borderBottom: "1px solid #F0EEEA" }}>
-                    <td style={{ padding: "10px 14px", fontSize: 11 }}>{st.location?.city || "—"} / {st.category?.name || "—"} / {st.source?.name || "—"}</td>
-                    <td style={{ padding: "10px 14px", fontSize: 11, color: "#60697A" }}>{st.lastRunAt ? new Date(st.lastRunAt).toLocaleString() : "Never"} / {st.lastSuccessfulRunAt ? new Date(st.lastSuccessfulRunAt).toLocaleString() : "Never"} / {st.nextEligibleRunAt ? new Date(st.nextEligibleRunAt).toLocaleString() : "Now"}</td>
-                    <td style={{ padding: "10px 14px" }}>{st.cycle} / {st.consecutiveFailures}</td>
-                    <td style={{ padding: "10px 14px" }}>{st.totalCandidates} / {st.totalAccepted} / {st.totalRejected}</td>
-                    <td style={{ padding: "10px 14px", fontSize: 10, color: "#9299A8", maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis" }}>{st.cursor ? JSON.stringify(st.cursor).slice(0, 80) : "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 900 }}>
+                <thead><tr style={{ background: "#FAF9F7", borderBottom: "1px solid #E5E3DF", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}><th style={{ padding: "10px 14px" }}>Location / Category / Source</th><th style={{ padding: "10px 14px" }}>Last Run / Last Success / Next Eligible</th><th style={{ padding: "10px 14px" }}>Cycle / Failures</th><th style={{ padding: "10px 14px" }}>Candidates / Accepted / Rejected</th><th style={{ padding: "10px 14px" }}>Cursor / BBOX</th></tr></thead>
+                <tbody>
+                  {states.length === 0 ? <tr><td colSpan={5} style={{ padding: "20px", textAlign: "center", color: "#9299A8" }}>No state yet. Worker will lazily create states. Supports location, category, source, lastRunAt, lastSuccessfulRunAt, nextEligibleRunAt, cursor (bbox, category, source, lastRunId), cycle, consecutiveFailures, totalCandidates/Accepted/Rejected. Unique [locationId, categoryId, sourceId]. Threshold for stale RUNNING recovery 20min.</td></tr> : states.map((st: any) => {
+                    const next = st.nextEligibleRunAt ? new Date(st.nextEligibleRunAt) : null;
+                    const isNow = !next || next <= new Date();
+                    return (
+                      <tr key={st.id} style={{ borderBottom: "1px solid #F0EEEA", background: isNow ? "#FAFDFB" : "white" }}>
+                        <td style={{ padding: "10px 14px", fontSize: 11 }}><div style={{ fontWeight: 500, color: "#151927" }}>{st.location?.city || "—"} / {st.category?.slug || st.category?.name || "—"}</div><div style={{ fontSize: 10, color: "#9299A8" }}>{st.source?.name?.slice(0, 30) || "—"} — P: {(st.location?.priority||0)+(st.category?.priority||0)+(st.source?.priority||0)}</div></td>
+                        <td style={{ padding: "10px 14px", fontSize: 11, color: "#60697A" }}><div>{st.lastRunAt ? new Date(st.lastRunAt).toLocaleString() : "Never"}</div><div style={{ fontSize: 10, color: "#9299A8" }}>Success: {st.lastSuccessfulRunAt ? new Date(st.lastSuccessfulRunAt).toLocaleString() : "Never"}</div><div style={{ marginTop: 2 }}><span style={{ padding: "2px 6px", borderRadius: 4, background: isNow ? "#EEF8F4" : "#FFF6E3", color: isNow ? "#4FAE91" : "#F29B38", fontSize: 10, fontWeight: 500 }}>{isNow ? "Eligible Now" : `Next ${next?.toLocaleString()}`}</span></div></td>
+                        <td style={{ padding: "10px 14px", fontSize: 11 }}>{st.cycle} / <span style={{ color: st.consecutiveFailures > 0 ? "#EC6262" : "#4FAE91" }}>{st.consecutiveFailures} failures</span></td>
+                        <td style={{ padding: "10px 14px", fontSize: 11 }}>{st.totalCandidates} / {st.totalAccepted} / {st.totalRejected}</td>
+                        <td style={{ padding: "10px 14px", fontSize: 10, color: "#9299A8", maxWidth: 200, overflow: "hidden" }}><div style={{ fontFamily: "monospace" }}>{st.cursor?.lastBbox ? st.cursor.lastBbox.slice(0, 40) : st.cursor ? JSON.stringify(st.cursor).slice(0, 60) : "—"}</div><div style={{ fontSize: 10, color: "#9299A8", marginTop: 2 }}>Run: {st.cursor?.lastRunId?.slice(0, 8) || "—"}</div></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

@@ -1,94 +1,140 @@
+"use client";
+
 export default function SpacingPage() {
-  const spacing = [
-    { name: "0", value: "0", px: "0" },
-    { name: "1", value: "0.25rem", px: "4px" },
-    { name: "2", value: "0.5rem", px: "8px" },
-    { name: "3", value: "0.75rem", px: "12px" },
-    { name: "4", value: "1rem", px: "16px" },
-    { name: "5", value: "1.25rem", px: "20px" },
-    { name: "6", value: "1.5rem", px: "24px" },
-    { name: "8", value: "2rem", px: "32px" },
-    { name: "10", value: "2.5rem", px: "40px" },
-    { name: "12", value: "3rem", px: "48px" },
-    { name: "16", value: "4rem", px: "64px" },
-  ];
-
-  const radius = [
-    { name: "sm", value: "6px", usage: "Badges, small elements" },
-    { name: "base", value: "8px", usage: "Inputs, buttons" },
-    { name: "md", value: "10px", usage: "Cards, default" },
-    { name: "lg", value: "12px", usage: "Large cards" },
-    { name: "xl", value: "14px", usage: "Modals, large surfaces" },
-    { name: "full", value: "9999px", usage: "Pills, avatars, badges" },
-  ];
-
-  const shadows = [
-    { name: "xs", value: "0 1px 2px 0 rgb(0 0 0 / 0.05)", usage: "Subtle, cards" },
-    { name: "sm", value: "0 1px 3px 0 rgb(0 0 0 / 0.1)", usage: "Cards, dropdowns" },
-    { name: "md", value: "0 4px 6px -1px rgb(0 0 0 / 0.1)", usage: "Elevated, sticky" },
-    { name: "lg", value: "0 10px 15px -3px rgb(0 0 0 / 0.1)", usage: "Modals, popovers" },
+  const tokens = [
+    { name: "0", value: "0", px: 0 },
+    { name: "1", value: "4px", px: 4 },
+    { name: "2", value: "8px", px: 8 },
+    { name: "3", value: "12px", px: 12 },
+    { name: "4", value: "16px", px: 16 },
+    { name: "5", value: "20px", px: 20 },
+    { name: "6", value: "24px", px: 24 },
+    { name: "8", value: "32px", px: 32 },
+    { name: "10", value: "40px", px: 40 },
+    { name: "12", value: "48px", px: 48 },
+    { name: "16", value: "64px", px: 64 },
+    { name: "20", value: "80px", px: 80 },
+    { name: "24", value: "96px", px: 96 },
   ];
 
   return (
-    <div style={{ maxWidth: 1200 }}>
+    <div style={{ maxWidth: 1100, fontFamily: "'Poppins', system-ui, sans-serif" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap');`}</style>
+
       <div style={{ marginBottom: 32 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: "#315BE8", background: "#EEF3FF", padding: "4px 10px", borderRadius: 20 }}>04 / 74 · FOUNDATIONS</span>
-        </div>
-        <h1 style={{ fontSize: 40, fontWeight: 800, letterSpacing: "-0.03em", color: "#0B1224", marginBottom: 12 }}>Spacing & Layout</h1>
-        <p style={{ fontSize: 16, color: "#475467", lineHeight: 1.6, maxWidth: 700 }}>8px grid system, generous whitespace, consistent rhythm. Visualize each token rather than presenting only code.</p>
+        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "#49339A", background: "#F0ECFA", padding: "4px 10px", borderRadius: 6 }}>04 / 74 · FOUNDATIONS</span>
+        <h1 style={{ fontSize: 32, fontWeight: 600, letterSpacing: "-0.02em", color: "#151927", marginTop: 16, marginBottom: 8 }}>Spacing</h1>
+        <p style={{ fontSize: 14, color: "#60697A", lineHeight: 1.6, maxWidth: 640 }}>4px base unit. Visualize every token as actual distance. Consistent rhythm for premium admin.</p>
       </div>
 
-      <div style={{ background: "white", border: "1px solid #DDE3EE", borderRadius: 14, padding: 24, marginBottom: 24 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 700, color: "#0B1224", marginBottom: 20 }}>Spacing Scale — 8px Grid</h2>
-        <div style={{ display: "grid", gap: 12 }}>
-          {spacing.map((s) => (
-            <div key={s.name} style={{ display: "grid", gridTemplateColumns: "60px 80px 1fr 100px", gap: 16, alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F6F8FC" }}>
-              <span style={{ fontWeight: 600, fontSize: 13 }}>{s.name}</span>
-              <span style={{ fontSize: 12, color: "#667085", fontFamily: "monospace" }}>{s.value}</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ width: s.value, height: 16, background: "#315BE8", borderRadius: 4 }} />
-                <div style={{ flex: 1, height: 1, background: "#DDE3EE" }} />
+      {/* Tokens visualized */}
+      <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 24, marginBottom: 20 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, color: "#151927", marginBottom: 16 }}>Spacing Scale — 4px Base</h3>
+        <div style={{ display: "grid", gap: 10 }}>
+          {tokens.map((t) => (
+            <div key={t.name} style={{ display: "grid", gridTemplateColumns: "50px 70px 1fr 60px", gap: 16, alignItems: "center", padding: "8px 0", borderBottom: "1px solid #FAF9F7" }}>
+              <span style={{ fontWeight: 600, fontSize: 13, color: "#151927" }}>{t.name}</span>
+              <span style={{ fontSize: 12, color: "#60697A", fontFamily: "monospace" }}>{t.value}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: t.px, height: 14, background: "#49339A", borderRadius: 3, minWidth: t.px === 0 ? 1 : t.px }} />
+                <div style={{ flex: 1, height: 1, background: "#F0EEEA", position: "relative" }}>
+                  {t.px > 0 && <div style={{ position: "absolute", top: -3, left: 0, width: t.px, height: 7, borderLeft: "1px solid #E5E3DF", borderRight: "1px solid #E5E3DF", borderTop: "1px solid #E5E3DF" }} />}
+                </div>
               </div>
-              <span style={{ fontSize: 11, color: "#667085" }}>{s.px}</span>
+              <span style={{ fontSize: 11, color: "#9299A8" }}>{t.px}px</span>
             </div>
           ))}
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
-        <div style={{ background: "white", border: "1px solid #DDE3EE", borderRadius: 14, padding: 24 }}>
-          <h3 style={{ fontWeight: 700, fontSize: 14, marginBottom: 16 }}>Radius Scale — 8-10px Inputs/Buttons, 10-14px Cards</h3>
-          <div style={{ display: "grid", gap: 12 }}>
-            {radius.map((r) => (
-              <div key={r.name} style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                <div style={{ width: 48, height: 32, background: "#EEF3FF", border: "1px solid #315BE8", borderRadius: r.value }} />
-                <div><div style={{ fontWeight: 600, fontSize: 13 }}>{r.name} — {r.value}</div><div style={{ fontSize: 11, color: "#667085" }}>{r.usage}</div></div>
-              </div>
-            ))}
+      {/* Spacing in Components */}
+      <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 24, marginBottom: 20 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, color: "#151927", marginBottom: 16 }}>Spacing in Components</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 20 }}>
+          <div style={{ border: "1px solid #E5E3DF", borderRadius: 10, padding: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#9299A8", marginBottom: 10 }}>BUTTON — Gap 8px icon, Padding 16px</div>
+            <button style={{ background: "#49339A", color: "white", border: "none", height: 42, padding: "0 16px", borderRadius: 8, fontSize: 14, fontWeight: 500, fontFamily: "Poppins", display: "flex", alignItems: "center", gap: 8 }}>
+              <span>+</span> Create Lead
+            </button>
+            <div style={{ marginTop: 12, fontSize: 11, color: "#9299A8", display: "flex", gap: 12 }}>
+              <span>Icon gap: 8px (token 2)</span><span>Padding: 16px (token 4)</span>
+            </div>
           </div>
-        </div>
-        <div style={{ background: "white", border: "1px solid #DDE3EE", borderRadius: 14, padding: 24 }}>
-          <h3 style={{ fontWeight: 700, fontSize: 14, marginBottom: 16 }}>Shadows / Elevation — Very Subtle</h3>
-          <div style={{ display: "grid", gap: 16 }}>
-            {shadows.map((s) => (
-              <div key={s.name} style={{ padding: 16, background: "white", borderRadius: 10, boxShadow: s.value, border: "1px solid #F6F8FC" }}>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>{s.name}</div>
-                <div style={{ fontSize: 10, color: "#667085", fontFamily: "monospace", marginTop: 4 }}>{s.value}</div>
-                <div style={{ fontSize: 11, color: "#667085", marginTop: 4 }}>{s.usage}</div>
+
+          <div style={{ border: "1px solid #E5E3DF", borderRadius: 10, padding: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#9299A8", marginBottom: 10 }}>INPUT — Label→Input 8px, Field gap 20px</div>
+            <div style={{ display: "grid", gap: 20 }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: "#151927", marginBottom: 8 }}>Company Name</div>
+                <input defaultValue="Glow Dentistry" style={{ width: "100%", height: 42, border: "1px solid #E5E3DF", borderRadius: 8, padding: "0 12px", fontFamily: "Poppins", fontSize: 14 }} />
               </div>
-            ))}
+            </div>
           </div>
-          <div style={{ marginTop: 16, padding: 10, background: "#F6F8FC", borderRadius: 8, fontSize: 11, color: "#475467" }}>Avoid excessive shadows. Most UI uses xs/sm. lg only for modals/popovers.</div>
+
+          <div style={{ border: "1px solid #E5E3DF", borderRadius: 10, padding: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#9299A8", marginBottom: 10 }}>CARD — Padding 24px standard</div>
+            <div style={{ background: "#FAF9F7", border: "1px dashed #E5E3DF", borderRadius: 8, padding: 4 }}>
+              <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 8, padding: 24 }}>
+                <div style={{ fontWeight: 600, fontSize: 14, color: "#151927" }}>Card Content</div>
+                <div style={{ fontSize: 12, color: "#60697A", marginTop: 4 }}>24px padding (token 6)</div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ border: "1px solid #E5E3DF", borderRadius: 10, padding: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#9299A8", marginBottom: 10 }}>TABLE ROW — Cell padding 12px 14px</div>
+            <div style={{ display: "flex", gap: 0, border: "1px solid #E5E3DF", borderRadius: 8, overflow: "hidden" }}>
+              <div style={{ padding: "12px 14px", background: "white", fontSize: 12, borderRight: "1px solid #F0EEEA" }}>Glow Dentistry</div>
+              <div style={{ padding: "12px 14px", background: "white", fontSize: 12 }}>info@...</div>
+            </div>
+          </div>
+
+          <div style={{ border: "1px solid #E5E3DF", borderRadius: 10, padding: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#9299A8", marginBottom: 10 }}>SIDEBAR ITEM — 42px height, 10px padding</div>
+            <div style={{ background: "#252E43", borderRadius: 8, padding: 8 }}>
+              <div style={{ background: "#49339A", color: "white", padding: "10px 12px", borderRadius: 8, fontSize: 13, fontWeight: 500 }}>Dashboard</div>
+              <div style={{ color: "#C9CED9", padding: "10px 12px", fontSize: 13, marginTop: 2 }}>Leads</div>
+            </div>
+          </div>
+
+          <div style={{ border: "1px solid #E5E3DF", borderRadius: 10, padding: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#9299A8", marginBottom: 10 }}>FORM GROUP — Field gap 20px</div>
+            <div style={{ display: "grid", gap: 20 }}>
+              <input placeholder="Field 1" style={{ height: 42, border: "1px solid #E5E3DF", borderRadius: 8, padding: "0 12px" }} />
+              <input placeholder="Field 2" style={{ height: 42, border: "1px solid #E5E3DF", borderRadius: 8, padding: "0 12px" }} />
+            </div>
+            <div style={{ fontSize: 11, color: "#9299A8", marginTop: 8 }}>Gap: 20px (token 5)</div>
+          </div>
         </div>
       </div>
 
-      <div style={{ background: "white", border: "1px solid #DDE3EE", borderRadius: 14, padding: 24 }}>
-        <h3 style={{ fontWeight: 700, fontSize: 14, marginBottom: 16 }}>Grid, Containers, Z-index</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 24, fontSize: 12 }}>
-          <div><b>Breakpoints</b><div style={{ marginTop: 8, display: "grid", gap: 4 }}><div style={{ display: "flex", justifyContent: "space-between" }}><span>sm</span><span>640px</span></div><div style={{ display: "flex", justifyContent: "space-between" }}><span>md</span><span>768px</span></div><div style={{ display: "flex", justifyContent: "space-between" }}><span>lg</span><span>1024px</span></div><div style={{ display: "flex", justifyContent: "space-between" }}><span>xl</span><span>1280px</span></div></div></div>
-          <div><b>Z-index</b><div style={{ marginTop: 8, display: "grid", gap: 4 }}><div style={{ display: "flex", justifyContent: "space-between" }}><span>dropdown</span><span>1000</span></div><div style={{ display: "flex", justifyContent: "space-between" }}><span>sticky</span><span>1020</span></div><div style={{ display: "flex", justifyContent: "space-between" }}><span>modal</span><span>1050</span></div><div style={{ display: "flex", justifyContent: "space-between" }}><span>tooltip</span><span>1070</span></div></div></div>
-          <div><b>Containers</b><div style={{ marginTop: 8, display: "grid", gap: 4 }}><div style={{ display: "flex", justifyContent: "space-between" }}><span>sm</span><span>640px</span></div><div style={{ display: "flex", justifyContent: "space-between" }}><span>lg</span><span>1024px</span></div><div style={{ display: "flex", justifyContent: "space-between" }}><span>xl</span><span>1280px</span></div><div style={{ display: "flex", justifyContent: "space-between" }}><span>full</span><span>100%</span></div></div></div>
+      {/* Recommended defaults */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 20 }}>
+          <h4 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 12 }}>Recommended Defaults</h4>
+          <div style={{ display: "grid", gap: 8, fontSize: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #FAF9F7" }}><span style={{ color: "#9299A8" }}>Desktop page padding</span><span style={{ fontWeight: 500, color: "#151927" }}>32px (token 8)</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #FAF9F7" }}><span style={{ color: "#9299A8" }}>Tablet</span><span style={{ fontWeight: 500, color: "#151927" }}>24px (token 6)</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #FAF9F7" }}><span style={{ color: "#9299A8" }}>Mobile</span><span style={{ fontWeight: 500, color: "#151927" }}>16px (token 4)</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #FAF9F7" }}><span style={{ color: "#9299A8" }}>Card padding standard</span><span style={{ fontWeight: 500, color: "#151927" }}>24px (token 6)</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #FAF9F7" }}><span style={{ color: "#9299A8" }}>Card compact</span><span style={{ fontWeight: 500, color: "#151927" }}>20px (token 5)</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #FAF9F7" }}><span style={{ color: "#9299A8" }}>Card spacious</span><span style={{ fontWeight: 500, color: "#151927" }}>32px (token 8)</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}><span style={{ color: "#9299A8" }}>Section gap</span><span style={{ fontWeight: 500, color: "#151927" }}>32-40px (token 8-10)</span></div>
+          </div>
+        </div>
+        <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 20 }}>
+          <h4 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 12 }}>Micro Spacing</h4>
+          <div style={{ display: "grid", gap: 8, fontSize: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #FAF9F7" }}><span style={{ color: "#9299A8" }}>Form field gap</span><span style={{ fontWeight: 500, color: "#151927" }}>20px (token 5)</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #FAF9F7" }}><span style={{ color: "#9299A8" }}>Label → input</span><span style={{ fontWeight: 500, color: "#151927" }}>8px (token 2)</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #FAF9F7" }}><span style={{ color: "#9299A8" }}>Inline icon gap</span><span style={{ fontWeight: 500, color: "#151927" }}>8px (token 2)</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #FAF9F7" }}><span style={{ color: "#9299A8" }}>Icon + text compact</span><span style={{ fontWeight: 500, color: "#151927" }}>6px</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #FAF9F7" }}><span style={{ color: "#9299A8" }}>Icon + text standard</span><span style={{ fontWeight: 500, color: "#151927" }}>8px (token 2)</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}><span style={{ color: "#9299A8" }}>Table cell padding</span><span style={{ fontWeight: 500, color: "#151927" }}>12px 14px (token 3 + 4)</span></div>
+          </div>
+          <div style={{ marginTop: 12, padding: 10, background: "#FAF9F7", borderRadius: 8, fontSize: 11, color: "#60697A" }}>
+            Do: Use 4px base consistently. Don't: Random 5px, 7px, 13px values.
+          </div>
         </div>
       </div>
     </div>

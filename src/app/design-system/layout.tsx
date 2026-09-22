@@ -15,11 +15,12 @@ const navigation: NavGroup[] = [
       { num: "02", label: "Colors", href: "/design-system/foundations/colors", ready: true },
       { num: "03", label: "Typography", href: "/design-system/foundations/typography", ready: true },
       { num: "04", label: "Spacing", href: "/design-system/foundations/spacing", ready: true },
-      { num: "05", label: "Radius", href: "/design-system/foundations/radius", ready: false },
-      { num: "06", label: "Shadows", href: "/design-system/foundations/shadows", ready: false },
-      { num: "07", label: "Grid & Breakpoints", href: "/design-system/foundations/grid", ready: false },
-      { num: "08", label: "Motion", href: "/design-system/foundations/motion", ready: false },
-      { num: "09", label: "Iconography", href: "/design-system/foundations/icons", ready: false },
+      { num: "05", label: "Radius", href: "/design-system/foundations/radius", ready: true },
+      { num: "06", label: "Shadows", href: "/design-system/foundations/shadows", ready: true },
+      { num: "07", label: "Grid & Breakpoints", href: "/design-system/foundations/grid", ready: true },
+      { num: "08", label: "Motion", href: "/design-system/foundations/motion", ready: true },
+      { num: "09", label: "Iconography", href: "/design-system/foundations/icons", ready: true },
+      { num: "PG", label: "Foundation Playground", href: "/design-system/foundations/playground", ready: true },
     ],
   },
   {
@@ -350,10 +351,10 @@ export default function DesignSystemLayout({ children }: { children: React.React
         <div style={{ padding: 16, borderTop: "1px solid #303A52", fontSize: 11, color: "#8992A6" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
             <span style={{ fontWeight: 500 }}>Components</span>
-            <span style={{ color: "#C9CED9", fontWeight: 500 }}>74 total • 11 ready</span>
+            <span style={{ color: "#C9CED9", fontWeight: 500 }}>74 total • 17 ready</span>
           </div>
           <div style={{ height: 4, background: "#303A52", borderRadius: 2, overflow: "hidden" }}>
-            <div style={{ width: "15%", height: "100%", background: "#49339A" }} />
+            <div style={{ width: "23%", height: "100%", background: "#49339A" }} />
           </div>
         </div>
       </aside>

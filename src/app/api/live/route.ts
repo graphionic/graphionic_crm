@@ -128,9 +128,19 @@ export async function GET() {
       // ignore
     }
 
-    // If still no collectors, mark stopped
+    // If still no collectors, mark stopped but check heartbeat age for auto-restart message
     if (!collectors.length) {
-      collectors = [{ pid: "none", cmd: "No collectors running - chain broken! Check local machine", running: false }];
+      let msg = "No collectors running - chain broken! Check local machine";
+      if (heartbeat) {
+        const lastBeat = new Date(heartbeat.timestamp);
+        const diffSec = (Date.now() - lastBeat.getTime()) / 1000;
+        if (diffSec < 120) {
+          msg = `Collector stopped — Overpass 504/429 or crash. Will auto-restart in 10 sec. Last beat ${diffSec.toFixed(0)}s ago. If stays stopped >2 min, tell me.`;
+        } else {
+          msg = `⚠️ COLLECTOR STOPPED - No process running, chain broken! Last beat ${Math.floor(diffSec/60)} min ago. Restart needed on local machine`;
+        }
+      }
+      collectors = [{ pid: "none", cmd: msg, running: false }];
       status = "stopped";
     }
 
@@ -165,8 +175,8 @@ export async function GET() {
       heartbeat,
       status,
       message: status === "running"
-        ? `Collecting ${effectiveRows}/200 - CRM ${crmTotal}/200 - ${collectors.length} process(es) running - TRUE NO_SITE verified`
-        : "⚠️ COLLECTOR STOPPED - No process running, chain broken! Restart needed on local machine",
+        ? `Collecting ${effectiveRows}/200 - CRM ${crmTotal}/200 - ${collectors.length} process(es) running - TRUE NO_SITE verified (prevents Emma Clinic type)`
+        : collectors[0]?.cmd || "⚠️ COLLECTOR STOPPED - No process running, chain broken! Will auto-restart in 10 sec. If stays stopped >2 min, tell me.",
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message, timestamp: new Date().toISOString() }, { status: 500 });

@@ -63,7 +63,7 @@ export default function LiveCollectionWidget() {
         <span className={`badge ${isRunning ? "green" : "red"}`}>{isRunning ? "RUNNING" : "STOPPED"}</span>
       </div>
       <div className="card-body">
-        {/* Status message */}
+        {/* Status message - Never Stops */}
         <div style={{ 
           background: isRunning ? "#f0fdf4" : "#fef2f2", 
           border: `1px solid ${isRunning ? "#bbf7d0" : "#fecaca"}`, 
@@ -75,6 +75,11 @@ export default function LiveCollectionWidget() {
           color: isRunning ? "#15803d" : "#b91c1c"
         }}>
           {isRunning ? "✅" : "⚠️"} {data.message}
+          {!isRunning && (
+            <div style={{ marginTop: 8, fontSize: 11, fontWeight: 400 }}>
+              Collector stopped — Overpass 504/429 or crash. Will auto-restart in 10 sec via watchdog. If stays stopped &gt;2 min, tell me. 🔴 Live auto-refresh every 5 sec
+            </div>
+          )}
         </div>
 
         {/* Progress */}

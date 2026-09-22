@@ -15,6 +15,7 @@ type LiveData = {
 export default function LivePage() {
   const [data, setData] = useState<LiveData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [restarting, setRestarting] = useState(false);
 
   async function fetchLive() {
     try {
@@ -25,6 +26,20 @@ export default function LivePage() {
       console.error(e);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleRestart() {
+    setRestarting(true);
+    try {
+      const res = await fetch("/api/restart", { method: "POST", cache: "no-store" });
+      const json = await res.json();
+      alert(json.message || "Restart triggered - will auto-restart in 10 sec");
+      setTimeout(fetchLive, 3000);
+    } catch (e) {
+      alert("Restart failed");
+    } finally {
+      setRestarting(false);
     }
   }
 
@@ -43,21 +58,60 @@ export default function LivePage() {
     <div style={{padding:20, maxWidth:1200, margin:"0 auto"}}>
       <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16}}>
         <a href="/dashboard" style={{color:"#2563eb", textDecoration:"none", fontSize:14, fontWeight:600}}>← Back to Dashboard</a>
-        <a href="/leads" style={{color:"#666", textDecoration:"none", fontSize:13}}>View Leads →</a>
+        <div style={{display:"flex", gap:12, alignItems:"center"}}>
+          <button
+            onClick={handleRestart}
+            disabled={restarting}
+            style={{
+              background: isStopped ? "#ef4444" : "#22c55e",
+              color: "white",
+              border: "none",
+              padding: "8px 16px",
+              borderRadius: 6,
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: restarting ? "not-allowed" : "pointer",
+            }}
+          >
+            {restarting ? "Restarting..." : isStopped ? "🔄 Restart Collectors" : "🔄 Restart"}
+          </button>
+          <a href="/leads" style={{color:"#666", textDecoration:"none", fontSize:13}}>View Leads →</a>
+        </div>
       </div>
       <h1 style={{fontSize:24, fontWeight:700, marginBottom:8}}>🔴 Live Collection — Never Stops</h1>
       <p style={{color:"#666", marginBottom:20}}>Auto-refresh every 5 sec — shows if chain breaks, errors, progress to 200 — TRUE NO_SITE verified (prevents Emma Clinic type)</p>
 
       {isStopped && (
         <div style={{background:"#fee", border:"1px solid #fcc", padding:16, borderRadius:8, marginBottom:20}}>
-          <b style={{color:"#c00"}}>⚠️ {data.message}</b>
-          <p style={{margin:"8px 0 0"}}>Collector stopped — Overpass 504/429 or crash. Will auto-restart in 10 sec. If stays stopped &gt;2 min, tell me.</p>
+          <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:16}}>
+            <div>
+              <b style={{color:"#c00"}}>⚠️ {data.message}</b>
+              <p style={{margin:"8px 0 0"}}>Collector stopped — Overpass 504/429 or crash. Will auto-restart in 10 sec. If stays stopped &gt;2 min, tell me.</p>
+            </div>
+            <button
+              onClick={handleRestart}
+              disabled={restarting}
+              style={{
+                background:"#c00",
+                color:"white",
+                border:"none",
+                padding:"10px 20px",
+                borderRadius:8,
+                fontWeight:800,
+                cursor:"pointer",
+                whiteSpace:"nowrap"
+              }}
+            >
+              {restarting ? "Restarting..." : "🔄 RESTART NOW"}
+            </button>
+          </div>
         </div>
       )}
 
       {!isStopped && (
-        <div style={{background:"#efe", border:"1px solid #cfc", padding:16, borderRadius:8, marginBottom:20}}>
+        <div style={{background:"#efe", border:"1px solid #cfc", padding:16, borderRadius:8, marginBottom:20, display:"flex", justifyContent:"space-between", alignItems:"center"}}>
           <b style={{color:"#0a0"}}>✅ {data.message}</b>
+          <span style={{fontSize:12, color:"#666"}}>Auto-refresh 5s • Chain unbroken</span>
         </div>
       )}
 

@@ -1,24 +1,52 @@
 "use client";
+import { useState } from "react";
 import { FormField, FieldLabel, FieldDescription } from "@/components/ui/FormField";
 import { Input, CharacterCounter } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { Switch } from "@/components/ui/Switch";
 import { Button } from "@/components/ui/Button";
+import { Select } from "@/components/ui/Select";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
+import { UserSelector, StatusSelector, CompanySelector, TagSelector } from "@/components/ui/AdvancedSelectors";
+import { DatePicker } from "@/components/ui/DatePicker";
+import { TimePicker } from "@/components/ui/TimePicker";
+import { DropZone } from "@/components/ui/FileUpload";
 
 export default function CreateLeadForm() {
+  const [leadSource, setLeadSource] = useState("");
+  const [industry, setIndustry] = useState("");
+  const [owner, setOwner] = useState("aarav");
+  const [status, setStatus] = useState("new");
+  const [tags, setTags] = useState<string[]>(["saas"]);
+  const [followupDate, setFollowupDate] = useState<Date | undefined>(new Date(2026, 8, 24));
+  const [followupTime, setFollowupTime] = useState("10 : 30 AM");
+
+  const sourceOptions = [
+    { value: "website", label: "Website" },
+    { value: "referral", label: "Referral" },
+    { value: "linkedin", label: "LinkedIn" },
+    { value: "cold", label: "Cold Email" },
+  ];
+
+  const industryOptions = [
+    { value: "tech", label: "Technology" },
+    { value: "health", label: "Healthcare" },
+    { value: "finance", label: "Finance" },
+    { value: "dental", label: "Dental" },
+  ];
+
   return (
     <div style={{ maxWidth: 800, fontFamily: "'Poppins', system-ui, sans-serif" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap');`}</style>
 
       <div style={{ marginBottom: 24 }}>
-        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "#49339A", background: "#F0ECFA", padding: "4px 10px", borderRadius: 6 }}>CREATE LEAD FORM</span>
-        <h1 style={{ fontSize: 24, fontWeight: 600, color: "#151927", marginTop: 12, marginBottom: 4 }}>Create Lead</h1>
-        <p style={{ fontSize: 13, color: "#60697A" }}>Add a new prospect to your outreach workspace.</p>
+        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "#49339A", background: "#F0ECFA", padding: "4px 10px", borderRadius: 6 }}>ADVANCED CREATE LEAD FORM</span>
+        <h1 style={{ fontSize: 24, fontWeight: 600, color: "#151927", marginTop: 12, marginBottom: 4 }}>Create Lead — Advanced</h1>
+        <p style={{ fontSize: 13, color: "#60697A" }}>Now using actual advanced components: Select, Searchable Select, User, Status, Multi Select, Date/Time Pickers, File Upload. Same approved fields for rest.</p>
       </div>
 
       <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 24, display: "grid", gap: 24 }}>
-        {/* Basic Information */}
         <div>
           <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "#9299A8", marginBottom: 16 }}>BASIC INFORMATION</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
@@ -42,19 +70,33 @@ export default function CreateLeadForm() {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             <FormField><FieldLabel required>Company Name</FieldLabel><Input placeholder="Acme Inc" /></FormField>
             <FormField><FieldLabel>Website</FieldLabel><Input prefix="https://" placeholder="acme.com" /></FormField>
-            <FormField><FieldLabel>Industry</FieldLabel><div style={{ height: 42, border: "1px dashed #E5E3DF", borderRadius: 8, display: "flex", alignItems: "center", padding: "0 12px", color: "#9299A8", fontSize: 13 }}>Select industry — placeholder for Select</div></FormField>
+            <FormField><FieldLabel>Industry</FieldLabel><SearchableSelect options={industryOptions} value={industry} onChange={setIndustry} placeholder="Select industry" /></FormField>
             <FormField><FieldLabel>Employee Count</FieldLabel><Input placeholder="50-100" /></FormField>
           </div>
         </div>
 
         <div>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "#9299A8", marginBottom: 16 }}>LEAD DETAILS</div>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "#9299A8", marginBottom: 16 }}>LEAD DETAILS — Advanced Selectors</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            <FormField><FieldLabel>Lead Source</FieldLabel><div style={{ height: 42, border: "1px dashed #E5E3DF", borderRadius: 8, display: "flex", alignItems: "center", padding: "0 12px", color: "#9299A8", fontSize: 13 }}>Select source — placeholder</div></FormField>
+            <FormField><FieldLabel>Lead Source</FieldLabel><Select options={sourceOptions} value={leadSource} onChange={setLeadSource} placeholder="Select source" /></FormField>
             <FormField><FieldLabel>Estimated Value</FieldLabel><Input prefix="₹" placeholder="50,000" /></FormField>
-            <FormField><FieldLabel>Assigned Owner</FieldLabel><div style={{ height: 42, border: "1px dashed #E5E3DF", borderRadius: 8, display: "flex", alignItems: "center", padding: "0 12px", color: "#9299A8", fontSize: 13 }}>Select owner — placeholder</div></FormField>
-            <FormField><FieldLabel>Status</FieldLabel><div style={{ height: 42, border: "1px dashed #E5E3DF", borderRadius: 8, display: "flex", alignItems: "center", padding: "0 12px", color: "#9299A8", fontSize: 13 }}>Select status — placeholder</div></FormField>
+            <FormField><FieldLabel>Assigned Owner</FieldLabel><UserSelector value={owner} onChange={setOwner} /></FormField>
+            <FormField><FieldLabel>Status</FieldLabel><StatusSelector value={status} onChange={setStatus} /></FormField>
+            <FormField style={{ gridColumn: "span 2" }}><FieldLabel>Tags</FieldLabel><TagSelector value={tags} onChange={setTags} /></FormField>
           </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "#9299A8", marginBottom: 16 }}>FOLLOW-UP — Date & Time</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <FormField><FieldLabel>Next Follow-up</FieldLabel><DatePicker value={followupDate} onChange={setFollowupDate} /></FormField>
+            <FormField><FieldLabel>Follow-up Time</FieldLabel><TimePicker value={followupTime} onChange={setFollowupTime} /></FormField>
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "#9299A8", marginBottom: 16 }}>ATTACHMENT</div>
+          <FormField><FieldLabel>Attachment</FieldLabel><DropZone accept=".pdf,.png,.xlsx" maxSize="5 MB" label="Drop file or browse" description="PDF, PNG, XLSX up to 5 MB" /></FormField>
         </div>
 
         <div>
@@ -85,8 +127,6 @@ export default function CreateLeadForm() {
           <Button>Create Lead</Button>
         </div>
       </div>
-
-      <div style={{ marginTop: 16, fontSize: 11, color: "#9299A8" }}>Form uses reusable primitives: FormField, FieldLabel, Input, Textarea, Checkbox, Switch, Button • Two-column for related short fields, full-width for long • Lead Source/Industry/Owner/Status placeholders for upcoming Select</div>
     </div>
   );
 }

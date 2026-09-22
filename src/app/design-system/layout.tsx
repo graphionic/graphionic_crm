@@ -48,11 +48,13 @@ const navigation: NavGroup[] = [
       { num: "ER", label: "Error Preview", href: "/design-system/form-controls/error-preview", ready: true },
       { num: "FP", label: "Form Playground", href: "/design-system/form-controls/playground", ready: true },
       { num: "16", label: "Select", href: "/design-system/form-controls/select", ready: true },
-      { num: "17", label: "Searchable Select", href: "/design-system/form-controls/searchable", ready: false },
-      { num: "18", label: "Multi Select", href: "/design-system/form-controls/multi", ready: false },
-      { num: "22", label: "Date Picker", href: "/design-system/form-controls/date", ready: false },
-      { num: "23", label: "Time Picker", href: "/design-system/form-controls/time", ready: false },
-      { num: "24", label: "File Upload", href: "/design-system/form-controls/upload", ready: false },
+      { num: "17", label: "Searchable Select", href: "/design-system/form-controls/searchable", ready: true },
+      { num: "18", label: "Multi Select", href: "/design-system/form-controls/multi", ready: true },
+      { num: "22", label: "Date Picker", href: "/design-system/form-controls/date", ready: true },
+      { num: "23", label: "Time Picker", href: "/design-system/form-controls/time", ready: true },
+      { num: "24", label: "File Upload", href: "/design-system/form-controls/upload", ready: true },
+      { num: "CP", label: "Create Campaign", href: "/design-system/form-controls/create-campaign", ready: true },
+      { num: "AF", label: "Advanced Playground", href: "/design-system/form-controls/advanced-playground", ready: true },
     ],
   },
   {
@@ -355,10 +357,10 @@ export default function DesignSystemLayout({ children }: { children: React.React
         <div style={{ padding: 16, borderTop: "1px solid #303A52", fontSize: 11, color: "#8992A6" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
             <span style={{ fontWeight: 500 }}>Components</span>
-            <span style={{ color: "#C9CED9", fontWeight: 500 }}>74 total • 29 ready</span>
+            <span style={{ color: "#C9CED9", fontWeight: 500 }}>74 total • 37 ready</span>
           </div>
           <div style={{ height: 4, background: "#303A52", borderRadius: 2, overflow: "hidden" }}>
-            <div style={{ width: "39%", height: "100%", background: "#49339A" }} />
+            <div style={{ width: "50%", height: "100%", background: "#49339A" }} />
           </div>
         </div>
       </aside>

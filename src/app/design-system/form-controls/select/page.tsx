@@ -1,106 +1,141 @@
 "use client";
 import { useState } from "react";
+import { FormField, FieldLabel, FieldDescription, FieldError } from "@/components/ui/FormField";
+import { Select } from "@/components/ui/Select";
 
 export default function SelectPage() {
-  const [open, setOpen] = useState<string | null>("basic");
+  const [status, setStatus] = useState("qualified");
+  const [source, setSource] = useState("");
+  const [owner, setOwner] = useState("aarav");
+  const [grouped, setGrouped] = useState("website");
 
-  const options = [
-    { label: "Glow Dentistry", sub: "Dental • London", avatar: "G" },
-    { label: "Leith Optical", sub: "Eye • Edinburgh", avatar: "L" },
-    { label: "VIVA SKIN CLINICS", sub: "Hospital • London", avatar: "V" },
-    { label: "Medivet", sub: "Pet Store • London", avatar: "M" },
+  const statusOptions = [
+    { value: "new", label: "New" },
+    { value: "contacted", label: "Contacted" },
+    { value: "qualified", label: "Qualified" },
+    { value: "proposal", label: "Proposal Sent" },
+    { value: "won", label: "Won" },
+    { value: "lost", label: "Lost" },
+  ];
+
+  const statusWithDesc = [
+    { value: "new", label: "New", description: "Recently added, not yet contacted" },
+    { value: "contacted", label: "Contacted", description: "Initial outreach sent" },
+    { value: "qualified", label: "Qualified", description: "Lead has demonstrated interest." },
+    { value: "proposal", label: "Proposal Sent", description: "Proposal shared, awaiting decision" },
+    { value: "won", label: "Won", description: "Converted to customer" },
+    { value: "lost", label: "Lost", description: "No longer pursuing" },
+  ];
+
+  const ownerOptions = [
+    { value: "aarav", label: "Aarav Patel", metadata: "Sales Manager · 24 leads" },
+    { value: "neha", label: "Neha Shah", metadata: "Account Manager · 18 leads" },
+    { value: "rohan", label: "Rohan Mehta", metadata: "Sales Executive · 32 leads" },
+    { value: "priya", label: "Priya Nair", metadata: "Customer Success", disabled: true },
+  ];
+
+  const groupedOptions = [
+    { label: "INBOUND", options: [{ value: "website", label: "Website" }, { value: "landing", label: "Landing Page" }, { value: "referral", label: "Referral" }] },
+    { label: "OUTBOUND", options: [{ value: "linkedin", label: "LinkedIn" }, { value: "cold", label: "Cold Email" }, { value: "manual", label: "Manual Prospecting" }] },
+    { label: "IMPORT", options: [{ value: "csv", label: "CSV Import" }, { value: "api", label: "API" }] },
+  ];
+
+  const statusWithDot = [
+    { value: "new", label: "New", color: "#9299A8" },
+    { value: "contacted", label: "Contacted", color: "#62BDD4" },
+    { value: "qualified", label: "Qualified", color: "#4FAE91" },
+    { value: "proposal", label: "Proposal Sent", color: "#F4BE52" },
+    { value: "won", label: "Won", color: "#49339A" },
+    { value: "lost", label: "Lost", color: "#EC6262" },
   ];
 
   return (
-    <div style={{ maxWidth: 1200 }}>
-      <div style={{ marginBottom: 32 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: "#315BE8", background: "#EEF3FF", padding: "4px 10px", borderRadius: 20 }}>16 / 74 · FORM CONTROLS</span>
-        </div>
-        <h1 style={{ fontSize: 40, fontWeight: 800, letterSpacing: "-0.03em", color: "#0B1224", marginBottom: 12 }}>Select System</h1>
-        <p style={{ fontSize: 16, color: "#475467", lineHeight: 1.6, maxWidth: 700 }}>Critical for admin systems. Basic, searchable, multi, async, with avatars, tags, empty & loading states. Dropdowns shown OPEN for inspection.</p>
+    <div style={{ maxWidth: 1100, fontFamily: "'Poppins', system-ui, sans-serif" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap');`}</style>
+
+      <div style={{ marginBottom: 28 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "#49339A", background: "#F0ECFA", padding: "4px 10px", borderRadius: 6 }}>16 / 74 · FORM CONTROLS</span>
+        <h1 style={{ fontSize: 32, fontWeight: 600, letterSpacing: "-0.02em", color: "#151927", marginTop: 16, marginBottom: 8 }}>Select</h1>
+        <p style={{ fontSize: 14, color: "#60697A", lineHeight: 1.6, maxWidth: 640 }}>Reusable Select primitive. Same height/border/radius/typography/focus/validation as Input. Supports placeholder, icons, descriptions, groups, clearable.</p>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
-        {/* Basic Select - Open */}
-        <div style={{ background: "white", border: "1px solid #DDE3EE", borderRadius: 14, padding: 20 }}>
-          <h3 style={{ fontWeight: 700, fontSize: 12, letterSpacing: "0.05em", marginBottom: 12 }}>BASIC SELECT — OPEN</h3>
-          <div style={{ position: "relative" }}>
-            <button onClick={() => setOpen(open === "basic" ? null : "basic")} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", border: "1px solid #315BE8", borderRadius: 8, background: "white", fontSize: 13, boxShadow: "0 0 0 3px #D9E4FF" }}>
-              <span>Select category</span><span>▼</span>
-            </button>
-            {open === "basic" && (
-              <div style={{ position: "absolute", top: 44, left: 0, right: 0, background: "white", border: "1px solid #DDE3EE", borderRadius: 10, boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1)", zIndex: 10, overflow: "hidden" }}>
-                <div style={{ padding: 8 }}><input placeholder="Search..." style={{ width: "100%", padding: "8px 12px", border: "1px solid #DDE3EE", borderRadius: 6, fontSize: 12 }} /></div>
-                {["Dental", "Eye", "Pet Store", "Hospital", "Physio"].map((opt, i) => (
-                  <div key={opt} style={{ padding: "10px 14px", fontSize: 13, background: i === 0 ? "#EEF3FF" : "white", color: i === 0 ? "#315BE8" : "#0B1224", display: "flex", justifyContent: "space-between" }}><span>{opt}</span>{i === 0 && <span>✓</span>}</div>
-                ))}
-              </div>
-            )}
-          </div>
-          <div style={{ marginTop: 60, fontSize: 11, color: "#667085" }}>Includes search field, selected state, hover, empty results</div>
-        </div>
-
-        {/* User Select with Avatars */}
-        <div style={{ background: "white", border: "1px solid #DDE3EE", borderRadius: 14, padding: 20 }}>
-          <h3 style={{ fontWeight: 700, fontSize: 12, letterSpacing: "0.05em", marginBottom: 12 }}>USER SELECT — WITH AVATARS</h3>
-          <div style={{ position: "relative" }}>
-            <button style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", border: "1px solid #DDE3EE", borderRadius: 8, background: "white", fontSize: 13 }}>
-              <span>Assign to user</span><span>▼</span>
-            </button>
-            <div style={{ position: "absolute", top: 44, left: 0, right: 0, background: "white", border: "1px solid #DDE3EE", borderRadius: 10, boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1)", zIndex: 10, overflow: "hidden" }}>
-              {options.map((opt) => (
-                <div key={opt.label} style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, fontSize: 13, borderBottom: "1px solid #F6F8FC" }}>
-                  <div style={{ width: 28, height: 28, background: "#EEF3FF", color: "#315BE8", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12 }}>{opt.avatar}</div>
-                  <div><div style={{ fontWeight: 600 }}>{opt.label}</div><div style={{ fontSize: 11, color: "#667085" }}>{opt.sub}</div></div>
-                </div>
-              ))}
+      {/* Anatomy + Sizes */}
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, marginBottom: 16 }}>
+        <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 20 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 12 }}>Anatomy — Label Required/Optional + Trigger + Helper/Validation + Dropdown</h3>
+          <FormField>
+            <FieldLabel required>Lead Status</FieldLabel>
+            <Select options={statusOptions} value={status} onChange={setStatus} placeholder="Select status" />
+            <FieldDescription>Current stage in pipeline</FieldDescription>
+          </FormField>
+          <div style={{ marginTop: 16 }}>
+            <h4 style={{ fontSize: 12, fontWeight: 600, color: "#151927", marginBottom: 8 }}>Sizes — SM 36 / MD 42 DEFAULT / LG 48 — radius 8</h4>
+            <div style={{ display: "grid", gap: 12 }}>
+              <Select size="sm" options={statusOptions} value={status} onChange={setStatus} placeholder="SM — Select status" />
+              <Select size="md" options={statusOptions} value={status} onChange={setStatus} placeholder="MD — Select status" />
+              <Select size="lg" options={statusOptions} value={status} onChange={setStatus} placeholder="LG — Select status" />
             </div>
           </div>
         </div>
-      </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
-        <div style={{ background: "white", border: "1px solid #DDE3EE", borderRadius: 14, padding: 20 }}>
-          <h3 style={{ fontWeight: 700, fontSize: 12, letterSpacing: "0.05em", marginBottom: 12 }}>MULTI SELECT — WITH TAGS</h3>
-          <div style={{ border: "1px solid #DDE3EE", borderRadius: 8, padding: 8, display: "flex", gap: 6, flexWrap: "wrap", minHeight: 44, alignItems: "center" }}>
-            <span style={{ background: "#EEF3FF", color: "#315BE8", padding: "4px 10px", borderRadius: 20, fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>Dental ×</span>
-            <span style={{ background: "#EEF3FF", color: "#315BE8", padding: "4px 10px", borderRadius: 20, fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>Hospital ×</span>
-            <span style={{ color: "#98A2B3", fontSize: 12 }}>+ Add more</span>
-          </div>
-          <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {["Dental ✓", "Hospital ✓", "Eye", "Pet Store", "Physio"].map((t) => (
-              <span key={t} style={{ border: "1px solid #DDE3EE", padding: "6px 12px", borderRadius: 8, fontSize: 12, background: t.includes("✓") ? "#EEF3FF" : "white", color: t.includes("✓") ? "#315BE8" : "#667085" }}>{t}</span>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ background: "white", border: "1px solid #DDE3EE", borderRadius: 14, padding: 20 }}>
-          <h3 style={{ fontWeight: 700, fontSize: 12, letterSpacing: "0.05em", marginBottom: 12 }}>STATUS SELECT — WITH COLORS</h3>
-          <div style={{ display: "grid", gap: 8 }}>
-            {[
-              { label: "New", color: "#315BE8", bg: "#EEF3FF" },
-              { label: "Contacted", color: "#F59E0B", bg: "#FFFBEB" },
-              { label: "Qualified", color: "#7C5CFC", bg: "#F5F0FF" },
-              { label: "Won", color: "#16A36A", bg: "#ECFDF5" },
-              { label: "Lost", color: "#667085", bg: "#F6F8FC" },
-            ].map((s) => (
-              <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", border: "1px solid #DDE3EE", borderRadius: 8, fontSize: 13 }}>
-                <span style={{ width: 8, height: 8, background: s.color, borderRadius: "50%" }} />
-                <span style={{ flex: 1 }}>{s.label}</span>
-                <span style={{ background: s.bg, color: s.color, padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 600 }}>{s.label}</span>
-              </div>
-            ))}
+        <div style={{ background: "#FAF9F7", border: "1px solid #E5E3DF", borderRadius: 12, padding: 20 }}>
+          <h4 style={{ fontSize: 12, fontWeight: 600, color: "#151927", marginBottom: 12 }}>States</h4>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div><div style={{ fontSize: 11, color: "#9299A8", marginBottom: 4 }}>Default</div><Select options={statusOptions} placeholder="Select status" /></div>
+            <div><div style={{ fontSize: 11, color: "#9299A8", marginBottom: 4 }}>Hover (visual)</div><Select options={statusOptions} placeholder="Hover" /></div>
+            <div><div style={{ fontSize: 11, color: "#9299A8", marginBottom: 4 }}>Focus/Open — indigo border + ring</div><Select options={statusOptions} value="qualified" onChange={() => {}} placeholder="Open" /></div>
+            <div><div style={{ fontSize: 11, color: "#9299A8", marginBottom: 4 }}>Error</div><Select state="error" options={statusOptions} placeholder="Select status" /><FieldError>Required</FieldError></div>
+            <div><div style={{ fontSize: 11, color: "#9299A8", marginBottom: 4 }}>Disabled</div><Select disabled options={statusOptions} placeholder="Disabled" /></div>
+            <div><div style={{ fontSize: 11, color: "#9299A8", marginBottom: 4 }}>ReadOnly</div><Select readOnly options={statusOptions} value="qualified" onChange={() => {}} /></div>
           </div>
         </div>
       </div>
 
-      <div style={{ background: "#F6F8FC", border: "1px solid #DDE3EE", borderRadius: 14, padding: 20 }}>
-        <h3 style={{ fontWeight: 700, fontSize: 12, letterSpacing: "0.05em", marginBottom: 12 }}>SELECT ANATOMY</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, fontSize: 11 }}>
-          <div><b>Anatomy:</b><br />Trigger (40px), Search, Options (36px), Selected check, Hover #F6F8FC, Empty state, Loading spinner</div>
-          <div><b>Features:</b><br />Clearable, Disabled, Grouped, Async loading, Avatars, Tags, Checkbox selection, Recently selected</div>
-          <div><b>States:</b><br />Default, Hover, Focus (blue ring), Open, Selected, Disabled, Loading results, Empty results, Error</div>
+      {/* Dropdown Open + Option Structure */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+        <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 20 }}>
+          <h4 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 12 }}>Dropdown — OPEN state must be shown</h4>
+          <FormField>
+            <FieldLabel>Lead Status — open</FieldLabel>
+            <Select options={statusOptions} value={status} onChange={setStatus} placeholder="Select status" />
+          </FormField>
+          <div style={{ marginTop: 12, fontSize: 11, color: "#60697A" }}>Selected obvious #F0ECFA bg + ✓ + indigo text. Hovered #FAF9F7. Keyboard-focused distinguishable. Do NOT heavy background for every option.</div>
+          <div style={{ marginTop: 12, background: "#FAF9F7", border: "1px solid #E5E3DF", borderRadius: 8, padding: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#151927", marginBottom: 8 }}>Dropdown specs</div>
+            <div style={{ fontSize: 11, color: "#60697A", lineHeight: 1.6 }}>
+              Min-width 200, white bg, border #E5E3DF, radius 10, shadow 0 4px 16px rgba(21,25,39,0.10), padding 6, gap 2, item 8px 10px radius 6, active #F0ECFA, hover #FAF9F7
+            </div>
+          </div>
+        </div>
+
+        <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 20 }}>
+          <h4 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 12 }}>Option Structure</h4>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div><div style={{ fontSize: 11, color: "#9299A8", marginBottom: 4 }}>Simple — Qualified</div><Select options={[{ value: "q", label: "Qualified" }]} value="q" onChange={() => {}} /></div>
+            <div><div style={{ fontSize: 11, color: "#9299A8", marginBottom: 4 }}>Icon option — ● Qualified</div><Select options={statusWithDot} value="qualified" onChange={() => {}} /></div>
+            <div><div style={{ fontSize: 11, color: "#9299A8", marginBottom: 4 }}>With description</div><Select options={statusWithDesc} value="qualified" onChange={() => {}} /></div>
+            <div><div style={{ fontSize: 11, color: "#9299A8", marginBottom: 4 }}>With metadata — John Smith Sales Manager · 24 leads</div><Select options={ownerOptions} value={owner} onChange={setOwner} /></div>
+            <div><div style={{ fontSize: 11, color: "#9299A8", marginBottom: 4 }}>Disabled option</div><Select options={ownerOptions} value="aarav" onChange={() => {}} /></div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 20 }}>
+          <h4 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 12 }}>Grouped Select</h4>
+          <FormField>
+            <FieldLabel>Lead Source</FieldLabel>
+            <Select groups={groupedOptions} value={grouped} onChange={setGrouped} placeholder="Select source" />
+            <FieldDescription>Group headings subordinate 11px 600 uppercase #9299A8</FieldDescription>
+          </FormField>
+        </div>
+        <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 20 }}>
+          <h4 style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginBottom: 12 }}>Clearable Select</h4>
+          <FormField>
+            <FieldLabel>Assigned Owner</FieldLabel>
+            <Select options={ownerOptions} value={owner} onChange={setOwner} placeholder="Select owner" clearable />
+            <FieldDescription>Clicking × clears, chevron still opens. Do not confuse clear vs dropdown.</FieldDescription>
+          </FormField>
         </div>
       </div>
     </div>

@@ -28,9 +28,10 @@ const navigation: NavGroup[] = [
     title: "02 ACTIONS",
     items: [
       { num: "10", label: "Buttons", href: "/design-system/actions/buttons", ready: true },
-      { num: "11", label: "Button Groups", href: "/design-system/actions/button-groups", ready: false },
-      { num: "12", label: "Icon Buttons", href: "/design-system/actions/icon-buttons", ready: false },
-      { num: "13", label: "Dropdown Actions", href: "/design-system/actions/dropdown", ready: false },
+      { num: "11", label: "Button Groups", href: "/design-system/actions/button-groups", ready: true },
+      { num: "12", label: "Icon Buttons", href: "/design-system/actions/icon-buttons", ready: true },
+      { num: "13", label: "Dropdown Actions", href: "/design-system/actions/dropdown", ready: true },
+      { num: "AP", label: "Action Playground", href: "/design-system/actions/playground", ready: true },
     ],
   },
   {
@@ -351,10 +352,10 @@ export default function DesignSystemLayout({ children }: { children: React.React
         <div style={{ padding: 16, borderTop: "1px solid #303A52", fontSize: 11, color: "#8992A6" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
             <span style={{ fontWeight: 500 }}>Components</span>
-            <span style={{ color: "#C9CED9", fontWeight: 500 }}>74 total • 17 ready</span>
+            <span style={{ color: "#C9CED9", fontWeight: 500 }}>74 total • 21 ready</span>
           </div>
           <div style={{ height: 4, background: "#303A52", borderRadius: 2, overflow: "hidden" }}>
-            <div style={{ width: "23%", height: "100%", background: "#49339A" }} />
+            <div style={{ width: "28%", height: "100%", background: "#49339A" }} />
           </div>
         </div>
       </aside>

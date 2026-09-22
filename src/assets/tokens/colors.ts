@@ -1,136 +1,177 @@
 /**
- * ClientForge Design Tokens - Colors
- * Professional, Precise, Modern, Technical, Premium SaaS
- * Primary hierarchy: Navy → Forge Blue → Cyan → Violet
+ * ClientForge Design Tokens - Colors v2
+ * Premium commercial admin dashboard
+ * Royal Indigo primary, Warm Amber secondary, Aqua data
  */
 
 export const colors = {
-  // Brand - Forge
-  forge: {
-    navy: "#0B1224", // Forge Navy - primary brand, headers, text
-    midnight: "#111B33", // Midnight - darker navy
-    blue: "#315BE8", // Forge Blue - primary interactive
-    electric: "#4C73FF", // Electric Blue - hover, active
-    sky: "#38BDF8", // Sky Blue - secondary
-    cyan: "#22D3EE", // Signal Cyan - energetic highlights
-    violet: "#7C5CFC", // Violet - AI, automation, special
-  },
-  // Brand scale for Forge Blue
+  // Brand Primary - Royal Indigo
   brand: {
-    50: "#EEF3FF", // Soft Blue
-    100: "#D9E4FF",
-    200: "#B3C8FF",
-    300: "#8CABFF",
-    400: "#658EFF",
-    500: "#315BE8", // Forge Blue main
-    600: "#2548C0",
-    700: "#1D3898",
-    800: "#111B33", // Midnight
-    900: "#0B1224", // Forge Navy
+    50: "#F0ECFA",
+    100: "#E2D8F5",
+    200: "#C5B1EB",
+    300: "#A88AE1",
+    400: "#8B76CC",
+    500: "#49339A", // Royal Indigo main
+    600: "#38247F", // Primary Hover
+    700: "#2C1D66",
+    800: "#20164D",
+    900: "#151027",
   },
-  // Neutral - Ink to Canvas
-  neutral: {
-    0: "#FFFFFF", // Surface
-    50: "#F6F8FC", // Canvas
-    100: "#EEF3FF", // Soft Blue
-    200: "#DDE3EE", // Border
-    300: "#C2CAD9",
-    400: "#94A3B8",
-    500: "#667085", // Slate
-    600: "#475467",
-    700: "#344054",
-    800: "#1D2939",
-    900: "#101828", // Ink
-    950: "#0B1224", // Forge Navy
+  // Primary aliases
+  primary: {
+    50: "#F0ECFA",
+    100: "#E2D8F5",
+    200: "#C5B1EB",
+    300: "#A88AE1",
+    400: "#8B76CC",
+    500: "#49339A",
+    600: "#38247F",
+    700: "#2C1D66",
+    800: "#20164D",
+    900: "#151027",
   },
-  // Semantic - primarily for status
-  semantic: {
-    success: {
-      50: "#ECFDF5",
-      100: "#D1FAE5",
-      500: "#16A36A",
-      600: "#15803D",
-      700: "#166534",
-    },
-    warning: {
-      50: "#FFFBEB",
-      100: "#FEF3C7",
-      500: "#F59E0B",
-      600: "#D97706",
-      700: "#B45309",
-    },
-    danger: {
-      50: "#FEF2F2",
-      100: "#FEE2E2",
-      500: "#E5484D",
-      600: "#DC2626",
-      700: "#B91C1C",
-    },
-    info: {
-      50: "#EEF3FF",
-      100: "#D9E4FF",
-      500: "#315BE8",
-      600: "#2548C0",
-    },
+  // Secondary Accent - Warm Amber
+  accent: {
+    50: "#FFF6E3", // Warm Cream
+    100: "#FFEDC2",
+    200: "#FBE0A0",
+    300: "#F4BE52", // Warm Amber main
+    400: "#F2B03A",
+    500: "#F29B38",
+    600: "#E08A2E",
+    700: "#C27A28",
   },
-  // Surface
+  // Data / Info - Aqua
+  aqua: {
+    50: "#EAF7FA", // Ice Aqua
+    100: "#D4EFF5",
+    200: "#A9DFEB",
+    300: "#62BDD4", // Aqua main
+    400: "#4AA8C0",
+    500: "#3D93AB",
+    600: "#2F7A8F",
+  },
+  // Forge legacy for backward compat - map to new
+  forge: {
+    navy: "#252E43",
+    midnight: "#1E2638",
+    blue: "#49339A",
+    electric: "#38247F",
+    sky: "#62BDD4",
+    cyan: "#62BDD4",
+    violet: "#8B76CC",
+  },
+  // Navigation
+  nav: {
+    sidebar: "#252E43",
+    sidebarHover: "#303A52",
+    sidebarRaised: "#303A52",
+    text: "#C9CED9",
+    textMuted: "#8992A6",
+    textActive: "#FFFFFF",
+    border: "#303A52",
+  },
+  // Surfaces
   surface: {
-    canvas: "#F6F8FC",
-    default: "#FFFFFF",
-    subtle: "#F6F8FC",
-    muted: "#EEF3FF",
-    hover: "#F6F8FC",
-    active: "#EEF3FF",
-    selected: "#EEF3FF",
-    disabled: "#F6F8FC",
-    overlay: "rgba(11, 18, 36, 0.5)",
-    inverse: "#0B1224",
+    canvas: "#F7F6F3", // Application Canvas
+    default: "#FFFFFF", // Card
+    subtle: "#FAF9F7", // Soft Surface
+    soft: "#FAF9F7",
+    hover: "#FAF9F7",
+    active: "#F0ECFA",
+    selected: "#F0ECFA",
+    disabled: "#FAF9F7",
+    overlay: "rgba(21, 25, 39, 0.5)",
+    inverse: "#252E43",
   },
   // Border
   border: {
-    default: "#DDE3EE",
-    strong: "#C2CAD9",
-    subtle: "#EEF3FF",
-    focus: "#315BE8",
-    error: "#E5484D",
-    success: "#16A36A",
+    default: "#E5E3DF",
+    strong: "#D8D5D0",
+    subtle: "#F0EEEA",
+    focus: "#49339A",
+    error: "#EC6262",
+    success: "#4FAE91",
   },
   // Text
   text: {
-    primary: "#101828", // Ink
-    secondary: "#475467",
-    tertiary: "#667085", // Slate
-    disabled: "#98A2B3",
+    primary: "#151927", // Heading / Ink
+    secondary: "#60697A", // Body
+    tertiary: "#9299A8", // Muted
+    disabled: "#B8BDC8",
     inverse: "#FFFFFF",
-    brand: "#0B1224", // Forge Navy
-    link: "#315BE8",
-    linkHover: "#2548C0",
+    brand: "#151927",
+    link: "#49339A",
+    linkHover: "#38247F",
     onBrand: "#FFFFFF",
   },
-  // For backward compat
-  primary: {
-    50: "#EEF3FF",
-    100: "#D9E4FF",
-    200: "#B3C8FF",
-    300: "#8CABFF",
-    400: "#4C73FF",
-    500: "#315BE8",
-    600: "#2548C0",
-    700: "#1D3898",
-    800: "#111B33",
-    900: "#0B1224",
+  // Neutral - warm
+  neutral: {
+    0: "#FFFFFF",
+    50: "#FAF9F7",
+    100: "#F7F6F3",
+    200: "#E5E3DF",
+    300: "#D8D5D0",
+    400: "#B8BDC8",
+    500: "#9299A8",
+    600: "#60697A",
+    700: "#4A5363",
+    800: "#252E43",
+    900: "#151927",
+    950: "#0F1220",
   },
+  // Semantic
+  semantic: {
+    success: {
+      50: "#EEF8F4",
+      100: "#D5EDE3",
+      500: "#4FAE91",
+      600: "#3D9A7D",
+      700: "#2F7A63",
+    },
+    warning: {
+      50: "#FFF6E3",
+      100: "#FFEDC2",
+      500: "#F29B38",
+      600: "#E08A2E",
+      700: "#C27A28",
+    },
+    danger: {
+      50: "#FDECEC",
+      100: "#FBD5D5",
+      500: "#EC6262",
+      600: "#D94F4F",
+      700: "#B93E3E",
+    },
+    info: {
+      50: "#EAF7FA",
+      100: "#D4EFF5",
+      500: "#62BDD4",
+      600: "#4AA8C0",
+    },
+  },
+  // Data Viz Palette
+  dataViz: {
+    indigo: "#49339A",
+    amber: "#F4BE52",
+    aqua: "#62BDD4",
+    green: "#4FAE91",
+    coral: "#EC6262",
+    lavender: "#8B76CC",
+  },
+  // Backward compat secondary
   secondary: {
-    50: "#F6F8FC",
-    100: "#EEF3FF",
-    200: "#DDE3EE",
-    300: "#C2CAD9",
-    400: "#94A3B8",
-    500: "#667085",
-    600: "#475467",
-    700: "#344054",
-    800: "#1D2939",
-    900: "#101828",
+    50: "#FAF9F7",
+    100: "#F7F6F3",
+    200: "#E5E3DF",
+    300: "#D8D5D0",
+    400: "#B8BDC8",
+    500: "#9299A8",
+    600: "#60697A",
+    700: "#4A5363",
+    800: "#252E43",
+    900: "#151927",
   },
 } as const;
 
@@ -139,7 +180,7 @@ export const semanticColors = {
   warning: colors.semantic.warning[500],
   error: colors.semantic.danger[500],
   info: colors.semantic.info[500],
-  brand: colors.forge.blue,
-  cyan: colors.forge.cyan,
-  violet: colors.forge.violet,
+  brand: colors.brand[500],
+  amber: colors.accent[300],
+  aqua: colors.aqua[300],
 } as const;

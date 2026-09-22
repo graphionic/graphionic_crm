@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -113,7 +113,7 @@ const navigation: NavGroup[] = [
     title: "08 APPLICATION",
     items: [
       { num: "60", label: "Authentication", href: "/design-system/application/auth", ready: false },
-      { num: "61", label: "Dashboard", href: "/design-system/application/dashboard", ready: false },
+      { num: "61", label: "Dashboard Preview", href: "/design-system/application/dashboard", ready: true },
       { num: "62", label: "Users", href: "/design-system/application/users", ready: false },
       { num: "63", label: "Roles & Permissions", href: "/design-system/application/roles", ready: false },
       { num: "64", label: "Settings", href: "/design-system/application/settings", ready: false },
@@ -141,25 +141,40 @@ export default function DesignSystemLayout({ children }: { children: React.React
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState("");
-  const [theme, setTheme] = useState<"light" | "dark">("light");
 
   const toggleGroup = (id: string) => {
     setCollapsed((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const filteredNav = navigation.map((group) => ({
-    ...group,
-    items: group.items.filter((item) => !search || item.label.toLowerCase().includes(search.toLowerCase()) || item.num.includes(search)),
-  })).filter((group) => group.items.length > 0);
+  const filteredNav = navigation
+    .map((group) => ({
+      ...group,
+      items: group.items.filter(
+        (item) =>
+          !search ||
+          item.label.toLowerCase().includes(search.toLowerCase()) ||
+          item.num.includes(search)
+      ),
+    }))
+    .filter((group) => group.items.length > 0);
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "#F6F8FC", fontFamily: "Inter, -apple-system, sans-serif" }}>
-      {/* Sidebar */}
+    <div
+      style={{
+        display: "flex",
+        minHeight: "100vh",
+        background: "#F7F6F3",
+        fontFamily: "'Poppins', system-ui, sans-serif",
+      }}
+    >
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap');`}</style>
+
+      {/* Sidebar - Slate Navy #252E43 */}
       <aside
         style={{
-          width: 300,
-          background: "#0B1224",
-          color: "white",
+          width: 280,
+          background: "#252E43",
+          color: "#C9CED9",
           display: "flex",
           flexDirection: "column",
           position: "fixed",
@@ -171,22 +186,67 @@ export default function DesignSystemLayout({ children }: { children: React.React
         }}
       >
         {/* Header */}
-        <div style={{ padding: "20px 20px 16px", borderBottom: "1px solid #1A233F" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+        <div style={{ padding: "22px 20px 16px", borderBottom: "1px solid #303A52" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
             <div>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", color: "#7C5CFC", marginBottom: 4 }}>CLIENTFORGE</div>
-              <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em" }}>ADMIN DESIGN SYSTEM</div>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: "0.08em",
+                  color: "#8B76CC",
+                  marginBottom: 4,
+                  fontFamily: "'Poppins', sans-serif",
+                }}
+              >
+                CLIENTFORGE
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 500, color: "#FFFFFF", letterSpacing: "-0.01em" }}>
+                ADMIN DESIGN SYSTEM
+              </div>
             </div>
-            <span style={{ fontSize: 10, background: "#1A233F", border: "1px solid #2A3655", padding: "3px 8px", borderRadius: 12, color: "#8CA0C7" }}>v1.0</span>
+            <span
+              style={{
+                fontSize: 10,
+                background: "#303A52",
+                border: "1px solid #3A455F",
+                padding: "3px 8px",
+                borderRadius: 6,
+                color: "#8992A6",
+                fontWeight: 500,
+              }}
+            >
+              v2.0
+            </span>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <div style={{ flex: 1, background: "#111B33", border: "1px solid #1E2A4A", borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ color: "#4A5C85", fontSize: 12 }}>⌕</span>
+            <div
+              style={{
+                flex: 1,
+                background: "#303A52",
+                border: "1px solid #3A455F",
+                borderRadius: 8,
+                padding: "8px 12px",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <span style={{ color: "#8992A6", fontSize: 12 }}>⌕</span>
               <input
                 placeholder="Search components..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                style={{ background: "transparent", border: "none", outline: "none", color: "white", fontSize: 12, width: "100%" }}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  outline: "none",
+                  color: "#C9CED9",
+                  fontSize: 13,
+                  width: "100%",
+                  fontFamily: "'Poppins', sans-serif",
+                  fontWeight: 400,
+                }}
               />
             </div>
           </div>
@@ -195,7 +255,7 @@ export default function DesignSystemLayout({ children }: { children: React.React
         {/* Navigation */}
         <div style={{ flex: 1, overflowY: "auto", padding: "12px 0" }}>
           {filteredNav.map((group) => (
-            <div key={group.id} style={{ marginBottom: 16 }}>
+            <div key={group.id} style={{ marginBottom: 18 }}>
               <button
                 onClick={() => toggleGroup(group.id)}
                 style={{
@@ -206,19 +266,28 @@ export default function DesignSystemLayout({ children }: { children: React.React
                   padding: "6px 20px",
                   background: "transparent",
                   border: "none",
-                  color: "#8CA0C7",
-                  fontSize: 10,
-                  fontWeight: 700,
+                  color: "#8992A6",
+                  fontSize: 11,
+                  fontWeight: 600,
                   letterSpacing: "0.08em",
                   cursor: "pointer",
                   textAlign: "left",
+                  fontFamily: "'Poppins', sans-serif",
                 }}
               >
                 <span>{group.title}</span>
-                <span style={{ fontSize: 10, transform: collapsed[group.id] ? "rotate(-90deg)" : "rotate(0)", transition: "transform 0.2s" }}>▼</span>
+                <span
+                  style={{
+                    fontSize: 10,
+                    transform: collapsed[group.id] ? "rotate(-90deg)" : "rotate(0)",
+                    transition: "transform 0.2s",
+                  }}
+                >
+                  ▼
+                </span>
               </button>
               {!collapsed[group.id] && (
-                <div style={{ marginTop: 4 }}>
+                <div style={{ marginTop: 4, padding: "0 10px" }}>
                   {group.items.map((item) => {
                     const isActive = pathname === item.href;
                     return (
@@ -228,23 +297,45 @@ export default function DesignSystemLayout({ children }: { children: React.React
                         style={{
                           display: "flex",
                           alignItems: "center",
-                          gap: 12,
-                          padding: "8px 20px 8px 20px",
+                          gap: 10,
+                          padding: "10px 12px",
                           textDecoration: "none",
-                          background: isActive ? "#111B33" : "transparent",
-                          borderLeft: isActive ? "2px solid #315BE8" : "2px solid transparent",
-                          color: isActive ? "white" : "#8CA0C7",
-                          fontSize: 13,
-                          fontWeight: isActive ? 600 : 400,
+                          background: isActive ? "#49339A" : "transparent",
+                          borderRadius: 8,
+                          color: isActive ? "white" : "#C9CED9",
+                          fontSize: 14,
+                          fontWeight: isActive ? 500 : 400,
                           transition: "all 0.15s",
+                          minHeight: 42,
+                          fontFamily: "'Poppins', sans-serif",
                         }}
                       >
-                        <span style={{ fontSize: 11, fontWeight: 700, color: isActive ? "#4C73FF" : "#4A5C85", minWidth: 20 }}>{item.num}</span>
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 500,
+                            color: isActive ? "rgba(255,255,255,0.7)" : "#8992A6",
+                            minWidth: 20,
+                          }}
+                        >
+                          {item.num}
+                        </span>
                         <span style={{ flex: 1 }}>{item.label}</span>
                         {item.ready ? (
-                          <span style={{ width: 6, height: 6, background: "#16A36A", borderRadius: "50%" }} />
+                          <span style={{ width: 6, height: 6, background: "#4FAE91", borderRadius: "50%" }} />
                         ) : (
-                          <span style={{ fontSize: 9, color: "#4A5C85", background: "#111B33", padding: "2px 6px", borderRadius: 10 }}>SOON</span>
+                          <span
+                            style={{
+                              fontSize: 9,
+                              color: "#8992A6",
+                              background: "#303A52",
+                              padding: "2px 6px",
+                              borderRadius: 10,
+                              fontWeight: 500,
+                            }}
+                          >
+                            SOON
+                          </span>
                         )}
                       </Link>
                     );
@@ -256,57 +347,78 @@ export default function DesignSystemLayout({ children }: { children: React.React
         </div>
 
         {/* Footer */}
-        <div style={{ padding: 16, borderTop: "1px solid #1A233F", fontSize: 11, color: "#4A5C85" }}>
+        <div style={{ padding: 16, borderTop: "1px solid #303A52", fontSize: 11, color: "#8992A6" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-            <span>Components</span>
-            <span style={{ color: "#8CA0C7" }}>74 total • 10 ready</span>
+            <span style={{ fontWeight: 500 }}>Components</span>
+            <span style={{ color: "#C9CED9", fontWeight: 500 }}>74 total • 11 ready</span>
           </div>
-          <div style={{ height: 4, background: "#111B33", borderRadius: 2, overflow: "hidden" }}>
-            <div style={{ width: "13.5%", height: "100%", background: "#315BE8" }} />
+          <div style={{ height: 4, background: "#303A52", borderRadius: 2, overflow: "hidden" }}>
+            <div style={{ width: "15%", height: "100%", background: "#49339A" }} />
           </div>
         </div>
       </aside>
 
       {/* Main */}
-      <div style={{ marginLeft: 300, flex: 1, minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      <div style={{ marginLeft: 280, flex: 1, minHeight: "100vh", display: "flex", flexDirection: "column" }}>
         {/* Top bar */}
         <div
           style={{
             height: 56,
-            background: "white",
-            borderBottom: "1px solid #DDE3EE",
+            background: "#FFFFFF",
+            borderBottom: "1px solid #E5E3DF",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            padding: "0 32px",
+            padding: "0 28px",
             position: "sticky",
             top: 0,
             zIndex: 30,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 13 }}>
-            <span style={{ color: "#667085" }}>ClientForge</span>
-            <span style={{ color: "#DDE3EE" }}>·</span>
-            <span style={{ fontWeight: 600, color: "#0B1224" }}>Admin Design System</span>
-            <span style={{ background: "#EEF3FF", color: "#315BE8", padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 600 }}>v1.0</span>
-            <span style={{ background: "#ECFDF5", color: "#16A36A", padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ width: 6, height: 6, background: "#16A36A", borderRadius: "50%" }} /> Ready
+          <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 13 }}>
+            <span style={{ color: "#9299A8", fontWeight: 400 }}>ClientForge</span>
+            <span style={{ color: "#E5E3DF" }}>·</span>
+            <span style={{ fontWeight: 600, color: "#151927", fontSize: 14 }}>Admin Design System</span>
+            <span
+              style={{
+                background: "#F0ECFA",
+                color: "#49339A",
+                padding: "3px 8px",
+                borderRadius: 6,
+                fontSize: 11,
+                fontWeight: 600,
+              }}
+            >
+              v2.0
+            </span>
+            <span
+              style={{
+                background: "#EEF8F4",
+                color: "#4FAE91",
+                padding: "3px 8px",
+                borderRadius: 6,
+                fontSize: 11,
+                fontWeight: 500,
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+              }}
+            >
+              <span style={{ width: 6, height: 6, background: "#4FAE91", borderRadius: "50%" }} /> Ready
             </span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <Link href="/dashboard" style={{ fontSize: 12, color: "#667085", textDecoration: "none", fontWeight: 500 }}>← Back to CRM</Link>
-            <div style={{ width: 1, height: 16, background: "#DDE3EE" }} />
-            <button
-              onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-              style={{ background: "#F6F8FC", border: "1px solid #DDE3EE", borderRadius: 8, padding: "6px 10px", fontSize: 12, cursor: "pointer" }}
+            <Link
+              href="/dashboard"
+              style={{ fontSize: 13, color: "#60697A", textDecoration: "none", fontWeight: 500 }}
             >
-              {theme === "light" ? "☾ Dark" : "☀ Light"}
-            </button>
+              ← Back to CRM
+            </Link>
           </div>
         </div>
 
         {/* Content */}
-        <div style={{ flex: 1, padding: 32 }}>{children}</div>
+        <div style={{ flex: 1, padding: 32, background: "#F7F6F3" }}>{children}</div>
       </div>
     </div>
   );

@@ -42,6 +42,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
           <div className="sect">Setup</div>
           <NavLink href="/settings" icon="⚙" label="Settings" />
+          <NavLink href="/settings/lead-collection" icon="◎" label="Collector Config" />
           <NavLink href="/settings/email" icon="✉" label="Email & DNS" />
           <NavLink href="/settings/whatsapp" icon="◍" label="WhatsApp API" />
           <NavLink href="/settings/compliance" icon="⚖" label="Compliance" />

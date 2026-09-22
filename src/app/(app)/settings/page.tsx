@@ -56,6 +56,13 @@ export default async function SettingsPage() {
 
       <div className="grid c2">
         <Card
+          href="/settings/lead-collection"
+          title="Lead Collection Control Center"
+          desc="Configure collector locations, categories, data sources, API credentials (encrypted), collection rules, and monitor runs/state. Foundation for continuous acquisition."
+          status="Phase 4A — New"
+          statusOk
+        />
+        <Card
           href="/settings/email"
           title="Email, domain &amp; DNS"
           desc="Outgoing mail (SMTP or Resend), your from-address, and the SPF/DKIM/DMARC records for your sending domain — with a live DNS check."

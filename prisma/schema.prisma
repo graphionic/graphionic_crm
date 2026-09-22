@@ -40,29 +40,29 @@ model Lead {
   companyUrl       String?
 
   // website analysis (from qualify_leads.py)
-  website        String?
-  websiteStatus  String? // likely | check | unverified | none
-  segment        String? // NO_SITE | BROKEN | OUTDATED | OK | UNCHECKED
-  score          Int      @default(0)
-  issues         String?
-  hookLine       String? // the personalised opening line
+  website       String?
+  websiteStatus String? // likely | check | unverified | none
+  segment       String? // NO_SITE | BROKEN | OUTDATED | OK | UNCHECKED
+  score         Int     @default(0)
+  issues        String?
+  hookLine      String? // the personalised opening line
 
   // contact person
-  contactName  String?
-  contactRole  String?
-  email        String?
-  phone        String?
-  whatsapp     String?
-  linkedin     String?
+  contactName String?
+  contactRole String?
+  email       String?
+  phone       String?
+  whatsapp    String?
+  linkedin    String?
 
   // pipeline
-  source          String? // companies_house | apollo | referral | manual | inbound
-  status          String  @default("NEW")
+  source         String? // companies_house | apollo | referral | manual | inbound
+  status         String  @default("NEW")
   // NEW | QUALIFIED | CONTACTED | REPLIED | CALL_BOOKED | PROPOSAL_SENT
   // | WON | LOST | NURTURE
-  priority        String  @default("MEDIUM") // LOW | MEDIUM | HIGH
-  dealValueCents  Int? // in USD cents, avoids float issues
-  quotedCurrency  String? @default("GBP")
+  priority       String  @default("MEDIUM") // LOW | MEDIUM | HIGH
+  dealValueCents Int? // in USD cents, avoids float issues
+  quotedCurrency String? @default("GBP")
 
   // compliance — set these BEFORE any outreach
   optedInEmail    Boolean @default(false)
@@ -95,20 +95,20 @@ model Lead {
 
 // ---------------------------------------------------------------- timeline
 model Activity {
-  id      String @id @default(cuid())
-  leadId  String
-  lead    Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  id     String @id @default(cuid())
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
-  type      String // EMAIL | WHATSAPP | CALL | NOTE | STATUS | TASK
-  direction String @default("OUT") // OUT | IN
-  channel   String? // smtp | resend | whatsapp | manual
-  subject   String?
-  body      String?
+  type         String // EMAIL | WHATSAPP | CALL | NOTE | STATUS | TASK
+  direction    String  @default("OUT") // OUT | IN
+  channel      String? // smtp | resend | whatsapp | manual
+  subject      String?
+  body         String?
   templateName String?
-  status    String? // queued | sent | delivered | read | failed | received
-  externalId String?
-  error     String?
-  meta      String? // JSON string for extra data
+  status       String? // queued | sent | delivered | read | failed | received
+  externalId   String?
+  error        String?
+  meta         String? // JSON string for extra data
 
   createdAt DateTime @default(now())
 
@@ -135,13 +135,239 @@ model Suppression {
 
 // ---------------------------------------------------------------- templates
 model Template {
-  id      String @id @default(cuid())
-  name    String
-  channel String // EMAIL | WHATSAPP
-  subject String?
-  body    String
+  id             String   @id @default(cuid())
+  name           String
+  channel        String // EMAIL | WHATSAPP
+  subject        String?
+  body           String
   // WhatsApp Cloud API specific
   waTemplateName String?
-  waLanguage     String? @default("en_US")
+  waLanguage     String?  @default("en_US")
   createdAt      DateTime @default(now())
+}
+
+// ---------------------------------------------------------------- PHASE 4A — COLLECTOR CONFIGURATION & PERSISTENCE
+
+model CollectorConfig {
+  id  String @id @default(cuid())
+  key String @unique @default("default")
+
+  enabled        Boolean @default(true)
+  collectionMode String  @default("continuous") // continuous | scheduled | manual
+
+  defaultBatchSize           Int @default(25)
+  defaultQueryLimit          Int @default(50)
+  concurrentRequests         Int @default(15)
+  requestTimeoutMs           Int @default(25000)
+  retryCount                 Int @default(3)
+  cooldownMs                 Int @default(7000)
+  collectionFrequencyMinutes Int @default(15)
+
+  verificationEnabled       Boolean @default(true)
+  emailRequired             Boolean @default(true)
+  websiteFilteringEnabled   Boolean @default(true)
+  duplicateFilteringEnabled Boolean @default(true)
+
+  metadata Json? // extensible
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CollectorLocation {
+  id String @id @default(cuid())
+
+  country     String // United States
+  countryCode String // US, UK, AE, AU, IN
+  state       String? // Texas, England, Dubai, Victoria, Gujarat
+  city        String // Houston, Manchester, Dubai, Melbourne, Surat
+
+  latitude  Float?
+  longitude Float?
+  radiusKm  Int    @default(25)
+
+  enabled       Boolean @default(true)
+  priority      Int     @default(50) // 0-100, higher = more important
+  priorityLabel String  @default("MEDIUM") // LOW | MEDIUM | HIGH
+
+  lastCollectedAt DateTime?
+  nextCollectAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  states CollectorState[]
+  runs   CollectorRun[]
+
+  @@index([enabled])
+  @@index([priority])
+  @@index([countryCode])
+  @@index([city])
+}
+
+model LeadCategory {
+  id String @id @default(cuid())
+
+  name        String // Dental, Eye Clinic, Restaurants
+  slug        String  @unique // dental, eye, restaurants
+  description String?
+
+  enabled       Boolean @default(true)
+  priority      Int     @default(50)
+  priorityLabel String  @default("MEDIUM")
+
+  osmTags     Json? // ["healthcare"="dentist", "amenity"="dentist"]
+  queryConfig Json? // additional query config
+  runLimit    Int? // query limit if applicable
+
+  lastRunAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  states CollectorState[]
+  runs   CollectorRun[]
+
+  @@index([enabled])
+  @@index([priority])
+}
+
+model DataSource {
+  id String @id @default(cuid())
+
+  name     String // OpenStreetMap / Overpass
+  type     String // overpass | google_places | google_maps | custom
+  enabled  Boolean @default(true)
+  priority Int     @default(50)
+
+  baseUrl     String // https://overpass-api.de/api/interpreter
+  timeoutMs   Int    @default(25000)
+  retryCount  Int    @default(3)
+  concurrency Int    @default(15)
+
+  config        Json? // extensible JSON for provider-specific config
+  healthStatus  String    @default("unknown") // healthy | degraded | down | unknown
+  lastCheckedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  states CollectorState[]
+  runs   CollectorRun[]
+
+  @@index([enabled])
+  @@index([type])
+}
+
+model ProviderCredential {
+  id String @id @default(cuid())
+
+  provider String // openai | google_maps | enrichment | resend | custom
+  label    String? // optional label for multiple keys per provider
+
+  encryptedValue String // AES-256-GCM encrypted API key, never plaintext
+  keyHint        String? // last 4 chars masked like ••••9K2A
+
+  enabled Boolean @default(true)
+  status  String  @default("configured") // configured | connected | error | missing
+
+  lastUsedAt   DateTime?
+  lastTestedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([provider, label])
+  @@index([provider])
+  @@index([enabled])
+}
+
+model CollectionRule {
+  id String @id @default(cuid())
+
+  key         String  @unique // require_email, reject_generic, require_no_website, etc
+  name        String // Require Email
+  description String?
+  enabled     Boolean @default(true)
+  category    String  @default("lead_requirements") // lead_requirements | verification | deduplication | filtering
+
+  config Json? // extensible rule config
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([enabled])
+  @@index([category])
+}
+
+model CollectorState {
+  id String @id @default(cuid())
+
+  locationId String?
+  location   CollectorLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  categoryId String?
+  category   LeadCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  sourceId String?
+  source   DataSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+
+  lastRunAt           DateTime?
+  lastSuccessfulRunAt DateTime?
+  nextEligibleRunAt   DateTime?
+
+  cursor              Json? // progress metadata, bbox offset, page, etc
+  cycle               Int   @default(0)
+  consecutiveFailures Int   @default(0)
+
+  totalCandidates Int @default(0)
+  totalAccepted   Int @default(0)
+  totalRejected   Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([locationId, categoryId, sourceId])
+  @@index([nextEligibleRunAt])
+}
+
+model CollectorRun {
+  id String @id @default(cuid())
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  status     String    @default("QUEUED") // QUEUED | RUNNING | SUCCESS | PARTIAL | FAILED
+
+  locationId String?
+  location   CollectorLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  categoryId String?
+  category   LeadCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  sourceId String?
+  source   DataSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+
+  queriesAttempted Int @default(0)
+  candidatesFound  Int @default(0)
+
+  noEmailRejected      Int @default(0)
+  genericEmailRejected Int @default(0)
+  websiteRejected      Int @default(0)
+  duplicateRejected    Int @default(0)
+  invalidRejected      Int @default(0)
+
+  leadsAccepted Int @default(0)
+  leadsInserted Int @default(0)
+
+  durationMs   Int?
+  errorMessage String?
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([status])
+  @@index([startedAt])
+  @@index([locationId])
+  @@index([categoryId])
 }

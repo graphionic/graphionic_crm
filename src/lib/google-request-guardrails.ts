@@ -514,6 +514,219 @@ export async function reserveGoogleRequestBudgetAtomically(
   }
 }
 
+// ---------------------------------------------------------------- Controlled Probe Reservation — MANUAL ONLY, explicit narrow bypass
+// This function reuses SAME global mutex, budget accounting, duplicate protection, crash accounting
+// but allows manual probe despite config.enabled=false and source.enabled=false
+// It is ONLY callable from controlled probe path that requires GOOGLE_CONTROLLED_PROBE=true
+// It is NOT a generic ignoreEnabled flag — it is named explicit manual-probe-only
+// Normal collector MUST continue using reserveGoogleRequestBudgetAtomically which checks enabled
+
+export async function reserveGoogleControlledProbeAtomically(
+  prisma: PrismaClient,
+  req: ReservationRequest
+): Promise<ReservationResult> {
+  // Fail-closed checks before transaction — same as normal
+  if (!req.sourceId) return { allowed: false, reason: 'MISSING_SOURCE_ID' };
+  if (!req.collectorRunId) return { allowed: false, reason: 'MISSING_COLLECTOR_RUN_ID' };
+  if (!req.operation) return { allowed: false, reason: 'MISSING_OPERATION' };
+  if (!req.queryFingerprint) return { allowed: false, reason: 'MISSING_FINGERPRINT' };
+
+  const requestUnits = req.requestUnits ?? 1;
+  if (requestUnits <= 0) return { allowed: false, reason: 'INVALID_REQUEST_UNITS' };
+
+  // Check cache BEFORE billable reservation — same as normal, does not consume budget
+  try {
+    const cacheCheck = await checkGoogleCache(prisma, req.sourceId, req.queryFingerprint, req.operation as any);
+    if (cacheCheck.hit) {
+      await recordCacheHit(prisma, cacheCheck.cache.id);
+      return {
+        allowed: true,
+        reason: 'CACHE_HIT',
+        cacheHit: {
+          id: cacheCheck.cache.id,
+          hitCount: cacheCheck.cache.hitCount + 1,
+          expiresAt: cacheCheck.cache.expiresAt,
+        },
+      };
+    }
+  } catch (e: any) {
+    console.warn('[google-guardrails] controlled probe cache check failed, proceeding', e.message);
+  }
+
+  try {
+    const result = await prisma.$transaction(
+      async (tx) => {
+        // SAME GLOBAL MUTEX — serializes all Google budget reservations including controlled probe
+        await tx.$queryRaw`SELECT * FROM "GoogleCollectionConfig" WHERE key='default' FOR UPDATE`;
+
+        const config = await tx.googleCollectionConfig.findFirst({ where: { key: 'default' } });
+        if (!config) return { allowed: false, reason: 'MISSING_CONFIG' } as ReservationResult;
+
+        const validation = validateGoogleCollectionConfig(config);
+        if (!validation.valid) return { allowed: false, reason: validation.reason } as ReservationResult;
+
+        // Source existence check — but DO NOT check enabled for controlled probe (explicit narrow bypass)
+        const source = await tx.dataSource.findUnique({ where: { id: req.sourceId } });
+        if (!source) return { allowed: false, reason: 'SOURCE_NOT_FOUND' } as ReservationResult;
+        // Intentionally skip source.enabled check for controlled probe — this is the narrow bypass
+        // Config enabled check also skipped for controlled probe — narrow bypass
+        // All other budget checks remain
+
+        // Calculate usage INCLUDING RESERVED (conservative crash accounting) — SAME as normal
+        const usage = await calculateGoogleUsage(tx as any, req.sourceId, req.collectorRunId);
+
+        if (usage.perRun + requestUnits > config.perRunRequestLimit) {
+          return {
+            allowed: false,
+            reason: 'PER_RUN_LIMIT_REACHED',
+            usage: {
+              perRun: usage.perRun,
+              daily: usage.daily,
+              monthly: usage.monthly,
+              dailyCost: usage.dailyCost,
+              monthlyCost: usage.monthlyCost,
+              perRunLimit: config.perRunRequestLimit,
+              dailyLimit: config.dailyRequestLimit,
+              monthlyLimit: config.monthlyRequestLimit,
+              dailyCostLimit: config.dailyCostUnitLimit,
+              monthlyCostLimit: config.monthlyCostUnitLimit,
+              remainingPerRun: Math.max(0, config.perRunRequestLimit - usage.perRun),
+              remainingDaily: Math.max(0, config.dailyRequestLimit - usage.daily),
+              remainingMonthly: Math.max(0, config.monthlyRequestLimit - usage.monthly),
+            },
+          } as ReservationResult;
+        }
+
+        if (usage.daily + requestUnits > config.dailyRequestLimit) {
+          return {
+            allowed: false,
+            reason: 'DAILY_LIMIT_REACHED',
+            usage: {
+              perRun: usage.perRun,
+              daily: usage.daily,
+              monthly: usage.monthly,
+              dailyCost: usage.dailyCost,
+              monthlyCost: usage.monthlyCost,
+              perRunLimit: config.perRunRequestLimit,
+              dailyLimit: config.dailyRequestLimit,
+              monthlyLimit: config.monthlyRequestLimit,
+              dailyCostLimit: config.dailyCostUnitLimit,
+              monthlyCostLimit: config.monthlyCostUnitLimit,
+              remainingPerRun: Math.max(0, config.perRunRequestLimit - usage.perRun),
+              remainingDaily: Math.max(0, config.dailyRequestLimit - usage.daily),
+              remainingMonthly: Math.max(0, config.monthlyRequestLimit - usage.monthly),
+            },
+          } as ReservationResult;
+        }
+
+        if (usage.monthly + requestUnits > config.monthlyRequestLimit) {
+          return {
+            allowed: false,
+            reason: 'MONTHLY_LIMIT_REACHED',
+            usage: {
+              perRun: usage.perRun,
+              daily: usage.daily,
+              monthly: usage.monthly,
+              dailyCost: usage.dailyCost,
+              monthlyCost: usage.monthlyCost,
+              perRunLimit: config.perRunRequestLimit,
+              dailyLimit: config.dailyRequestLimit,
+              monthlyLimit: config.monthlyRequestLimit,
+              dailyCostLimit: config.dailyCostUnitLimit,
+              monthlyCostLimit: config.monthlyCostUnitLimit,
+              remainingPerRun: Math.max(0, config.perRunRequestLimit - usage.perRun),
+              remainingDaily: Math.max(0, config.dailyRequestLimit - usage.daily),
+              remainingMonthly: Math.max(0, config.monthlyRequestLimit - usage.monthly),
+            },
+          } as ReservationResult;
+        }
+
+        if (config.dailyCostUnitLimit != null && req.estimatedCostUnits != null) {
+          if (usage.dailyCost + req.estimatedCostUnits > config.dailyCostUnitLimit) {
+            return { allowed: false, reason: 'DAILY_COST_LIMIT_REACHED' } as ReservationResult;
+          }
+        }
+
+        if (config.monthlyCostUnitLimit != null && req.estimatedCostUnits != null) {
+          if (usage.monthlyCost + req.estimatedCostUnits > config.monthlyCostUnitLimit) {
+            return { allowed: false, reason: 'MONTHLY_COST_LIMIT_REACHED' } as ReservationResult;
+          }
+        }
+
+        const existingActive = await tx.googleApiUsage.findFirst({
+          where: {
+            sourceId: req.sourceId,
+            queryFingerprint: req.queryFingerprint,
+            operation: req.operation as any,
+            status: 'RESERVED' as any,
+          },
+        });
+        if (existingActive) {
+          return { allowed: false, reason: 'ACTIVE_RESERVATION_EXISTS', reservation: { id: existingActive.id, status: existingActive.status as any, reservedAt: existingActive.reservedAt, requestUnits: existingActive.requestUnits, estimatedCostUnits: existingActive.estimatedCostUnits, queryFingerprint: existingActive.queryFingerprint } } as ReservationResult;
+        }
+
+        const reserved = await tx.googleApiUsage.create({
+          data: {
+            sourceId: req.sourceId,
+            operation: req.operation as any,
+            status: 'RESERVED' as any,
+            reservedAt: new Date(),
+            requestUnits,
+            estimatedCostUnits: req.estimatedCostUnits ?? null,
+            collectorRunId: req.collectorRunId,
+            workerId: req.workerId ?? null,
+            queryFingerprint: req.queryFingerprint,
+            placeId: req.placeId ?? null,
+            metadata: {
+              ...(req.metadata||{}),
+              controlledProbe: true,
+              reservationMode: 'controlledProbe',
+            },
+          },
+        });
+
+        const usageAfter = await calculateGoogleUsage(tx as any, req.sourceId, req.collectorRunId);
+
+        return {
+          allowed: true,
+          reservation: {
+            id: reserved.id,
+            status: reserved.status as any,
+            reservedAt: reserved.reservedAt,
+            requestUnits: reserved.requestUnits,
+            estimatedCostUnits: reserved.estimatedCostUnits,
+            queryFingerprint: reserved.queryFingerprint,
+          },
+          usage: {
+            perRun: usageAfter.perRun,
+            daily: usageAfter.daily,
+            monthly: usageAfter.monthly,
+            dailyCost: usageAfter.dailyCost,
+            monthlyCost: usageAfter.monthlyCost,
+            perRunLimit: config.perRunRequestLimit,
+            dailyLimit: config.dailyRequestLimit,
+            monthlyLimit: config.monthlyRequestLimit,
+            dailyCostLimit: config.dailyCostUnitLimit,
+            monthlyCostLimit: config.monthlyCostUnitLimit,
+            remainingPerRun: Math.max(0, config.perRunRequestLimit - usageAfter.perRun),
+            remainingDaily: Math.max(0, config.dailyRequestLimit - usageAfter.daily),
+            remainingMonthly: Math.max(0, config.monthlyRequestLimit - usageAfter.monthly),
+          },
+        } as ReservationResult;
+      },
+      { maxWait: 15000, timeout: 20000 }
+    );
+
+    return result;
+  } catch (e: any) {
+    if (e.code === 'P2028' || e.message?.includes('Unable to start a transaction') || e.message?.includes('Transaction API error')) {
+      return { allowed: false, reason: 'RESERVATION_TIMEOUT' };
+    }
+    console.error('[google-guardrails] controlled probe reservation failed fail-closed', e.message);
+    return { allowed: false, reason: 'RESERVATION_FAILED' };
+  }
+}
+
 // ---------------------------------------------------------------- Completion helpers (no Google fetch)
 
 export async function completeGoogleReservation(

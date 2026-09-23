@@ -1,0 +1,74 @@
+name: Google Controlled Probe
+
+on:
+  workflow_dispatch: {}  # manual-only, absolutely no schedule/push/pull_request/workflow_run/repository_dispatch
+
+concurrency:
+  group: google-controlled-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+      GOOGLE_CONTROLLED_PROBE: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci --ignore-scripts
+          ./node_modules/.bin/prisma generate
+
+      - name: Controlled Google Places Probe — ONE REQUEST ONLY
+        run: |
+          echo "CONTROLLED GOOGLE PROBE — Phase 4C.4C.4"
+          echo "Manual trigger, one-request cap, TEXT_SEARCH ID-only"
+          echo "GOOGLE_CONTROLLED_PROBE=true required"
+          echo "MAX_NETWORK_REQUESTS=1"
+          echo "No retry, no pagination, no Place Details, no Nearby"
+          echo "Query: dental clinic in Manchester UK"
+          echo "Field mask: places.id,places.name,nextPageToken"
+          echo "Page size: 1"
+          echo "Hostname restriction: places.googleapis.com"
+          node scripts/google-controlled-probe.mjs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          GOOGLE_CONTROLLED_PROBE: "true"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Controlled Google Probe" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run ID**: $GITHUB_RUN_ID" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Operation**: TEXT_SEARCH" >> $GITHUB_STEP_SUMMARY
+          echo "- **Query**: dental clinic in Manchester UK" >> $GITHUB_STEP_SUMMARY
+          echo "- **Field mask**: places.id,places.name,nextPageToken" >> $GITHUB_STEP_SUMMARY
+          echo "- **Max requests**: 1" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check logs for:" >> $GITHUB_STEP_SUMMARY
+          echo "- credentialConfigured" >> $GITHUB_STEP_SUMMARY
+          echo "- reservationId" >> $GITHUB_STEP_SUMMARY
+          echo "- requestSent" >> $GITHUB_STEP_SUMMARY
+          echo "- httpStatus" >> $GITHUB_STEP_SUMMARY
+          echo "- resultCount" >> $GITHUB_STEP_SUMMARY
+          echo "- cacheHit" >> $GITHUB_STEP_SUMMARY
+          echo "- networkRequests" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "DO NOT log API key" >> $GITHUB_STEP_SUMMARY

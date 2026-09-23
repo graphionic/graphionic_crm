@@ -326,11 +326,23 @@ Safe logging: operation, usageId, runId, sourceId, fingerprint prefix (16 chars)
 
 Implemented `getSafeRequestLog()` and `getSafeResponseLog()`
 
-## Isolated Postgres Blocker
+## Isolated Postgres Blocker — VERIFIED 4C.4C.2
 
-REAL GOOGLE NETWORK ACTIVATION BLOCKED UNTIL G/H/I/BA CONCURRENCY TESTS PASS AGAINST ISOLATED POSTGRES
+REAL GOOGLE NETWORK ACTIVATION BLOCKED UNTIL G/H/I/BA CONCURRENCY TESTS PASS AGAINST ISOLATED POSTGRES — NOW VERIFIED 2026-09-23 against local PostgreSQL 17 isolated database `clientforge_test` (localhost:5432), separate from production Neon `ep-soft-bread-b5symaj4-pooler.c-7.us-east-2.aws.neon.tech` / `neondb`.
 
-Do not use production Neon for these tests — 4C.4C.1 does NOT need to solve PostgreSQL provisioning, just document blocker.
+**ISOLATED POSTGRES CONCURRENCY VERIFIED**
+
+- Test date: 2026-09-23
+- Test DB type: local PostgreSQL 17, database `clientforge_test`, host localhost, owner test_user — disposable/test-only, same PostgreSQL semantics, supports transactions and SELECT ... FOR UPDATE
+- Production identity guard: `scripts/test-db-client.mjs` compares normalized hostname, port, database name, Neon branch, refuses same identity, never prints secrets
+- Tests executed: G daily race (1 ALLOWED / 1 DAILY_LIMIT_REACHED), H monthly race (1 ALLOWED / 1 MONTHLY_LIMIT_REACHED with 9 pre-existing yesterday usages), I per-run race (1 ALLOWED / 1 PER_RUN_LIMIT_REACHED), BA global mutex across different Google sources (only one wins, proves GLOBAL not per-source), crash RESERVED accounting, duplicate reservation race (ACTIVE_RESERVATION_EXISTS), cache race (miss reserves, hit zero budget), rollback (no token, no row, fail closed)
+- Independent connections: 2 PrismaClients per concurrent test, Promise.all, genuine competing transactions
+- No production mutation: Google enabled false, usage 0, cache 0, DataSource 0, requests 0, enrichment false, credentials/jobs/attempts 0, Lead 88 Candidate 256 unchanged
+- No Google requests, no credential
+- Test command: `TEST_DATABASE_URL=<isolated> npx tsx scripts/test-google-concurrency-4c4c2.mjs`
+- CI future: GitHub Actions ephemeral postgres service → prisma db push → DB integration tests → destroy
+
+Do not use production Neon for these tests — 4C.4C.1 documented blocker, 4C.4C.2 solved with isolated local PostgreSQL, but production activation still requires review.
 
 ## Google DataSource (Future, Not Created Yet)
 

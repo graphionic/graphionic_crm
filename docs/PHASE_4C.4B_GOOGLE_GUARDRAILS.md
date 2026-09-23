@@ -177,6 +177,68 @@ Pure/Unit (`test-google-guardrails-unit.mjs`) + DB Integration (`test-google-gua
 - GOOGLE DISABLED NO KEY NO REQUEST in this phase.
 - No real Google key, no request key, no googleapis.com/places.googleapis.com call, no SDK unless needed for types, no real adapter, no enrichment job, no schedule modification, no manual collector trigger, no spend.
 
+## Isolated PostgreSQL Concurrency Verified — 4C.4C.2
+
+**ISOLATED POSTGRES CONCURRENCY VERIFIED**
+
+- **Test date**: 2026-09-23
+- **Test database type**: local PostgreSQL 17 (Debian trixie), database `clientforge_test`, owner `test_user`, host `localhost:5432` — isolated from production Neon `ep-soft-bread-b5symaj4-pooler.c-7.us-east-2.aws.neon.tech` / `neondb`
+- **Production identity guard**: `scripts/test-db-client.mjs` strengthened to compare normalized hostname, port, database name, Neon branch identifier — refuses when TEST_DATABASE_URL same identity as production DATABASE_URL, refuses Neon host match, never prints secrets
+- **Schema initialization**: `prisma db push` against TEST_DATABASE_URL (migrate deploy uses production DIRECT_URL, so push used for isolated DB), verified tables `GoogleCollectionConfig`, `GoogleApiUsage`, `GoogleApiCache`, `DataSource`, `CollectorRun`
+- **Independent connections**: Each concurrent test creates 2 independent `PrismaClient` instances via `getTestPrismaClient()` with `datasourceUrl=TEST_DATABASE_URL`, each gets own pool connection, concurrent via `Promise.all`, proves genuine competing DB transactions, not sequential single-client queue
+- **Transaction isolation**: `SELECT * FROM "GoogleCollectionConfig" WHERE key='default' FOR UPDATE` global mutex serializes reservations, maxWait 15000 timeout 20000
+
+**Tests executed against REAL PostgreSQL (no mocks, no SQLite):**
+
+- **G concurrent final daily slot**: Configure daily limit 1, monthly 1000, per-run 100, exactly ONE daily slot remains globally, launch 2 concurrent reservations via separate clients → 1 ALLOWED, 1 DAILY_LIMIT_REACHED, exactly 1 RESERVED row, no oversubscription
+- **H concurrent final monthly slot**: Daily has room (daily 10, monthly 10, 9 usages from yesterday counts for monthly not daily), monthly has exactly ONE slot remaining, 2 concurrent → 1 ALLOWED, 1 MONTHLY_LIMIT_REACHED, 10 total rows (9 pre +1 winner), proves monthly GLOBAL
+- **I concurrent final per-run slot**: Global daily/monthly have room (1000), specific CollectorRun has exactly ONE slot remaining (perRun 1), 2 concurrent for same run → 1 ALLOWED, 1 PER_RUN_LIMIT_REACHED, exactly 1 reservation, same run isolation
+- **BA global GoogleCollectionConfig FOR UPDATE mutex**: 2 enabled synthetic Google DataSource rows, concurrent across DIFFERENT sources, final global daily slot (daily 1), source A vs source B → only one wins, proves limits GLOBAL not source-local, multiple Google sources cannot independently overspend, FOR UPDATE mutex
+- **Crash RESERVED accounting**: Create RESERVED, simulate worker disappearance (do NOT complete), next usage calculation still counts RESERVED, no auto-refund, second reservation blocked
+- **Duplicate reservation race**: Same source, same fingerprint, same operation, 2 simultaneous via independent clients → one wins, other ACTIVE_RESERVATION_EXISTS, no duplicate active reservation, unique active guard works under race
+- **Cache behavior**: Cache miss → reservation required (creates usage), cache hit → allowed CACHE_HIT, no reservation, zero budget consumed, source-aware uniqueness `@@unique([sourceId, queryFingerprint, operation])`
+- **Rollback behavior**: Failed/rolled-back transaction creates NO permission token, NO committed usage row, fail closed, subsequent reservation still works
+
+**No production mutation**: Production GoogleCollectionConfig.enabled=false, GoogleApiUsage 0, GoogleApiCache 0, Google DataSource 0, Google requests 0, Enrichment enabled false, credentials/jobs/attempts 0, Lead 88 Candidate 256 unchanged — verified READ ONLY after isolated tests
+
+**No Google requests**: Zero fetch to maps.googleapis.com / places.googleapis.com, no API key, no credential, no network, only budget/reservation logic
+
+**Test command (canonical)**:
+
+```bash
+TEST_DATABASE_URL=<isolated> npx tsx scripts/test-google-concurrency-4c4c2.mjs
+# Example isolated: postgresql://test_user:test_pass@localhost:5432/clientforge_test
+# Never document actual URL with password in docs/logs
+```
+
+**Future CI preparation (documentation only, no workflow yet):**
+
+Future model:
+```
+GitHub Actions
+    ↓
+ephemeral postgres service (postgres:17)
+    ↓
+Prisma db push / migrate deploy against TEST_DATABASE_URL
+    ↓
+DB integration tests: test-google-guardrails-db.mjs + test-google-concurrency-4c4c2.mjs
+    ↓
+destroy runner/database
+```
+
+This gives repeatable concurrency verification without production mutation, supports transactions and SELECT ... FOR UPDATE, same PostgreSQL semantics as production Neon.
+
+CI env:
+- `TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/clientforge_test`
+- `DATABASE_URL` still production or test depending, but tests use TEST_DATABASE_URL
+- Service container postgres:17 with healthcheck
+- Steps: checkout, setup node, install deps, start postgres service, create db, prisma db push, run `TEST_DATABASE_URL=... npx tsx scripts/test-google-concurrency-4c4c2.mjs`
+
+Do NOT add/enable CI workflow yet unless explicitly part of project plan — documentation only in this phase.
+
+**Blocker status**: REAL GOOGLE NETWORK ACTIVATION BLOCKED UNTIL G/H/I/BA CONCURRENCY TESTS PASS AGAINST ISOLATED POSTGRES — NOW VERIFIED against local PostgreSQL 17, but production activation still requires review and explicit enablement, not automatic.
+
 ## Commit
 
 `feat: Phase 4C.4B Google API request guardrails` — DO NOT PUSH until review.
+`test: verify Google guardrails under PostgreSQL concurrency` — 4C.4C.2 verification, local commit, DO NOT PUSH.

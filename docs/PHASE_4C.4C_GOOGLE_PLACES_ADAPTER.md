@@ -48,14 +48,46 @@ References:
 - Path injection rejected: contains `..`, `//`, `\`, `/`, `?`, `#`, `&`, `%2F`, spaces → throws INVALID_REQUEST
 - URL encoding: path component safely encoded via `encodeURIComponent(canonicalId)`
 
-## Authentication Contract
+## Authentication Contract (4C.4C.3 Canonical)
 
 - Header: `X-Goog-Api-Key: API_KEY` (primary for our use)
 - Alternative: `?key=API_KEY` query param or OAuth token `Authorization: Bearer`
 - For Places API New: API key and OAuth both supported
-- Our credential reader checks env vars: `GOOGLE_MAPS_API_KEY`, `GOOGLE_PLACES_API_KEY`, `GOOGLE_API_KEY` (first found wins)
-- Credential reader exposes only `configured: true/false`, never actual key
+- **Canonical production env var**: `GOOGLE_MAPS_API_KEY` — standardized in 4C.4C.3
+- Legacy fallback (compatibility): `GOOGLE_PLACES_API_KEY`, `GOOGLE_API_KEY`
+- **Precedence**: `GOOGLE_MAPS_API_KEY` > `GOOGLE_PLACES_API_KEY` > `GOOGLE_API_KEY` (first found wins) — documented in `google-credential-reader.ts`, canonical preferred for new deployments
+- Credential reader `getGoogleCredentialStatus()` returns only `{ configured: boolean, source: "env"|"none", envVarName: string|null }`, never actual key
+- Internal accessor `getGoogleApiKeyForTransport()` returns trimmed key only to future Real transport, never via API/UI/logs/metrics/errors
+- Safe logging `getSafeCredentialLog()` → `{ configured, envVar, canonical: "GOOGLE_MAPS_API_KEY" }`
 - API key must NEVER be stored in: GoogleCollectionConfig.metadata, DataSource.config, GoogleApiUsage.metadata, GoogleApiCache, CollectorRun.metadata, LeadCandidate, logs, errors, fingerprints, Git, docs
+- Validation without Google request: missing/empty/whitespace → `GOOGLE_CREDENTIAL_MISSING`, do NOT attempt to validate key by calling Google (validity belongs to controlled request #1)
+
+### Secret Ownership & Leak Audit (4C.4C.3)
+
+- Search project for `GOOGLE_MAPS_API_KEY`, `GOOGLE_PLACES_API_KEY`, `GOOGLE_API_KEY`, `AIza`, `X-Goog-Api-Key`, `apiKey`, `encryptedValue` — classify occurrences
+- No real key in Git history, source, tests, docs, Prisma seed, database, logs — only env var names, synthetic `test_mock_key` fixtures, endpoint URLs `places.googleapis.com`
+- `.env`, `.env.local`, `.env.production.local` ignored via `.gitignore`
+- `.env.example` contains `GOOGLE_MAPS_API_KEY=` placeholder only, never sample key
+- Database secret audit: `DataSource.config`, `GoogleCollectionConfig`, `GoogleApiUsage`, `GoogleApiCache` inspected, no secret/API key, config contains only non-secret `apiVersion`, `fieldStrategy`, `pageCap`, `source`
+
+### GitHub Secret Contract (4C.4C.3)
+
+- Workflow `.github/workflows/collect.yml` currently injects only `DATABASE_URL`
+- **Design future injection** (deferred until 4C.4C.4 controlled request phase):
+  ```yaml
+  env:
+    DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+  ```
+- Preference: DEFER actual workflow secret wiring until controlled request phase — Google remains disabled in 4C.4C.3, so no need to wire yet
+- Required GitHub repository secret name (documented, no value): `GOOGLE_MAPS_API_KEY`
+
+### Vercel Secret Contract (4C.4C.3 Least Privilege)
+
+- Does Vercel need Google credential? **No** — Google network execution occurs ONLY in GitHub Actions collector (Phase 4B worker)
+- Vercel UI/API is READ-ONLY observability (DataSources list, credential configured true/false), never needs to call Google
+- Principle of least privilege: Vercel SHOULD NOT receive `GOOGLE_MAPS_API_KEY`
+- Decision: Do NOT add Google key to Vercel unless server-side CRM functionality genuinely requires Google network access — expected current architecture GitHub Actions collector needs key eventually, Vercel UI/API does NOT
 
 ## Field-Mask Strategy — Cost Sensitive (CORRECTED 4C.4C.1.1)
 
@@ -208,29 +240,35 @@ Validation before future network:
 
 Do NOT create production reservations in this phase — mock/unit tests only.
 
-## Credential Architecture
+## Credential Architecture (4C.4C.3 Final)
 
-- Preferred production source: env var / secret manager, e.g., GOOGLE_MAPS_API_KEY
-- Candidate env vars: GOOGLE_MAPS_API_KEY, GOOGLE_PLACES_API_KEY, GOOGLE_API_KEY
-- Reader `getGoogleCredentialStatus()` returns only `configured: true/false`, source, envVarName — never actual key
-- `getGoogleApiKeyForTransport()` internal, only for Real transport, never exposed via status or logs
-- Safe logging `getSafeCredentialLog()` → { configured, envVar }
+- Canonical: `GOOGLE_MAPS_API_KEY`, legacy fallback `GOOGLE_PLACES_API_KEY`, `GOOGLE_API_KEY`, precedence GOOGLE_MAPS_API_KEY > GOOGLE_PLACES_API_KEY > GOOGLE_API_KEY
+- Reader `getGoogleCredentialStatus()` → `{ configured, source, envVarName }` never key
+- `getGoogleApiKeyForTransport()` internal only to Real transport, never via API/UI/logs
+- Safe logging `getSafeCredentialLog()` → `{ configured, envVar, canonical }`
+- Validation: missing/empty/whitespace → GOOGLE_CREDENTIAL_MISSING
 
-## Credential Fail-Closed Contract
+## Credential Fail-Closed Contract (4C.4C.3 Dual Enable)
 
-Future execution permission requires:
-- Google config enabled
-- Google DataSource enabled
+Future execution requires ALL:
+- GoogleCollectionConfig.enabled=true
+- Google DataSource.enabled=true
 - valid reservation
-- credential configured
+- credential configured (GOOGLE_MAPS_API_KEY)
 - source healthy
 - budget available
 
-Missing credential → `GOOGLE_CREDENTIAL_MISSING` → no network, AUTH_ERROR classification
+Any false → NO NETWORK.
 
-Invalid credential → future Google AUTH_ERROR → source down → stop additional requests
+```
+config enabled AND source enabled AND credential configured AND reservation allowed → eligible
+Any false → NO NETWORK
+```
 
-No credential exists during this phase — `configured=false`
+Missing credential → GOOGLE_CREDENTIAL_MISSING → no network, AUTH_ERROR
+Invalid credential → AUTH_ERROR → source down
+
+Current after 4C.4C.3: GoogleCollectionConfig.enabled=false, Google DataSource.enabled=false, credential configured=false (unless synthetic test), so network impossible — ZERO NETWORK
 
 ## Request Builders — Pure
 
@@ -344,38 +382,46 @@ REAL GOOGLE NETWORK ACTIVATION BLOCKED UNTIL G/H/I/BA CONCURRENCY TESTS PASS AGA
 
 Do not use production Neon for these tests — 4C.4C.1 documented blocker, 4C.4C.2 solved with isolated local PostgreSQL, but production activation still requires review.
 
-## Google DataSource (Future, Not Created Yet)
+## Google DataSource (4C.4C.3 Created Disabled — VERIFIED)
 
-Future row should look like:
+- Created via idempotent script `scripts/create-google-source.mjs`
+- Canonical row:
+  - name = Google Places
+  - type = google_places
+  - enabled = false — MUST remain disabled
+  - priority = 90
+  - healthStatus = unknown
+  - baseUrl = https://places.googleapis.com
+  - timeoutMs = 25000
+  - retryCount = 0
+  - concurrency = 1
+  - config = { apiVersion: v1, fieldStrategy: staged, pageCap: 3, source: places_api_new } — NON-SECRET only
+- Idempotent: search type=google_places, if none create ONE disabled, if one reuse/update safe non-secret config, if multiple STOP ambiguity
+- After creation: count=1 enabled=false, no CollectorState created, OSM collector ignores disabled source (filters enabled=true)
+- Database secret audit: DataSource.config inspected, no secret, no API key, only non-secret keys
+- Historical note: Do NOT insert in production in 4C.4C.1 — documented not to insert Google DataSource in production during contract phase; 4C.4C.3 now creates ONE disabled source per dual-enable contract
 
-- name = Google Places
-- type = google_places
-- enabled = false
-- priority = 90 (between Overpass DE 100 and Kumi 90? Actually 90)
-- healthStatus = unknown
-- baseUrl = https://places.googleapis.com
-- config = { test: false, fieldMask: DISCOVERY_FIELD_MASK }
+## Collector Integration (4C.4C.3)
 
-Do NOT insert in production in 4C.4C.1.
+- Do NOT activate Google inside `collector-worker.mjs`
+- Collector queries DataSource where enabled=true and health not down — Google source enabled=false so ignored, OSM behavior unchanged
+- No Google CollectorState created merely because disabled source exists
+- If integration seam added, must remain unreachable while Google source disabled and config disabled
 
-## Collector Integration
-
-Do NOT activate Google inside `collector-worker.mjs`.
-
-If integration seam/interface added, must remain unreachable while Google source does not exist and Google config disabled.
-
-Prefer adapter tests independent from production collector.
-
-## Production Safety
+## Production Safety (4C.4C.3)
 
 - GoogleCollectionConfig enabled=false failClosed=true perRun 10 daily 50 monthly 500 cacheEnabled true queryTTL 24 placeDetailsTTL 168 retryLimit 0
-- GoogleApiUsage=0 GoogleApiCache=0 Google requests=0
-- Google DataSource count=0
+- Google DataSource count=1 enabled=false (created disabled in 4C.4C.3, was 0 in 4C.4C.1)
+- GoogleApiUsage=0 GoogleApiCache=0 Google requests=0 Google CollectorState=0
 - Enrichment enabled=false credentials=0 jobs=0 attempts=0
-- Lead 88 Candidate 256 Run 9 State 9 NEEDS 154 REJECTED 102 QUALIFIED 0 unchanged
+- Lead 88 Candidate 256 Run 9 State 9 NEEDS 154 REJECTED 102 QUALIFIED 0 unchanged except legitimate scheduled OSM
+- Dual-enable contract: config enabled AND source enabled AND credential configured AND reservation allowed → network eligible, any false → NO NETWORK — currently both false, so impossible
 
-## No Google Network
+## No Google Network (4C.4C.3 ZERO NETWORK)
 
-- GOOGLE DISABLED NO KEY NO REQUEST — contract only
-- Mock transport only, Real transport throws GOOGLE_NETWORK_TRANSPORT_DISABLED
-- No real Google key, no secret in .env, no GitHub/Vercel secret, no places.googleapis.com/maps.googleapis.com call
+- GOOGLE DISABLED NO KEY NO REQUEST — credential architecture only, not request execution
+- Mock transport only, Real transport throws GOOGLE_NETWORK_TRANSPORT_DISABLED — remains disabled, unreachable
+- No real Google key, no secret in .env (only placeholder in .env.example), no GitHub/Vercel secret wired yet (deferred to 4C.4C.4), no places.googleapis.com/maps.googleapis.com call
+- Credential configured false in production (GOOGLE_MAPS_API_KEY NOT CONFIGURED), synthetic test key only in tests
+- GitHub secret strategy: required secret name GOOGLE_MAPS_API_KEY documented, no value, injection deferred
+- Vercel least privilege: Vercel SHOULD NOT receive GOOGLE_MAPS_API_KEY, only GitHub Actions collector will need it eventually

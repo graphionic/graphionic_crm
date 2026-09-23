@@ -425,3 +425,62 @@ Do not use production Neon for these tests — 4C.4C.1 documented blocker, 4C.4C
 - Credential configured false in production (GOOGLE_MAPS_API_KEY NOT CONFIGURED), synthetic test key only in tests
 - GitHub secret strategy: required secret name GOOGLE_MAPS_API_KEY documented, no value, injection deferred
 - Vercel least privilege: Vercel SHOULD NOT receive GOOGLE_MAPS_API_KEY, only GitHub Actions collector will need it eventually
+
+## Controlled Production Proof — Phase 4C.4C.4 Attempt #2 (2026-09-23) — VERIFIED AND SEALED
+
+**GitHub Controlled Probe #2 SUCCESS — FIRST REAL GOOGLE REQUEST**
+
+- **Date/time**: 2026-09-23T13:54:11.614Z started, 13:54:12.757Z finished (UTC)
+- **Workflow**: Google Controlled Probe #2, workflow_dispatch manual-only, concurrency google-controlled-probe
+- **Attempt**: #2 (Attempt #1 failed BEFORE NETWORK with ERR_UNKNOWN_FILE_EXTENSION .ts, fixed in 8fa3a15 via npx tsx)
+- **Runtime fix**: `npx tsx scripts/google-controlled-probe.mjs` — tsx@^4.23.15 devDep, smoke mode GOOGLE_CONTROLLED_PROBE_SMOKE_TEST=true → CONTROLLED_PROBE_RUNTIME_SMOKE_OK, zero DB mutation, zero network
+
+**Execution Evidence (from production DB READ ONLY):**
+
+- **Operation**: TEXT_SEARCH
+- **Query**: dental clinic in Manchester UK
+- **Field strategy**: SEARCH_ID_ONLY_MASK
+- **Field mask**: places.id,places.name,nextPageToken — cheapest ID-only, no displayName/formattedAddress/websiteUri/phone/reviews
+- **Page size**: 1 — smallest valid useful per official docs, Places API (New) supports 1 for Text Search
+- **Credential configured**: true (GOOGLE_MAPS_API_KEY via GitHub secret, canonical env var)
+- **Cache hit**: false — expected MISS for request #1
+- **CollectorRun created**: cmue5zaqn00012gu4d4ngqs3g controlledProbe=true status=SUCCESS candidatesFound=1 networkRequests=1 cacheHit=false resultCount=1 hasNextPageToken=true latency 392ms httpStatus 200
+- **GoogleApiUsage RESERVED before network**: cmue5zb2800032gu4tn03kyl3 operation=TEXT_SEARCH sourceId=cmudzideq0000nzn8hd82hlo1 collectorRunId=cmue5zaqn00012gu4d4ngqs3g fingerprint 4228774d7d1387ba... requestUnits 1 actualCostUnits 1
+- **requestSentAt**: 2026-09-23T13:54:12.213Z marked atomically immediately BEFORE fetch — ensures crash after boundary remains accounted, conservative billable
+- **Network requests**: 1 — hard cap MAX_NETWORK_REQUESTS=1 enforced at send boundary, increment before fetch
+- **HTTP**: 200 latency 392ms — native fetch POST v1/places:searchText, headers Content-Type/X-Goog-Api-Key/X-Goog-FieldMask, no secret logging, hostname restriction places.googleapis.com, AbortController 15s, zero retries, zero pagination
+- **ResultCount**: 1
+- **hasNextPageToken**: true — IMPORTANT: NO PAGE 2 REQUEST WAS MADE — one-request cap overrode available pagination, proof of cap
+- **Normalization**: sourceType=GOOGLE_PLACES externalType=place externalId=<bare Google place ID> email=null website=null phone=null — expected because ID-only mask, NOT TRUE_NO_SITE, no candidate persistence
+- **Usage status**: SUCCESS — RESERVED→SUCCESS, requestSentAt != null, safe metadata only, no API key
+- **Cache**: cmue5zbkk00052gu41jcqqo52 sourceId same operation TEXT_SEARCH fingerprint matches usage expiresAt 2026-09-24T13:54:12.691Z > createdAt hitCount 0 safe payload only fieldMask httpStatus resultCount hasNextPageToken — no API key, no auth header, no credential
+- **Budget accounting UTC**: daily usage 1 monthly 1 per-run 1 remaining daily 49 monthly 499 per-run 9 (limits 50/500/10), 0 dangling RESERVED
+- **CollectorState**: Google count 0 — controlled probe must not alter normal source rotation
+- **LeadCandidate/Lead**: 0 from Google source, candidates around window 0, google source candidates 0, leads by controlled run 0, google string 0 — ID-only response must NOT create CRM Lead, verified
+- **Secret audit**: metadata contains AIza false, api_key false, no secret in usage/cache/run/DataSource/config/logs/Git-tracked files — Do NOT retrieve actual GitHub secret
+- **Source health**: unknown lastChecked null — probe intentionally leaves health unchanged (architecture intentional, either unchanged or updated is acceptable if intentional, here unchanged)
+- **Google errors**: 0 — no AUTH_ERROR/QUOTA_EXCEEDED/RATE_LIMITED/SERVER_ERROR/INVALID_REQUEST/NETWORK_ERROR
+- **Pagination proof**: hasNextPageToken true returned, but NO second usage row, NO pageToken fingerprint reservation, NO page 2 cache row — one-request cap proof
+- **Normal collector safety**: collect.yml still has NO GOOGLE_MAPS_API_KEY (grep 0), Google source enabled=false, Google config enabled=false, therefore scheduled 3-hour collector remains OSM-only — verified via workflow file
+- **Controlled workflow**: google-controlled-probe.yml workflow_dispatch ONLY, no schedule/push/pr, manual-only, remains available for future controlled diagnostics, DO NOT schedule, DO NOT run again yet
+- **Cache reuse proof ZERO NETWORK**: checkGoogleCache with same sourceId/operation/fingerprint → cacheHit=true hitCount 0 id matches cache row, networkRequests 0, no credential access, no transport invocation — verified via src/lib/google-request-guardrails.ts pure check, no GoogleApiUsage row created for cache check
+
+**Safety Interlocks Verified Post-#2:**
+
+- MAX_NETWORK_REQUESTS=1, TEXT_SEARCH only, pageSize 1, SEARCH_ID_ONLY_MASK, no retries, no pagination, hostname restriction, requestSentAt boundary, controlled reservation via global mutex FOR UPDATE, manual-only, no Candidate/Lead/State, safe logging, no secret
+
+**Production State After Seal:**
+
+- GoogleCollectionConfig.enabled=false failClosed=true perRun 10 daily 50 monthly 500 cacheEnabled true queryTTL 24 placeDetailsTTL 168 retryLimit 0 — MUST remain disabled
+- Google DataSource count=1 type google_places enabled=false priority 90 baseUrl https://places.googleapis.com health unknown — MUST remain disabled
+- GoogleApiUsage count=1 status SUCCESS operation TEXT_SEARCH requestSentAt not null fingerprint populated safe metadata only
+- GoogleApiCache count=1 operation TEXT_SEARCH fingerprint matches usage expiresAt > createdAt safe payload only
+- Google CollectorState 0
+- Lead 88 Candidate 354 (increase from 256 due to legitimate scheduled OSM runs at 14:00 UTC after probe, not Google — verified candidates around probe window 0)
+- No API key in DB/Git/logs
+
+**Do NOT Activate Yet:**
+
+- Even after successful audit: GoogleCollectionConfig.enabled=false, Google DataSource.enabled=false, normal collect.yml NO GOOGLE_MAPS_API_KEY, Do NOT begin 4C.4C.5 automatically
+
+- Vercel least privilege: Vercel SHOULD NOT receive GOOGLE_MAPS_API_KEY, only GitHub Actions collector will need it eventually

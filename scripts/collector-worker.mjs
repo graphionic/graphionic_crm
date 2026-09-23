@@ -550,35 +550,97 @@ async function recoverStaleRuns() {
   return staleRuns.length;
 }
 
-// --- Fair rotation selection ---
+// --- Fair rotation selection — Phase 4C.1 Improved ---
 /**
- * Selection algorithm (documented):
- * 1. Read enabled locations, categories, sources (sources health != DOWN)
- * 2. Query existing CollectorState where nextEligibleRunAt is null or <= now, location.enabled, category.enabled, source.enabled, source.healthStatus != DOWN
- * 3. Order by:
- *    a) nextEligibleRunAt ASC NULLS FIRST (earliest eligible first)
- *    b) lastRunAt ASC NULLS FIRST (least recently run first) - ensures fairness
- *    c) consecutiveFailures ASC (prefer healthy)
- *    d) priority sum DESC (location.priority + category.priority + source.priority) - higher priority wins tie, but does not starve LOW because lastRunAt is primary
- * 4. If no eligible state, look for missing combinations (lazy init): iterate enabled locations × categories × sources, find first combo not in existing states, create state for it (unless dryRun)
- * 5. If all combos have states but none eligible, return null (no work, next eligible in future)
- * 6. Priority affects selection only, not frequency. Frequency is controlled by CollectorConfig.collectionFrequencyMinutes setting nextEligibleRunAt
+ * Phase 4C.1 Fair Rotation Algorithm (documented):
+ * 
+ * PROBLEM BEFORE: Nested loops loc outer × cat middle × src inner caused location starvation:
+ *   London/dental/DE, London/dental/Kumi, London/dental/Mail.ru, London/eye/DE... (London monopolized)
+ *   Also eligible states always beat never-run combos, causing repeat of same assignment.
+ *   Nulls handling: Prisma asc puts nulls last, so never-run (null) sorted AFTER recently-run, opposite of desired.
+ * 
+ * SOLUTION AFTER:
+ * 1. Read enabled locations, categories, sources (health != down)
+ *    - Locations: JS sort lastCollectedAt asc NULLS FIRST, priority desc, city asc
+ *    - Categories: JS sort lastRunAt asc NULLS FIRST, priority desc, slug asc
+ *    - Sources: JS sort priority desc, health healthy first, name asc
+ * 
+ * 2. Read all existing states, build set of existing combos
+ * 
+ * 3. Generate missing combos: all enabled loc × cat × src not in existing set
+ *    - Limited to first 100 loc × 20 cat × 5 src = max 10k to avoid explosion, but still fair
+ *    - For 8×7×3=168 combos, all generated
+ * 
+ * 4. If missing combos exist (many untested):
+ *    - Sort missing combos by FAIR DIVERSITY:
+ *      a) category priority desc, source priority desc (keep high-priority cat/src first) — preserves priority influence
+ *      b) location lastCollectedAt asc NULLS FIRST (never-run locations first, then least recently collected) — ensures location diversity before exhausting cat/src of one location
+ *      c) category lastRunAt asc NULLS FIRST (never-run categories first as secondary)
+ *      d) location priority desc, category priority desc, source priority desc (tie-breaker, priority influences without starvation)
+ *      e) location city asc, category slug asc, source name asc (deterministic)
+ *    - Pick first missing combo
+ *    - This ensures: never-run assignments preferred, location diversity first, priority influences, deterministic
+ *    - Example: After London/dental/DE done, missing for dental/DE includes New York, Houston, Manchester... all null lastCollected, so New York (prio 100) first → New York/dental/DE, then Houston/dental/DE, etc. Matches desired conceptual behavior.
+ * 
+ * 5. Else (no missing, all combos have states):
+ *    - Fetch eligible states where nextEligible null or <= now
+ *    - Sort eligible by:
+ *      a) nextEligible asc NULLS FIRST (earliest eligible first)
+ *      b) lastRun asc NULLS FIRST (least recently run first, never-run first) — fairness, prevents starvation
+ *      c) consecutiveFailures asc (prefer healthy)
+ *      d) location lastCollected asc NULLS FIRST, category lastRun asc NULLS FIRST (prioritize never-run dimensions even among existing)
+ *      e) priority sum desc (location+category+source) — higher priority wins tie, but does not starve LOW because lastRun is primary
+ *      f) city/slug/name asc deterministic
+ *    - Pick first eligible
+ * 
+ * 6. If no eligible and no missing, return null (no work, next eligible future)
+ * 
+ * This ensures:
+ * - Never-run assignments (missing) preferred over re-running eligible that was recently run (fixes "existing eligible should NOT automatically beat never-run")
+ * - Location diversity: when many untested combos, rotate locations before exhausting categories/sources of one location
+ * - Priority influences without starvation: priority is tie-breaker after lastRun/lastCollected nulls first
+ * - Deterministic: same inputs → same selection, no randomness
+ * - Respects nextEligible, excludes disabled/DOWN, preserves unique combo semantics
+ * - Scalable: limited slice but fair
  */
 async function selectNextAssignment(config, dryRun = false) {
-  const enabledLocations = await prisma.collectorLocation.findMany({
-    where: { enabled: true },
-    orderBy: [{ priority: 'desc' }, { lastCollectedAt: 'asc' }],
+  // 1. Read enabled with JS sorting nulls first
+  let enabledLocations = await prisma.collectorLocation.findMany({ where: { enabled: true } });
+  let enabledCategories = await prisma.leadCategory.findMany({ where: { enabled: true } });
+  let enabledSources = await prisma.dataSource.findMany({ where: { enabled: true, NOT: { healthStatus: 'down' } } });
+
+  // JS sort: lastCollectedAt asc nulls first, priority desc, city asc
+  enabledLocations.sort((a, b) => {
+    const aLast = a.lastCollectedAt ? new Date(a.lastCollectedAt).getTime() : 0;
+    const bLast = b.lastCollectedAt ? new Date(b.lastCollectedAt).getTime() : 0;
+    const aNull = a.lastCollectedAt == null;
+    const bNull = b.lastCollectedAt == null;
+    if (aNull && !bNull) return -1;
+    if (!aNull && bNull) return 1;
+    if (aLast !== bLast) return aLast - bLast;
+    if (a.priority !== b.priority) return b.priority - a.priority;
+    return (a.city || '').localeCompare(b.city || '');
   });
-  const enabledCategories = await prisma.leadCategory.findMany({
-    where: { enabled: true },
-    orderBy: [{ priority: 'desc' }, { lastRunAt: 'asc' }],
+  // Categories: lastRunAt asc nulls first, priority desc, slug asc
+  enabledCategories.sort((a, b) => {
+    const aLast = a.lastRunAt ? new Date(a.lastRunAt).getTime() : 0;
+    const bLast = b.lastRunAt ? new Date(b.lastRunAt).getTime() : 0;
+    const aNull = a.lastRunAt == null;
+    const bNull = b.lastRunAt == null;
+    if (aNull && !bNull) return -1;
+    if (!aNull && bNull) return 1;
+    if (aLast !== bLast) return aLast - bLast;
+    if (a.priority !== b.priority) return b.priority - a.priority;
+    return (a.slug || '').localeCompare(b.slug || '');
   });
-  const enabledSources = await prisma.dataSource.findMany({
-    where: {
-      enabled: true,
-      NOT: { healthStatus: 'down' },
-    },
-    orderBy: [{ priority: 'desc' }, { healthStatus: 'asc' }],
+  // Sources: priority desc, health healthy first, name asc
+  const healthOrder = { healthy: 0, degraded: 1, unknown: 2, down: 3 };
+  enabledSources.sort((a, b) => {
+    if (a.priority !== b.priority) return b.priority - a.priority;
+    const aHealth = healthOrder[a.healthStatus] ?? 2;
+    const bHealth = healthOrder[b.healthStatus] ?? 2;
+    if (aHealth !== bHealth) return aHealth - bHealth;
+    return (a.name || '').localeCompare(b.name || '');
   });
 
   log(`enabled counts`, {
@@ -596,41 +658,176 @@ async function selectNextAssignment(config, dryRun = false) {
     return null;
   }
 
-  // Fetch eligible states
-  const now = new Date();
-  const eligibleStates = await prisma.collectorState.findMany({
+  // 2. Existing states
+  const existingStates = await prisma.collectorState.findMany({
     where: {
       locationId: { in: enabledLocations.map(l => l.id) },
       categoryId: { in: enabledCategories.map(c => c.id) },
       sourceId: { in: enabledSources.map(s => s.id) },
-      OR: [
-        { nextEligibleRunAt: null },
-        { nextEligibleRunAt: { lte: now } },
-      ],
+    },
+    include: { location: true, category: true, source: true },
+  });
+  const existingSet = new Set(existingStates.map(s => `${s.locationId}|${s.categoryId}|${s.sourceId}`));
+  const existingMap = new Map(existingStates.map(s => [`${s.locationId}|${s.categoryId}|${s.sourceId}`, s]));
+
+  // 3. Generate missing combos (limit to avoid explosion)
+  const locSlice = enabledLocations.slice(0, 100);
+  const catSlice = enabledCategories.slice(0, 20);
+  const srcSlice = enabledSources.slice(0, 5);
+  const missingCombos = [];
+  for (const loc of locSlice) {
+    for (const cat of catSlice) {
+      for (const src of srcSlice) {
+        const key = `${loc.id}|${cat.id}|${src.id}`;
+        if (!existingSet.has(key)) {
+          missingCombos.push({ loc, cat, src, key });
+        }
+      }
+    }
+  }
+  log(`existing combos ${existingSet.size}, missing combos ${missingCombos.length} (from ${locSlice.length}×${catSlice.length}×${srcSlice.length} slice)`);
+
+  // 4. If missing combos exist, prefer them (never-run assignments) over eligible re-runs — location diversity first, category sticky
+  if (missingCombos.length) {
+    // Sort missing by fair diversity: cat priority desc, src priority desc, location lastCollected asc nulls first (never-run locations first), location priority desc, cat slug asc deterministic
+    // This ensures desired diversity: London/dental/DE, New York/dental/DE, Houston/dental/DE... then categories/sources rotate
+    // Prevents high-prio location monopolizing: London/dental/DE → London/dental/Kumi → London/dental/Mail.ru → London/eye/DE is NOT acceptable
+    missingCombos.sort((a, b) => {
+      // category priority desc — higher priority cat first, influences without starvation
+      if (a.cat.priority !== b.cat.priority) return b.cat.priority - a.cat.priority;
+      // source priority desc
+      if (a.src.priority !== b.src.priority) return b.src.priority - a.src.priority;
+      // location lastCollected asc nulls first — ensures location diversity before exhausting cat/src of one location
+      const aLocLast = a.loc.lastCollectedAt ? new Date(a.loc.lastCollectedAt).getTime() : 0;
+      const bLocLast = b.loc.lastCollectedAt ? new Date(b.loc.lastCollectedAt).getTime() : 0;
+      const aLocNull = a.loc.lastCollectedAt == null;
+      const bLocNull = b.loc.lastCollectedAt == null;
+      if (aLocNull && !bLocNull) return -1;
+      if (!aLocNull && bLocNull) return 1;
+      if (aLocLast !== bLocLast) return aLocLast - bLocLast;
+      // location priority desc — higher priority location wins tie
+      if (a.loc.priority !== b.loc.priority) return b.loc.priority - a.loc.priority;
+      // category slug asc — deterministic, dental before eye when same priority
+      const slugCmp = (a.cat.slug || '').localeCompare(b.cat.slug || '');
+      if (slugCmp !== 0) return slugCmp;
+      // city asc deterministic
+      const cityCmp = (a.loc.city || '').localeCompare(b.loc.city || '');
+      if (cityCmp !== 0) return cityCmp;
+      return (a.src.name || '').localeCompare(b.src.name || '');
+    });
+
+    const selectedMissing = missingCombos[0];
+    log(`selected missing combo (never-run)`, {
+      location: `${selectedMissing.loc.city} ${selectedMissing.loc.countryCode}`,
+      category: selectedMissing.cat.slug,
+      source: selectedMissing.src.name,
+      locationLastCollected: selectedMissing.loc.lastCollectedAt,
+      categoryLastRun: selectedMissing.cat.lastRunAt,
+      prioritySum: (selectedMissing.loc.priority||0)+(selectedMissing.cat.priority||0)+(selectedMissing.src.priority||0),
+      totalMissing: missingCombos.length,
+    });
+
+    if (dryRun) {
+      const virtualState = {
+        id: `dryrun-${selectedMissing.loc.id}-${selectedMissing.cat.id}-${selectedMissing.src.id}`,
+        locationId: selectedMissing.loc.id,
+        categoryId: selectedMissing.cat.id,
+        sourceId: selectedMissing.src.id,
+        cycle: 0,
+        consecutiveFailures: 0,
+        totalCandidates: 0,
+        totalAccepted: 0,
+        totalRejected: 0,
+        lastRunAt: null,
+        lastSuccessfulRunAt: null,
+        nextEligibleRunAt: null,
+        cursor: null,
+      };
+      return {
+        location: selectedMissing.loc,
+        category: selectedMissing.cat,
+        source: selectedMissing.src,
+        state: virtualState,
+        isNewState: true,
+      };
+    }
+
+    const newState = await prisma.collectorState.create({
+      data: {
+        locationId: selectedMissing.loc.id,
+        categoryId: selectedMissing.cat.id,
+        sourceId: selectedMissing.src.id,
+        cycle: 0,
+        consecutiveFailures: 0,
+        totalCandidates: 0,
+        totalAccepted: 0,
+        totalRejected: 0,
+      },
+      include: { location: true, category: true, source: true },
+    });
+    return {
+      location: newState.location,
+      category: newState.category,
+      source: newState.source,
+      state: newState,
+      isNewState: true,
+    };
+  }
+
+  // 5. No missing, check eligible states
+  const now = new Date();
+  let eligibleStates = await prisma.collectorState.findMany({
+    where: {
+      locationId: { in: enabledLocations.map(l => l.id) },
+      categoryId: { in: enabledCategories.map(c => c.id) },
+      sourceId: { in: enabledSources.map(s => s.id) },
+      OR: [{ nextEligibleRunAt: null }, { nextEligibleRunAt: { lte: now } }],
       location: { enabled: true },
       category: { enabled: true },
       source: { enabled: true, NOT: { healthStatus: 'down' } },
     },
     include: { location: true, category: true, source: true },
-    orderBy: [
-      { nextEligibleRunAt: 'asc' },
-      { lastRunAt: 'asc' },
-      { consecutiveFailures: 'asc' },
-    ],
   });
 
-  // Sort by priority sum desc as final tie-breaker in JS (since Prisma can't sum)
+  // Sort eligible by fair rotation: nextEligible asc nulls first, lastRun asc nulls first, failures asc, location lastCollected asc nulls first, category lastRun asc nulls first, priority sum desc
   eligibleStates.sort((a, b) => {
     const nextA = a.nextEligibleRunAt ? new Date(a.nextEligibleRunAt).getTime() : 0;
     const nextB = b.nextEligibleRunAt ? new Date(b.nextEligibleRunAt).getTime() : 0;
+    const nextANull = a.nextEligibleRunAt == null;
+    const nextBNull = b.nextEligibleRunAt == null;
+    if (nextANull && !nextBNull) return -1;
+    if (!nextANull && nextBNull) return 1;
     if (nextA !== nextB) return nextA - nextB;
     const lastA = a.lastRunAt ? new Date(a.lastRunAt).getTime() : 0;
     const lastB = b.lastRunAt ? new Date(b.lastRunAt).getTime() : 0;
+    const lastANull = a.lastRunAt == null;
+    const lastBNull = b.lastRunAt == null;
+    if (lastANull && !lastBNull) return -1;
+    if (!lastANull && lastBNull) return 1;
     if (lastA !== lastB) return lastA - lastB;
     if (a.consecutiveFailures !== b.consecutiveFailures) return a.consecutiveFailures - b.consecutiveFailures;
+    // location lastCollected asc nulls first
+    const aLocLast = a.location?.lastCollectedAt ? new Date(a.location.lastCollectedAt).getTime() : 0;
+    const bLocLast = b.location?.lastCollectedAt ? new Date(b.location.lastCollectedAt).getTime() : 0;
+    const aLocNull = a.location?.lastCollectedAt == null;
+    const bLocNull = b.location?.lastCollectedAt == null;
+    if (aLocNull && !bLocNull) return -1;
+    if (!aLocNull && bLocNull) return 1;
+    if (aLocLast !== bLocLast) return aLocLast - bLocLast;
+    // category lastRun asc nulls first
+    const aCatLast = a.category?.lastRunAt ? new Date(a.category.lastRunAt).getTime() : 0;
+    const bCatLast = b.category?.lastRunAt ? new Date(b.category.lastRunAt).getTime() : 0;
+    const aCatNull = a.category?.lastRunAt == null;
+    const bCatNull = b.category?.lastRunAt == null;
+    if (aCatNull && !bCatNull) return -1;
+    if (!aCatNull && bCatNull) return 1;
+    if (aCatLast !== bCatLast) return aCatLast - bCatLast;
     const prioA = (a.location?.priority || 0) + (a.category?.priority || 0) + (a.source?.priority || 0);
     const prioB = (b.location?.priority || 0) + (b.category?.priority || 0) + (b.source?.priority || 0);
-    return prioB - prioA;
+    if (prioA !== prioB) return prioB - prioA;
+    const cityCmp = (a.location?.city || '').localeCompare(b.location?.city || '');
+    if (cityCmp !== 0) return cityCmp;
+    return (a.category?.slug || '').localeCompare(b.category?.slug || '');
   });
 
   if (eligibleStates.length) {
@@ -642,6 +839,8 @@ async function selectNextAssignment(config, dryRun = false) {
       lastRunAt: selected.lastRunAt,
       nextEligible: selected.nextEligibleRunAt,
       failures: selected.consecutiveFailures,
+      prioritySum: (selected.location?.priority||0)+(selected.category?.priority||0)+(selected.source?.priority||0),
+      totalEligible: eligibleStates.length,
     });
     return {
       location: selected.location,
@@ -652,87 +851,7 @@ async function selectNextAssignment(config, dryRun = false) {
     };
   }
 
-  // No eligible state, try lazy init: find missing combo
-  log('no eligible state, attempting lazy init for missing combo');
-
-  const existingStates = await prisma.collectorState.findMany({
-    where: {
-      locationId: { in: enabledLocations.map(l => l.id) },
-      categoryId: { in: enabledCategories.map(c => c.id) },
-      sourceId: { in: enabledSources.map(s => s.id) },
-    },
-    select: { locationId: true, categoryId: true, sourceId: true },
-  });
-  const existingSet = new Set(existingStates.map(s => `${s.locationId}|${s.categoryId}|${s.sourceId}`));
-
-  // Iterate limited combos to avoid explosion: prioritize high priority first, but limit to first 20 locations × 10 categories × 3 sources
-  const locSlice = enabledLocations.slice(0, 20);
-  const catSlice = enabledCategories.slice(0, 10);
-  const srcSlice = enabledSources.slice(0, 3);
-
-  for (const loc of locSlice) {
-    for (const cat of catSlice) {
-      for (const src of srcSlice) {
-        const key = `${loc.id}|${cat.id}|${src.id}`;
-        if (!existingSet.has(key)) {
-          log(`lazy init new state for missing combo`, {
-            location: `${loc.city} ${loc.countryCode}`,
-            category: cat.slug,
-            source: src.name,
-            dryRun,
-          });
-          if (dryRun) {
-            // In dry run, don't create state, return virtual assignment
-            const virtualState = {
-              id: `dryrun-${loc.id}-${cat.id}-${src.id}`,
-              locationId: loc.id,
-              categoryId: cat.id,
-              sourceId: src.id,
-              cycle: 0,
-              consecutiveFailures: 0,
-              totalCandidates: 0,
-              totalAccepted: 0,
-              totalRejected: 0,
-              lastRunAt: null,
-              lastSuccessfulRunAt: null,
-              nextEligibleRunAt: null,
-              cursor: null,
-            };
-            return {
-              location: loc,
-              category: cat,
-              source: src,
-              state: virtualState,
-              isNewState: true,
-            };
-          }
-          // Create state
-          const newState = await prisma.collectorState.create({
-            data: {
-              locationId: loc.id,
-              categoryId: cat.id,
-              sourceId: src.id,
-              cycle: 0,
-              consecutiveFailures: 0,
-              totalCandidates: 0,
-              totalAccepted: 0,
-              totalRejected: 0,
-            },
-            include: { location: true, category: true, source: true },
-          });
-          return {
-            location: newState.location,
-            category: newState.category,
-            source: newState.source,
-            state: newState,
-            isNewState: true,
-          };
-        }
-      }
-    }
-  }
-
-  // All combos have states but none eligible (future nextEligible)
+  // 6. No eligible and no missing
   const nextEligibleState = await prisma.collectorState.findFirst({
     where: {
       locationId: { in: enabledLocations.map(l => l.id) },
@@ -750,7 +869,7 @@ async function selectNextAssignment(config, dryRun = false) {
       nextEligible: nextEligibleState.nextEligibleRunAt,
     });
   } else {
-    log('no states at all and no missing combo in sliced search — possible large dataset, consider increasing slice');
+    log('no states and no missing combos — possible all disabled or large dataset slice limit');
   }
 
   return null;
@@ -1110,18 +1229,21 @@ async function main() {
       },
     });
 
-    // Update source health conservatively
+    // Update source health conservatively — Phase 4C.1 improved
     const newFailures = state.consecutiveFailures + 1;
     let healthStatus = source.healthStatus;
     if (newFailures >= 5) healthStatus = 'down';
     else if (newFailures >= 3) healthStatus = 'degraded';
+    else healthStatus = 'degraded'; // Even first failure marks degraded for observability, not down
 
-    if (healthStatus !== source.healthStatus) {
-      logWarn(`marking source ${source.name} as ${healthStatus}`, { failures: newFailures });
+    try {
       await prisma.dataSource.update({
         where: { id: source.id },
         data: { healthStatus, lastCheckedAt: new Date() },
       });
+      logWarn(`marking source ${source.name} as ${healthStatus} after failure`, { failures: newFailures, previous: source.healthStatus });
+    } catch (e) {
+      logWarn(`failed to update source health on failure for ${source.name}`, { error: e.message });
     }
 
     // Heartbeat
@@ -1143,13 +1265,16 @@ async function main() {
     process.exit(1);
   }
 
-  // 9. Parse leads
+  // 9. Parse leads — Phase 4C.1 adds parsed count + yield metrics
   const parsedLeads = [];
   for (const el of elements) {
     const parsed = parseOsmElement(el, category.slug, location);
     if (parsed) parsedLeads.push(parsed);
   }
-  log(`parsed`, { raw: candidatesFound, parsed: parsedLeads.length });
+  const parsedCount = parsedLeads.length;
+  const emailPresentCount = parsedLeads.filter(l => l.email && l.email.trim()).length;
+  const emailPresenceRate = parsedCount ? (emailPresentCount / parsedCount) : 0;
+  log(`parsed`, { raw: candidatesFound, parsed: parsedCount, emailPresent: emailPresentCount, emailPresenceRate: `${(emailPresenceRate*100).toFixed(2)}%` });
 
   // 10. Apply CollectionRules + verification + deduplication
   let noEmailRejected = 0;
@@ -1354,17 +1479,37 @@ async function main() {
     where: { id: category.id },
     data: { lastRunAt: new Date() },
   });
-  // Update source health to healthy on success
-  if (source.healthStatus !== 'healthy') {
+  // Update source health — Phase 4C.1 improved observability
+  // Record lastCheckedAt always, mark degraded if retries used, healthy if no retries
+  // Do NOT mark DOWN because of one temporarily bad run that eventually succeeded
+  const hadRetries = fetchResult && fetchResult.retryDelays && fetchResult.retryDelays.length > 0;
+  const newHealthStatus = hadRetries ? 'degraded' : 'healthy';
+  try {
     await prisma.dataSource.update({
       where: { id: source.id },
-      data: { healthStatus: 'healthy', lastCheckedAt: new Date() },
+      data: {
+        healthStatus: newHealthStatus,
+        lastCheckedAt: new Date(),
+      },
     });
+    if (hadRetries) {
+      logWarn(`source ${source.name} marked degraded after ${fetchResult.retryDelays.length} retries but eventual success`, {
+        retries: fetchResult.retryDelays.length,
+        attempt: fetchResult.attempt,
+        status: fetchResult.status,
+      });
+    } else {
+      log(`source ${source.name} marked healthy, no retries`, { lastCheckedAt: new Date().toISOString() });
+    }
+  } catch (e) {
+    logWarn(`failed to update source health for ${source.name}`, { error: e.message });
   }
 
-  // 13. Finalize CollectorRun
+  // 13. Finalize CollectorRun — Phase 4C.1 adds parsed count + yield metrics
   const durationMs = Date.now() - startTime;
   const finalStatus = queryFailures.length ? 'PARTIAL' : 'SUCCESS'; // SUCCESS even if 0 leads, per spec
+  const acceptanceRate = parsedCount ? (leadsAccepted / parsedCount) : 0;
+  const insertionRate = parsedCount ? (leadsInserted / parsedCount) : 0;
 
   await prisma.collectorRun.update({
     where: { id: run.id },
@@ -1396,6 +1541,23 @@ async function main() {
         retryCount,
         warnings: [...osmWarnings, ...ruleWarnings],
         durationMs,
+        // Phase 4C.1 new metrics
+        parsedCount,
+        emailPresentCount,
+        emailPresenceRate: parseFloat(emailPresenceRate.toFixed(4)),
+        acceptanceRate: parseFloat(acceptanceRate.toFixed(4)),
+        insertionRate: parseFloat(insertionRate.toFixed(4)),
+        yield: {
+          raw: candidatesFound,
+          parsed: parsedCount,
+          emailPresent: emailPresentCount,
+          emailPresenceRate: `${(emailPresenceRate*100).toFixed(2)}%`,
+          accepted: leadsAccepted,
+          inserted: leadsInserted,
+          acceptanceRate: `${(acceptanceRate*100).toFixed(2)}%`,
+          noEmailRate: parsedCount ? `${((noEmailRejected/parsedCount)*100).toFixed(2)}%` : '0%',
+          websiteRejectedRate: parsedCount ? `${((websiteRejected/parsedCount)*100).toFixed(2)}%` : '0%',
+        },
       },
     },
   });
@@ -1428,10 +1590,10 @@ async function main() {
     log(`debug CSV written empty (no accepted leads)`, { path: csvPath });
   }
 
-  // 15. Legacy heartbeat for /live backward compat
+  // 15. Legacy heartbeat for /live backward compat — Phase 4C.1 enhanced
   const hb = {
     timestamp: new Date().toISOString(),
-    message: `Worker ${location.city}/${category.slug}: ${leadsInserted} inserted, ${candidatesFound} candidates, ${websiteRejected} websiteRejected - ${finalStatus}`,
+    message: `Worker ${location.city}/${category.slug}: ${leadsInserted} inserted, ${candidatesFound} raw, ${parsedCount} parsed, ${emailPresentCount} emailPresent (${(emailPresenceRate*100).toFixed(1)}%), ${websiteRejected} websiteRejected - ${finalStatus} - ${fetchResult.retryDelays.length} retries`,
     collectors: 1,
     source: 'collector-worker',
     githubRunId: GITHUB_RUN_ID,
@@ -1442,9 +1604,17 @@ async function main() {
       category: category.slug,
       source: source.name,
       candidatesFound,
+      parsedCount,
+      emailPresentCount,
+      emailPresenceRate: `${(emailPresenceRate*100).toFixed(2)}%`,
       leadsAccepted,
       leadsInserted,
+      acceptanceRate: `${(acceptanceRate*100).toFixed(2)}%`,
       durationMs,
+      retries: fetchResult.retryDelays.length,
+      attempt: fetchResult.attempt,
+      finalStatus: fetchResult.status,
+      health: newHealthStatus,
     },
   };
   await prisma.setting.upsert({
@@ -1453,15 +1623,12 @@ async function main() {
     create: { key: 'collector_heartbeat', value: JSON.stringify(hb) },
   });
 
-  // 16. Structured final logs
+  // 16. Structured final logs — Phase 4C.1 enhanced with yield
   console.log(`[collector] assignment ${location.city} / ${category.slug} / ${source.name}`);
-  console.log(`[collector] candidates=${candidatesFound}`);
-  console.log(`[collector] accepted=${leadsAccepted}`);
-  console.log(`[collector] inserted=${leadsInserted}`);
-  console.log(`[collector] websiteRejected=${websiteRejected}`);
-  console.log(`[collector] duplicateRejected=${duplicateRejected}`);
-  console.log(`[collector] genericRejected=${genericEmailRejected}`);
-  console.log(`[collector] noEmailRejected=${noEmailRejected}`);
+  console.log(`[collector] candidates=${candidatesFound} parsed=${parsedCount} emailPresent=${emailPresentCount} emailPresenceRate=${(emailPresenceRate*100).toFixed(2)}%`);
+  console.log(`[collector] accepted=${leadsAccepted} inserted=${leadsInserted} acceptanceRate=${(acceptanceRate*100).toFixed(2)}%`);
+  console.log(`[collector] websiteRejected=${websiteRejected} duplicateRejected=${duplicateRejected} genericRejected=${genericEmailRejected} noEmailRejected=${noEmailRejected}`);
+  console.log(`[collector] retries=${fetchResult.retryDelays.length} attempt=${fetchResult.attempt} status=${fetchResult.status} health=${newHealthStatus}`);
   console.log(`[collector] run=${finalStatus} duration=${Math.round(durationMs / 1000)}s`);
 
   await prisma.$disconnect();

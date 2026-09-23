@@ -344,37 +344,240 @@ export async function getCollectorRuns(params?: { status?: string; limit?: numbe
   });
 }
 
+// Phase 4C.1 — Next assignment prediction and yield metrics
+export async function getNextAssignmentPrediction() {
+  const enabledLocations = await prisma.collectorLocation.findMany({ where: { enabled: true } });
+  const enabledCategories = await prisma.leadCategory.findMany({ where: { enabled: true } });
+  const enabledSources = await prisma.dataSource.findMany({ where: { enabled: true, NOT: { healthStatus: "down" } } });
+
+  // Sort with nulls first for fairness
+  enabledLocations.sort((a: any, b: any) => {
+    const aLast = a.lastCollectedAt ? new Date(a.lastCollectedAt).getTime() : 0;
+    const bLast = b.lastCollectedAt ? new Date(b.lastCollectedAt).getTime() : 0;
+    const aNull = a.lastCollectedAt == null;
+    const bNull = b.lastCollectedAt == null;
+    if (aNull && !bNull) return -1;
+    if (!aNull && bNull) return 1;
+    if (aLast !== bLast) return aLast - bLast;
+    if (a.priority !== b.priority) return b.priority - a.priority;
+    return (a.city || "").localeCompare(b.city || "");
+  });
+  enabledCategories.sort((a: any, b: any) => {
+    const aLast = a.lastRunAt ? new Date(a.lastRunAt).getTime() : 0;
+    const bLast = b.lastRunAt ? new Date(b.lastRunAt).getTime() : 0;
+    const aNull = a.lastRunAt == null;
+    const bNull = b.lastRunAt == null;
+    if (aNull && !bNull) return -1;
+    if (!aNull && bNull) return 1;
+    if (aLast !== bLast) return aLast - bLast;
+    if (a.priority !== b.priority) return b.priority - a.priority;
+    return (a.slug || "").localeCompare(b.slug || "");
+  });
+  const healthOrder: any = { healthy: 0, degraded: 1, unknown: 2, down: 3 };
+  enabledSources.sort((a: any, b: any) => {
+    if (a.priority !== b.priority) return b.priority - a.priority;
+    const aHealth = healthOrder[a.healthStatus] ?? 2;
+    const bHealth = healthOrder[b.healthStatus] ?? 2;
+    if (aHealth !== bHealth) return aHealth - bHealth;
+    return (a.name || "").localeCompare(b.name || "");
+  });
+
+  const existingStates = await prisma.collectorState.findMany({
+    where: {
+      locationId: { in: enabledLocations.map((l: any) => l.id) },
+      categoryId: { in: enabledCategories.map((c: any) => c.id) },
+      sourceId: { in: enabledSources.map((s: any) => s.id) },
+    },
+    include: { location: true, category: true, source: true },
+  });
+  const existingSet = new Set(existingStates.map((s: any) => `${s.locationId}|${s.categoryId}|${s.sourceId}`));
+
+  // Missing combos
+  const locSlice = enabledLocations.slice(0, 100);
+  const catSlice = enabledCategories.slice(0, 20);
+  const srcSlice = enabledSources.slice(0, 5);
+  const missingCombos: any[] = [];
+  for (const loc of locSlice) {
+    for (const cat of catSlice) {
+      for (const src of srcSlice) {
+        const key = `${loc.id}|${cat.id}|${src.id}`;
+        if (!existingSet.has(key)) {
+          missingCombos.push({ loc, cat, src, key });
+        }
+      }
+    }
+  }
+
+  if (missingCombos.length) {
+    missingCombos.sort((a: any, b: any) => {
+      if (a.cat.priority !== b.cat.priority) return b.cat.priority - a.cat.priority;
+      if (a.src.priority !== b.src.priority) return b.src.priority - a.src.priority;
+      const aLocLast = a.loc.lastCollectedAt ? new Date(a.loc.lastCollectedAt).getTime() : 0;
+      const bLocLast = b.loc.lastCollectedAt ? new Date(b.loc.lastCollectedAt).getTime() : 0;
+      const aLocNull = a.loc.lastCollectedAt == null;
+      const bLocNull = b.loc.lastCollectedAt == null;
+      if (aLocNull && !bLocNull) return -1;
+      if (!aLocNull && bLocNull) return 1;
+      if (aLocLast !== bLocLast) return aLocLast - bLocLast;
+      if (a.loc.priority !== b.loc.priority) return b.loc.priority - a.loc.priority;
+      const slugCmp = (a.cat.slug || "").localeCompare(b.cat.slug || "");
+      if (slugCmp !== 0) return slugCmp;
+      return (a.loc.city || "").localeCompare(b.loc.city || "");
+    });
+    const next = missingCombos[0];
+    return {
+      type: "missing",
+      location: next.loc,
+      category: next.cat,
+      source: next.src,
+      totalMissing: missingCombos.length,
+      totalExisting: existingSet.size,
+    };
+  }
+
+  // No missing, check eligible
+  const now = new Date();
+  let eligibleStates = await prisma.collectorState.findMany({
+    where: {
+      locationId: { in: enabledLocations.map((l: any) => l.id) },
+      categoryId: { in: enabledCategories.map((c: any) => c.id) },
+      sourceId: { in: enabledSources.map((s: any) => s.id) },
+      OR: [{ nextEligibleRunAt: null }, { nextEligibleRunAt: { lte: now } }],
+    },
+    include: { location: true, category: true, source: true },
+  });
+  eligibleStates.sort((a: any, b: any) => {
+    const nextA = a.nextEligibleRunAt ? new Date(a.nextEligibleRunAt).getTime() : 0;
+    const nextB = b.nextEligibleRunAt ? new Date(b.nextEligibleRunAt).getTime() : 0;
+    const nextANull = a.nextEligibleRunAt == null;
+    const nextBNull = b.nextEligibleRunAt == null;
+    if (nextANull && !nextBNull) return -1;
+    if (!nextANull && nextBNull) return 1;
+    if (nextA !== nextB) return nextA - nextB;
+    const lastA = a.lastRunAt ? new Date(a.lastRunAt).getTime() : 0;
+    const lastB = b.lastRunAt ? new Date(b.lastRunAt).getTime() : 0;
+    const lastANull = a.lastRunAt == null;
+    const lastBNull = b.lastRunAt == null;
+    if (lastANull && !lastBNull) return -1;
+    if (!lastANull && lastBNull) return 1;
+    if (lastA !== lastB) return lastA - lastB;
+    return 0;
+  });
+  if (eligibleStates.length) {
+    const next = eligibleStates[0];
+    return {
+      type: "eligible",
+      location: next.location,
+      category: next.category,
+      source: next.source,
+      state: next,
+      totalEligible: eligibleStates.length,
+    };
+  }
+
+  const nextEligibleState = await prisma.collectorState.findFirst({
+    where: {
+      locationId: { in: enabledLocations.map((l: any) => l.id) },
+      categoryId: { in: enabledCategories.map((c: any) => c.id) },
+      sourceId: { in: enabledSources.map((s: any) => s.id) },
+    },
+    orderBy: { nextEligibleRunAt: "asc" },
+    include: { location: true, category: true, source: true },
+  });
+  if (nextEligibleState) {
+    return {
+      type: "future",
+      location: nextEligibleState.location,
+      category: nextEligibleState.category,
+      source: nextEligibleState.source,
+      state: nextEligibleState,
+      nextEligibleAt: nextEligibleState.nextEligibleRunAt,
+    };
+  }
+  return null;
+}
+
 export async function getCollectorOverview() {
-  const [config, locations, categories, sources, rules, states, runs, creds, leadCount] = await Promise.all([
+  const [config, locationsActive, categoriesActive, sourcesActive, rulesActive, statesCount, runs, creds, leadCount, totalLocations, totalCategories, totalSources, allSources, allStates, recentRunsWithMeta] = await Promise.all([
     getCollectorConfig(),
     prisma.collectorLocation.count({ where: { enabled: true } }),
     prisma.leadCategory.count({ where: { enabled: true } }),
     prisma.dataSource.count({ where: { enabled: true } }),
     prisma.collectionRule.count({ where: { enabled: true } }),
     prisma.collectorState.count(),
-    prisma.collectorRun.findMany({ orderBy: { startedAt: "desc" }, take: 5 }),
+    prisma.collectorRun.findMany({ orderBy: { startedAt: "desc" }, take: 5, include: { location: true, category: true, source: true } }),
     prisma.providerCredential.count(),
     prisma.lead.count(),
+    prisma.collectorLocation.count(),
+    prisma.leadCategory.count(),
+    prisma.dataSource.count(),
+    prisma.dataSource.findMany({ orderBy: [{ priority: "desc" }] }),
+    prisma.collectorState.findMany({ include: { location: true, category: true, source: true }, orderBy: { updatedAt: "desc" }, take: 100 }),
+    prisma.collectorRun.findMany({ orderBy: { startedAt: "desc" }, take: 20, include: { location: true, category: true, source: true } }),
   ]);
 
-  const totalLocations = await prisma.collectorLocation.count();
-  const totalCategories = await prisma.leadCategory.count();
-  const totalSources = await prisma.dataSource.count();
+  // Source health breakdown
+  const healthBreakdown = {
+    healthy: allSources.filter((s: any) => s.healthStatus === "healthy").length,
+    degraded: allSources.filter((s: any) => s.healthStatus === "degraded").length,
+    down: allSources.filter((s: any) => s.healthStatus === "down").length,
+    unknown: allSources.filter((s: any) => s.healthStatus === "unknown").length,
+  };
+
+  // Yield metrics from recent runs
+  let totalRaw = 0, totalParsed = 0, totalEmailPresent = 0, totalAccepted = 0, totalInserted = 0, totalNoEmail = 0, totalWebsiteRejected = 0, totalRetries = 0;
+  for (const r of recentRunsWithMeta) {
+    const meta: any = r.metadata || {};
+    totalRaw += r.candidatesFound || 0;
+    totalParsed += meta.parsedCount || 0;
+    totalEmailPresent += meta.emailPresentCount || 0;
+    totalAccepted += r.leadsAccepted || 0;
+    totalInserted += r.leadsInserted || 0;
+    totalNoEmail += r.noEmailRejected || 0;
+    totalWebsiteRejected += r.websiteRejected || 0;
+    totalRetries += meta.fetchResult?.retryDelays?.length || 0;
+  }
+  const avgEmailPresenceRate = totalParsed ? (totalEmailPresent / totalParsed) : 0;
+  const avgAcceptanceRate = totalParsed ? (totalAccepted / totalParsed) : 0;
+
+  // Next assignment prediction
+  const nextAssignment = await getNextAssignmentPrediction();
+
+  // Eligible now count
+  const now = new Date();
+  const eligibleNow = allStates.filter((s: any) => !s.nextEligibleRunAt || new Date(s.nextEligibleRunAt) <= now).length;
 
   return {
     config,
     counts: {
-      locationsActive: locations,
+      locationsActive,
       locationsTotal: totalLocations,
-      categoriesActive: categories,
+      categoriesActive,
       categoriesTotal: totalCategories,
-      sourcesActive: sources,
+      sourcesActive,
       sourcesTotal: totalSources,
-      rulesActive: rules,
-      states,
+      rulesActive,
+      states: statesCount,
       creds,
       leadCount,
+      eligibleNow,
     },
     recentRuns: runs,
+    healthBreakdown,
+    yieldMetrics: {
+      totalRaw,
+      totalParsed,
+      totalEmailPresent,
+      totalAccepted,
+      totalInserted,
+      totalNoEmail,
+      totalWebsiteRejected,
+      totalRetries,
+      avgEmailPresenceRate,
+      avgAcceptanceRate,
+    },
+    nextAssignment,
+    allSources: allSources.slice(0, 10),
+    allStates: allStates.slice(0, 20),
   };
 }

@@ -1,25 +1,30 @@
 /**
- * ClientForge CRM — Phase 4C.3A Enrichment Engine Foundation
+ * ClientForge CRM — Phase 4C.3A.1 Enrichment Engine Foundation Hardened
  * Provider-agnostic, no external calls, fail-closed, budget-safe
+ * Concurrency hardened: single canonical claim, ownership token via lockedBy
  *
  * Core principle: Discovery and enrichment are separate systems.
- * Collector: finds businesses, persists LeadCandidate, classifies rejects, creates Leads only when qualified
- * Enrichment: operates ONLY on persisted LeadCandidates requiring enrichment
- *
- * Enums:
- * - EnrichmentJobStatus: PENDING, PROCESSING, VERIFICATION_PENDING, COMPLETED, FAILED, EXHAUSTED, CANCELLED
- * - EnrichmentAttemptStatus: STARTED, SUCCESS, NO_RESULT, FAILED, SKIPPED
  *
  * Security:
  * - Never store full secret/API key in metadata
  * - Never expose encryptedValue to client
  * - Never log secrets
  * - Provider responses not blindly persisted
+ * - Ownership guarded mutations prevent stale worker overwrite
  */
 
 import { PrismaClient, EnrichmentJobStatus, EnrichmentAttemptStatus } from '@prisma/client';
 
 const prisma = new PrismaClient();
+
+// ---------------------------------------------------------------- Custom errors
+
+export class JobOwnershipLostError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'JOB_OWNERSHIP_LOST';
+  }
+}
 
 // ---------------------------------------------------------------- Config helpers
 
@@ -93,7 +98,6 @@ export async function isCandidateEligibleForEnrichment(candidateId: string) {
 export async function ensureEnrichmentJob(candidateId: string) {
   const eligibility = await isCandidateEligibleForEnrichment(candidateId);
   if (!eligibility.eligible) {
-    // If job already exists, return it (idempotency)
     if (eligibility.reason?.startsWith('job_exists')) {
       const existing = await prisma.enrichmentJob.findUnique({ where: { candidateId } });
       return { created: false, job: existing, reason: eligibility.reason };
@@ -116,7 +120,6 @@ export async function ensureEnrichmentJob(candidateId: string) {
     });
     return { created: true, job, reason: null };
   } catch (e: any) {
-    // Unique constraint violation — another worker created job concurrently, return existing (idempotent)
     if (e.code === 'P2002') {
       const existing = await prisma.enrichmentJob.findUnique({ where: { candidateId } });
       return { created: false, job: existing, reason: 'job_exists_race' };
@@ -129,7 +132,7 @@ export async function ensureEnrichmentJob(candidateId: string) {
 
 export type SeedOptions = {
   limit: number;
-  category?: string; // businessCategory slug
+  category?: string;
   city?: string;
   candidateIds?: string[];
 };
@@ -138,32 +141,25 @@ export async function seedEnrichmentJobs(options: SeedOptions) {
   const { limit, category, city, candidateIds } = options;
   if (limit <= 0) return { created: 0, jobs: [] };
 
-  // Select only clean queue: NEEDS_ENRICHMENT, email empty, website empty, qualifiedLeadId null, no existing job
   const where: any = {
     status: 'NEEDS_ENRICHMENT',
     qualifiedLeadId: null,
     enrichmentJob: null,
     OR: [{ email: null }, { email: '' }],
-    AND: [
-      { OR: [{ website: null }, { website: '' }] },
-    ],
+    AND: [{ OR: [{ website: null }, { website: '' }] }],
   };
 
   if (category) where.businessCategory = category;
   if (city) where.city = city;
   if (candidateIds && candidateIds.length > 0) where.id = { in: candidateIds };
 
-  // Additional safety: ensure email and website empty (redundant with OR above but explicit)
-  // Prisma doesn't support easy empty check, so we filter in query and double-check in code
-
   const candidates = await prisma.leadCandidate.findMany({
     where,
     select: { id: true, email: true, website: true, createdAt: true, businessCategory: true, city: true },
-    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], // deterministic: createdAt / id
-    take: limit * 2, // over-fetch to allow filtering empty strings
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    take: limit * 2,
   });
 
-  // Filter empty strings precisely
   const eligible = candidates.filter(c => isEmpty(c.email) && isEmpty(c.website)).slice(0, limit);
 
   const config = await getEnrichmentConfig();
@@ -185,10 +181,7 @@ export async function seedEnrichmentJobs(options: SeedOptions) {
       jobs.push(job);
       created++;
     } catch (e: any) {
-      if (e.code === 'P2002') {
-        // Already has job, skip
-        continue;
-      }
+      if (e.code === 'P2002') continue;
       throw e;
     }
   }
@@ -196,17 +189,26 @@ export async function seedEnrichmentJobs(options: SeedOptions) {
   return { created, jobs, eligibleCandidates: eligible.length };
 }
 
-// ---------------------------------------------------------------- STEP 7 — Claim / Lock architecture
+// ---------------------------------------------------------------- STEP 7 — Claim / Lock architecture — CANONICAL IMPLEMENTATION
+// Single canonical function: claimNextEnrichmentJobsSafe
+// Wrapper claimNextEnrichmentJobs calls safe variant
+// SKIP LOCKED variant removed for ambiguity reduction — documented as future option, not needed for current scale
+// If high concurrency needed, reintroduce with clear naming and use same ownership guarantees
 
 /**
- * claimNextEnrichmentJobs(workerId, limit)
- * Requirements:
- * - only PENDING jobs
- * - nextAttemptAt <= now OR null
- * - not actively locked
- * When claimed: status=PROCESSING, lockedAt=now, lockedBy=workerId, lockExpiresAt=now+configured duration
- * Safe transaction variant — avoids race via optimistic locking
- * For true SKIP LOCKED, use raw SQL variant claimNextEnrichmentJobsWithSkipLocked if needed (future)
+ * CANONICAL CLAIM — claimNextEnrichmentJobsSafe
+ * Guarantees:
+ * 1. only PENDING eligible jobs selected (nextAttemptAt <= now or null, not locked or expired)
+ * 2. conditional update verifies job is still claimable (status PENDING AND (lockedAt null OR lockExpiresAt < now))
+ * 3. lockedBy set to workerId (unique execution-scoped token)
+ * 4. status becomes PROCESSING
+ * 5. final returned rows MUST satisfy lockedBy = workerId AND status = PROCESSING
+ * 6. worker never treats row owned by another worker as claimed (updated.count check + lockedBy filter)
+ * 7. limit >1 safe, deterministic ordering priority desc createdAt asc id asc
+ *
+ * Ownership token: lockedBy serves as ownership token because WORKER_ID is unique per process/run:
+ * format enrichment-${GITHUB_RUN_ID || 'local'}-${GITHUB_RUN_ATTEMPT || '0'}-${pid}-${timestamp}-${randomUUID}
+ * This ensures stale worker cannot reuse same token after lock expiry.
  */
 export async function claimNextEnrichmentJobs(workerId: string, limit: number) {
   return claimNextEnrichmentJobsSafe(workerId, limit);
@@ -223,11 +225,7 @@ export async function claimNextEnrichmentJobsSafe(workerId: string, limit: numbe
       where: {
         status: EnrichmentJobStatus.PENDING,
         OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
-        AND: [
-          {
-            OR: [{ lockedAt: null }, { lockExpiresAt: { lt: now } }],
-          },
-        ],
+        AND: [{ OR: [{ lockedAt: null }, { lockExpiresAt: { lt: now } }] }],
       },
       orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
       take: limit,
@@ -254,32 +252,11 @@ export async function claimNextEnrichmentJobsSafe(workerId: string, limit: numbe
 
     if (updated.count === 0) return [];
 
-    const claimed = await tx.enrichmentJob.findMany({ where: { id: { in: ids }, lockedBy: workerId, status: EnrichmentJobStatus.PROCESSING } });
-    return claimed;
-  });
-}
-
-// Raw SQL variant with FOR UPDATE SKIP LOCKED (optional, not used in build to avoid TS error)
-// Uses $queryRawUnsafe safely with parameterized limit, and Prisma updateMany for IN clause
-export async function claimNextEnrichmentJobsWithSkipLocked(workerId: string, limit: number) {
-  const config = await getEnrichmentConfig();
-  const lockDurationMs = config.jobLockDurationMinutes * 60 * 1000;
-  const now = new Date();
-  const lockExpiresAt = new Date(now.getTime() + lockDurationMs);
-
-  return await prisma.$transaction(async (tx) => {
-    const rows = (await tx.$queryRawUnsafe<{ id: string }[]>(
-      `SELECT id FROM "EnrichmentJob" WHERE status = 'PENDING'::"EnrichmentJobStatus" AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= NOW()) AND ("lockedAt" IS NULL OR "lockExpiresAt" < NOW()) ORDER BY priority DESC, "createdAt" ASC, id ASC LIMIT $1 FOR UPDATE SKIP LOCKED`,
-      limit
-    )) as any as { id: string }[];
-
-    if (!rows || rows.length === 0) return [];
-    const ids = rows.map((r: any) => r.id);
-    await tx.enrichmentJob.updateMany({
-      where: { id: { in: ids } },
-      data: { status: EnrichmentJobStatus.PROCESSING, lockedAt: now, lockedBy: workerId, lockExpiresAt },
+    // Only return jobs actually owned by this worker
+    const claimed = await tx.enrichmentJob.findMany({
+      where: { id: { in: ids }, lockedBy: workerId, status: EnrichmentJobStatus.PROCESSING },
     });
-    return await tx.enrichmentJob.findMany({ where: { id: { in: ids } } });
+    return claimed;
   });
 }
 
@@ -320,7 +297,7 @@ export async function releaseExpiredEnrichmentLocks() {
   return { released, jobs: expired.map(j => j.id) };
 }
 
-// ---------------------------------------------------------------- STEP 9 — Attempt recording foundation
+// ---------------------------------------------------------------- STEP 9 — Attempt recording foundation — OWNERSHIP GUARDED
 
 export async function startEnrichmentAttempt(params: {
   jobId: string;
@@ -328,30 +305,49 @@ export async function startEnrichmentAttempt(params: {
   providerCredentialId?: string | null;
   providerType?: string | null;
   providerLabel?: string | null;
+  ownerToken: string; // REQUIRED: must match job.lockedBy
 }) {
-  const { jobId, candidateId, providerCredentialId, providerType, providerLabel } = params;
-  const attempt = await prisma.enrichmentAttempt.create({
-    data: {
-      jobId,
-      candidateId,
-      providerCredentialId: providerCredentialId || null,
-      providerType: providerType || null,
-      providerLabel: providerLabel || null,
-      status: EnrichmentAttemptStatus.STARTED,
-      startedAt: new Date(),
-    },
-  });
+  const { jobId, candidateId, providerCredentialId, providerType, providerLabel, ownerToken } = params;
+  if (!ownerToken) throw new Error('ownerToken required');
 
-  // Increment attemptCount and update lastAttemptAt
-  await prisma.enrichmentJob.update({
-    where: { id: jobId },
-    data: {
-      attemptCount: { increment: 1 },
-      lastAttemptAt: new Date(),
-    },
-  });
+  return await prisma.$transaction(async (tx) => {
+    const job = await tx.enrichmentJob.findUnique({ where: { id: jobId } });
+    if (!job) throw new Error(`Job ${jobId} not found`);
+    if (job.status !== EnrichmentJobStatus.PROCESSING || job.lockedBy !== ownerToken) {
+      throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: job ${jobId} not owned by ${ownerToken}, current owner ${job.lockedBy} status ${job.status}`);
+    }
 
-  return attempt;
+    const attempt = await tx.enrichmentAttempt.create({
+      data: {
+        jobId,
+        candidateId,
+        providerCredentialId: providerCredentialId || null,
+        providerType: providerType || null,
+        providerLabel: providerLabel || null,
+        status: EnrichmentAttemptStatus.STARTED,
+        startedAt: new Date(),
+        metadata: {
+          ownerToken,
+          startedBy: ownerToken,
+          startedAt: new Date().toISOString(),
+        },
+      },
+    });
+
+    const updated = await tx.enrichmentJob.updateMany({
+      where: { id: jobId, lockedBy: ownerToken, status: EnrichmentJobStatus.PROCESSING },
+      data: {
+        attemptCount: { increment: 1 },
+        lastAttemptAt: new Date(),
+      },
+    });
+
+    if (updated.count !== 1) {
+      throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: failed to increment attemptCount for job ${jobId}, ownership lost`);
+    }
+
+    return attempt;
+  });
 }
 
 export async function completeEnrichmentAttempt(params: {
@@ -363,31 +359,55 @@ export async function completeEnrichmentAttempt(params: {
   creditsUsed?: number | null;
   providerResponseCode?: string | null;
   metadata?: any;
+  ownerToken: string;
 }) {
-  const { attemptId, emailFound, domainFound, websiteFound, costUnits, creditsUsed, providerResponseCode, metadata } = params;
-  const now = new Date();
-  const attempt = await prisma.enrichmentAttempt.findUnique({ where: { id: attemptId } });
-  if (!attempt) throw new Error(`Attempt ${attemptId} not found`);
+  const { attemptId, emailFound, domainFound, websiteFound, costUnits, creditsUsed, providerResponseCode, metadata, ownerToken } = params;
+  if (!ownerToken) throw new Error('ownerToken required');
 
-  const durationMs = attempt.startedAt ? now.getTime() - attempt.startedAt.getTime() : null;
+  return await prisma.$transaction(async (tx) => {
+    const attempt = await tx.enrichmentAttempt.findUnique({
+      where: { id: attemptId },
+      include: { job: true },
+    });
+    if (!attempt) throw new Error(`Attempt ${attemptId} not found`);
 
-  const updatedAttempt = await prisma.enrichmentAttempt.update({
-    where: { id: attemptId },
-    data: {
-      status: EnrichmentAttemptStatus.SUCCESS,
-      finishedAt: now,
-      durationMs,
-      emailFound: emailFound || null,
-      domainFound: domainFound || null,
-      websiteFound: websiteFound || null,
-      costUnits: costUnits ?? null,
-      creditsUsed: creditsUsed ?? null,
-      providerResponseCode: providerResponseCode || null,
-      metadata: metadata || null,
-    },
+    const attemptOwner = (attempt.metadata as any)?.ownerToken;
+    if (attemptOwner && attemptOwner !== ownerToken) {
+      throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: attempt ${attemptId} owned by ${attemptOwner}, not ${ownerToken}`);
+    }
+    if (attempt.status !== EnrichmentAttemptStatus.STARTED) {
+      throw new Error(`Attempt ${attemptId} not in STARTED state, current ${attempt.status}`);
+    }
+    if (attempt.job.lockedBy !== ownerToken || attempt.job.status !== EnrichmentJobStatus.PROCESSING) {
+      throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: job ${attempt.jobId} not owned by ${ownerToken}, current owner ${attempt.job.lockedBy}`);
+    }
+
+    const now = new Date();
+    const durationMs = attempt.startedAt ? now.getTime() - attempt.startedAt.getTime() : null;
+
+    const updatedAttempt = await tx.enrichmentAttempt.update({
+      where: { id: attemptId },
+      data: {
+        status: EnrichmentAttemptStatus.SUCCESS,
+        finishedAt: now,
+        durationMs,
+        emailFound: emailFound || null,
+        domainFound: domainFound || null,
+        websiteFound: websiteFound || null,
+        costUnits: costUnits ?? null,
+        creditsUsed: creditsUsed ?? null,
+        providerResponseCode: providerResponseCode || null,
+        metadata: {
+          ...(attempt.metadata as any),
+          ...metadata,
+          completedBy: ownerToken,
+          ownerToken,
+        },
+      },
+    });
+
+    return updatedAttempt;
   });
-
-  return updatedAttempt;
 }
 
 export async function failEnrichmentAttempt(params: {
@@ -396,27 +416,51 @@ export async function failEnrichmentAttempt(params: {
   providerResponseCode?: string | null;
   costUnits?: number | null;
   metadata?: any;
+  ownerToken: string;
 }) {
-  const { attemptId, failureReason, providerResponseCode, costUnits, metadata } = params;
-  const now = new Date();
-  const attempt = await prisma.enrichmentAttempt.findUnique({ where: { id: attemptId } });
-  if (!attempt) throw new Error(`Attempt ${attemptId} not found`);
-  const durationMs = attempt.startedAt ? now.getTime() - attempt.startedAt.getTime() : null;
+  const { attemptId, failureReason, providerResponseCode, costUnits, metadata, ownerToken } = params;
+  if (!ownerToken) throw new Error('ownerToken required');
 
-  const updated = await prisma.enrichmentAttempt.update({
-    where: { id: attemptId },
-    data: {
-      status: EnrichmentAttemptStatus.FAILED,
-      finishedAt: now,
-      durationMs,
-      failureReason,
-      providerResponseCode: providerResponseCode || null,
-      costUnits: costUnits ?? null,
-      metadata: metadata || null,
-    },
+  return await prisma.$transaction(async (tx) => {
+    const attempt = await tx.enrichmentAttempt.findUnique({
+      where: { id: attemptId },
+      include: { job: true },
+    });
+    if (!attempt) throw new Error(`Attempt ${attemptId} not found`);
+    const attemptOwner = (attempt.metadata as any)?.ownerToken;
+    if (attemptOwner && attemptOwner !== ownerToken) {
+      throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: attempt ${attemptId} owned by ${attemptOwner}, not ${ownerToken}`);
+    }
+    if (attempt.job.lockedBy !== ownerToken || attempt.job.status !== EnrichmentJobStatus.PROCESSING) {
+      throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: job ${attempt.jobId} not owned by ${ownerToken}`);
+    }
+    if (attempt.status !== EnrichmentAttemptStatus.STARTED) {
+      throw new Error(`Attempt ${attemptId} not in STARTED state`);
+    }
+
+    const now = new Date();
+    const durationMs = attempt.startedAt ? now.getTime() - attempt.startedAt.getTime() : null;
+
+    const updated = await tx.enrichmentAttempt.update({
+      where: { id: attemptId },
+      data: {
+        status: EnrichmentAttemptStatus.FAILED,
+        finishedAt: now,
+        durationMs,
+        failureReason,
+        providerResponseCode: providerResponseCode || null,
+        costUnits: costUnits ?? null,
+        metadata: {
+          ...(attempt.metadata as any),
+          ...metadata,
+          failedBy: ownerToken,
+          ownerToken,
+        },
+      },
+    });
+
+    return updated;
   });
-
-  return updated;
 }
 
 export async function recordNoResult(params: {
@@ -424,42 +468,65 @@ export async function recordNoResult(params: {
   providerResponseCode?: string | null;
   costUnits?: number | null;
   metadata?: any;
+  ownerToken: string;
 }) {
-  const { attemptId, providerResponseCode, costUnits, metadata } = params;
-  const now = new Date();
-  const attempt = await prisma.enrichmentAttempt.findUnique({ where: { id: attemptId } });
-  if (!attempt) throw new Error(`Attempt ${attemptId} not found`);
-  const durationMs = attempt.startedAt ? now.getTime() - attempt.startedAt.getTime() : null;
+  const { attemptId, providerResponseCode, costUnits, metadata, ownerToken } = params;
+  if (!ownerToken) throw new Error('ownerToken required');
 
-  const updated = await prisma.enrichmentAttempt.update({
-    where: { id: attemptId },
-    data: {
-      status: EnrichmentAttemptStatus.NO_RESULT,
-      finishedAt: now,
-      durationMs,
-      providerResponseCode: providerResponseCode || null,
-      costUnits: costUnits ?? null,
-      metadata: metadata || null,
-    },
+  return await prisma.$transaction(async (tx) => {
+    const attempt = await tx.enrichmentAttempt.findUnique({
+      where: { id: attemptId },
+      include: { job: true },
+    });
+    if (!attempt) throw new Error(`Attempt ${attemptId} not found`);
+    const attemptOwner = (attempt.metadata as any)?.ownerToken;
+    if (attemptOwner && attemptOwner !== ownerToken) {
+      throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: attempt ${attemptId} owned by ${attemptOwner}, not ${ownerToken}`);
+    }
+    if (attempt.job.lockedBy !== ownerToken || attempt.job.status !== EnrichmentJobStatus.PROCESSING) {
+      throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: job ${attempt.jobId} not owned by ${ownerToken}`);
+    }
+    if (attempt.status !== EnrichmentAttemptStatus.STARTED) {
+      throw new Error(`Attempt ${attemptId} not in STARTED state`);
+    }
+
+    const now = new Date();
+    const durationMs = attempt.startedAt ? now.getTime() - attempt.startedAt.getTime() : null;
+
+    const updated = await tx.enrichmentAttempt.update({
+      where: { id: attemptId },
+      data: {
+        status: EnrichmentAttemptStatus.NO_RESULT,
+        finishedAt: now,
+        durationMs,
+        providerResponseCode: providerResponseCode || null,
+        costUnits: costUnits ?? null,
+        metadata: {
+          ...(attempt.metadata as any),
+          ...metadata,
+          noResultBy: ownerToken,
+          ownerToken,
+        },
+      },
+    });
+
+    return updated;
   });
-
-  return updated;
 }
 
-// ---------------------------------------------------------------- STEP 10 — Result staging
+// ---------------------------------------------------------------- STEP 10 — Result staging — OWNERSHIP GUARDED
 
-/**
- * stageEnrichmentResult — provider-neutral staging
- * Does NOT create Lead, does NOT automatically qualify
- * Future flow: Provider result → Job.resultEmail/Domain/Website → Candidate VERIFICATION_PENDING → verification → qualification
- * Phase 4C.3A may implement lifecycle helper for staging a MOCK result in tests, but NOT for production
- */
-export async function stageEnrichmentResult(jobId: string, result: EnrichmentResult) {
+export async function stageEnrichmentResult(jobId: string, result: EnrichmentResult, ownerToken: string) {
+  if (!ownerToken) throw new Error('ownerToken required');
+
   const job = await prisma.enrichmentJob.findUnique({ where: { id: jobId } });
   if (!job) throw new Error(`Job ${jobId} not found`);
+  if (job.lockedBy !== ownerToken || job.status !== EnrichmentJobStatus.PROCESSING) {
+    throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: job ${jobId} not owned by ${ownerToken}, current owner ${job.lockedBy} status ${job.status}`);
+  }
 
-  const updated = await prisma.enrichmentJob.update({
-    where: { id: jobId },
+  const updated = await prisma.enrichmentJob.updateMany({
+    where: { id: jobId, lockedBy: ownerToken, status: EnrichmentJobStatus.PROCESSING },
     data: {
       resultEmail: result.email || null,
       resultDomain: result.domain || null,
@@ -469,88 +536,124 @@ export async function stageEnrichmentResult(jobId: string, result: EnrichmentRes
         lastResult: {
           ...result,
           stagedAt: new Date().toISOString(),
+          stagedBy: ownerToken,
         },
       },
     },
   });
 
-  return updated;
+  if (updated.count !== 1) {
+    throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: failed to stage result for job ${jobId}`);
+  }
+
+  return await prisma.enrichmentJob.findUnique({ where: { id: jobId } });
 }
 
-/**
- * Transition job to VERIFICATION_PENDING after successful staging
- * Candidate transitions to VERIFICATION_PENDING (not QUALIFIED)
- * NO Lead created here
- */
-export async function transitionJobToVerificationPending(jobId: string) {
-  const job = await prisma.enrichmentJob.findUnique({ where: { id: jobId }, include: { candidate: true } });
-  if (!job) throw new Error(`Job ${jobId} not found`);
+export async function transitionJobToVerificationPending(jobId: string, ownerToken: string) {
+  if (!ownerToken) throw new Error('ownerToken required');
 
-  // Update job status
-  const updatedJob = await prisma.enrichmentJob.update({
-    where: { id: jobId },
-    data: {
-      status: EnrichmentJobStatus.VERIFICATION_PENDING,
-      completedAt: new Date(),
-      lockedAt: null,
-      lockedBy: null,
-      lockExpiresAt: null,
-    },
+  return await prisma.$transaction(async (tx) => {
+    const job = await tx.enrichmentJob.findUnique({ where: { id: jobId }, include: { candidate: true } });
+    if (!job) throw new Error(`Job ${jobId} not found`);
+    if (job.lockedBy !== ownerToken || job.status !== EnrichmentJobStatus.PROCESSING) {
+      throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: job ${jobId} not owned by ${ownerToken}, current ${job.lockedBy} status ${job.status}`);
+    }
+
+    const updatedJob = await tx.enrichmentJob.update({
+      where: { id: jobId },
+      data: {
+        status: EnrichmentJobStatus.VERIFICATION_PENDING,
+        completedAt: new Date(),
+        lockedAt: null,
+        lockedBy: null,
+        lockExpiresAt: null,
+        metadata: {
+          ...((job.metadata as any) || {}),
+          verificationTransitionAt: new Date().toISOString(),
+          verificationTransitionBy: ownerToken,
+        },
+      },
+    });
+
+    await tx.leadCandidate.update({
+      where: { id: job.candidateId },
+      data: { status: 'VERIFICATION_PENDING' },
+    });
+
+    return updatedJob;
   });
-
-  // Update candidate to VERIFICATION_PENDING
-  await prisma.leadCandidate.update({
-    where: { id: job.candidateId },
-    data: {
-      status: 'VERIFICATION_PENDING',
-      // Do NOT set email/website yet — verification will decide
-      // For mock tests, we may set staged values in separate helper
-    },
-  });
-
-  return updatedJob;
 }
 
 // For tests only — stage mock result and transition candidate to VERIFICATION_PENDING with staged email
-export async function stageMockResultAndTransitionToVerification(jobId: string, result: EnrichmentResult) {
-  const job = await stageEnrichmentResult(jobId, result);
-  const verificationJob = await transitionJobToVerificationPending(jobId);
-
-  // For test purposes, also update candidate with staged email? But keep verification boundary
-  // We will NOT automatically create Lead — that is future phase
-  // For TEST J, we want candidate to be VERIFICATION_PENDING with resultEmail populated in job, not necessarily in candidate
-
+// Now requires ownerToken for hardened path, but provide fallback for legacy tests
+export async function stageMockResultAndTransitionToVerification(jobId: string, result: EnrichmentResult, ownerToken?: string) {
+  // If ownerToken not provided, use job's current lockedBy (for backward compat in simple tests)
+  let token = ownerToken;
+  if (!token) {
+    const job = await prisma.enrichmentJob.findUnique({ where: { id: jobId } });
+    token = job?.lockedBy || 'test-owner';
+    // If job not locked, temporarily lock it for test
+    if (!job?.lockedBy) {
+      await prisma.enrichmentJob.update({
+        where: { id: jobId },
+        data: { lockedBy: token, lockedAt: new Date(), lockExpiresAt: new Date(Date.now() + 10 * 60 * 1000), status: EnrichmentJobStatus.PROCESSING },
+      });
+    }
+  }
+  const staged = await stageEnrichmentResult(jobId, result, token);
+  const verificationJob = await transitionJobToVerificationPending(jobId, token);
   return verificationJob;
 }
 
-// ---------------------------------------------------------------- STEP 12 — Exhaustion policy
+// ---------------------------------------------------------------- STEP 12 — Exhaustion policy — OWNERSHIP GUARDED
 
-export async function handleJobRetryOrExhaustion(jobId: string) {
+export async function handleJobRetryOrExhaustion(jobId: string, ownerToken: string) {
+  if (!ownerToken) throw new Error('ownerToken required');
+
   const job = await prisma.enrichmentJob.findUnique({ where: { id: jobId } });
   if (!job) throw new Error(`Job ${jobId} not found`);
+  // For retry/exhaustion, job should be PROCESSING and owned, or if already PENDING due to recovery, old owner should not retry
+  if (job.status === EnrichmentJobStatus.PROCESSING && job.lockedBy !== ownerToken) {
+    throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: job ${jobId} not owned by ${ownerToken}, current ${job.lockedBy}`);
+  }
+  // If job is already PENDING/EXHAUSTED, check if this owner is still valid — if lockedBy is null and status PENDING, it means it was recovered, old owner should fail
+  if (job.status !== EnrichmentJobStatus.PROCESSING && job.lockedBy !== null && job.lockedBy !== ownerToken) {
+    throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: job ${jobId} not owned by ${ownerToken}`);
+  }
+  if (job.status === EnrichmentJobStatus.PROCESSING && job.lockedBy === null) {
+    throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: job ${jobId} lock cleared, ownership lost`);
+  }
 
   const config = await getEnrichmentConfig();
   const maxAttempts = job.maxAttempts ?? config.maxAttemptsPerCandidate;
   const retryCooldownMinutes = config.retryCooldownMinutes;
 
   if (job.attemptCount < maxAttempts) {
-    // Retry: PENDING + nextAttemptAt future
     const nextAttemptAt = new Date(Date.now() + retryCooldownMinutes * 60 * 1000);
-    const updated = await prisma.enrichmentJob.update({
-      where: { id: jobId },
+    // Conditional update with ownership check
+    const updated = await prisma.enrichmentJob.updateMany({
+      where: { id: jobId, lockedBy: ownerToken, status: EnrichmentJobStatus.PROCESSING },
       data: {
         status: EnrichmentJobStatus.PENDING,
         nextAttemptAt,
         lockedAt: null,
         lockedBy: null,
         lockExpiresAt: null,
+        metadata: {
+          ...((job.metadata as any) || {}),
+          lastRetryAt: new Date().toISOString(),
+          lastRetryBy: ownerToken,
+        },
       },
     });
-    return { action: 'retry', job: updated, nextAttemptAt };
+    if (updated.count !== 1) {
+      throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: failed to retry job ${jobId}`);
+    }
+    const refreshed = await prisma.enrichmentJob.findUnique({ where: { id: jobId } });
+    return { action: 'retry' as const, job: refreshed, nextAttemptAt };
   } else {
-    // Exhausted
-    const updated = await prisma.enrichmentJob.update({
-      where: { id: jobId },
+    const updated = await prisma.enrichmentJob.updateMany({
+      where: { id: jobId, lockedBy: ownerToken, status: EnrichmentJobStatus.PROCESSING },
       data: {
         status: EnrichmentJobStatus.EXHAUSTED,
         completedAt: new Date(),
@@ -558,11 +661,18 @@ export async function handleJobRetryOrExhaustion(jobId: string) {
         lockedBy: null,
         lockExpiresAt: null,
         failureReason: `Max attempts ${maxAttempts} reached`,
+        metadata: {
+          ...((job.metadata as any) || {}),
+          exhaustedAt: new Date().toISOString(),
+          exhaustedBy: ownerToken,
+        },
       },
     });
-    // Candidate remains NEEDS_ENRICHMENT (do NOT reject)
-    // Do NOT change candidate status
-    return { action: 'exhausted', job: updated };
+    if (updated.count !== 1) {
+      throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: failed to exhaust job ${jobId}`);
+    }
+    const refreshed = await prisma.enrichmentJob.findUnique({ where: { id: jobId } });
+    return { action: 'exhausted' as const, job: refreshed };
   }
 }
 
@@ -575,7 +685,6 @@ export class MockEnrichmentProvider {
   providerLabel = 'mock-test';
 
   async enrich(candidate: { id: string; companyName: string; city?: string | null }, outcome: MockProviderOutcome = 'SUCCESS'): Promise<{ status: EnrichmentAttemptStatus; result?: EnrichmentResult; failureReason?: string }> {
-    // No network, no credentials, no credits
     if (outcome === 'SUCCESS') {
       const fakeEmail = `contact@${candidate.companyName.toLowerCase().replace(/[^a-z0-9]/g, '')}.test`;
       return {
@@ -619,7 +728,6 @@ export async function getEnrichmentStats() {
     prisma.enrichmentAttempt.count({ where: { createdAt: { gte: today }, status: EnrichmentAttemptStatus.FAILED } }),
   ]);
 
-  // Credits used today (sum)
   const creditsAgg = await prisma.enrichmentAttempt.aggregate({
     where: { createdAt: { gte: today } },
     _sum: { creditsUsed: true, costUnits: true },

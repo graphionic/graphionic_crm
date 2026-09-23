@@ -1,33 +1,37 @@
 /**
- * ClientForge CRM — Phase 4C.4C.1 Google Places Adapter Contract
+ * ClientForge CRM — Phase 4C.4C.1 Google Places Adapter Contract (CORRECTED 4C.4C.1.1)
  * ZERO REAL GOOGLE REQUESTS — adapter CONTRACT only
  *
  * Official API selected: Places API (New)
- * Endpoints (from official docs https://developers.google.com/maps/documentation/places/web-service):
+ * Endpoints (official https://developers.google.com/maps/documentation/places/web-service):
  * - Text Search (New): POST https://places.googleapis.com/v1/places:searchText
  * - Nearby Search (New): POST https://places.googleapis.com/v1/places:searchNearby
- * - Place Details (New): GET https://places.googleapis.com/v1/places/{placeId}
+ * - Place Details (New): GET https://places.googleapis.com/v1/places/{PLACE_ID} — bare place ID, NOT places/PLACE_ID in URL path double
  *
- * Auth: X-Goog-Api-Key header or ?key= query (API key), OAuth supported but we use API key
- * Field mask: X-Goog-FieldMask header required, no default, wildcard * discouraged in prod
- * Pagination: Text Search returns nextPageToken, each page new request with pageToken param
- * Place identifier: places/PLACE_ID resource name, id field is place_id
+ * Auth: X-Goog-Api-Key header, X-Goog-FieldMask required, no default, wildcard * discouraged
+ * Pagination: Text Search returns nextPageToken at top level, field mask must include nextPageToken to receive it (example: places.id,nextPageToken)
+ * Place identifier: resource name places/PLACE_ID, but URL uses bare PLACE_ID, canonical externalId is bare PLACE_ID (ChIJ123)
  *
- * Billing: Field mask determines SKU tier — billed at highest SKU applicable. Must minimize fields.
- * Email: Places API does NOT return business email (confirmed via official docs + Issue Tracker). Need website crawl for email.
+ * Billing: Field mask determines SKU — billed at highest SKU. Minimize fields.
+ * Email: Places API does NOT return business email.
  */
 
-import { GoogleOperation, GoogleErrorClassification } from '@prisma/client';
-import { getGoogleCredentialStatus, getGoogleApiKeyForTransport } from './google-credential-reader';
+import { getGoogleCredentialStatus } from './google-credential-reader';
 
 // ---------------------------------------------------------------- Field Mask Constants — centrally controlled, no wildcard
+// Staged masks for cost optimization — cheapest sufficient request shape
 
-// Discovery essential fields — minimum for business discovery
-// Based on official Place Data Fields: https://developers.google.com/maps/documentation/places/web-service/data-fields
-// Pro SKU: displayName, formattedAddress, location, businessStatus, types, primaryType, id, name (resource)
-// Enterprise SKU: websiteUri, internationalPhoneNumber, nationalPhoneNumber, rating etc — we include only website/phone for qualification, not rating/reviews
+// ID-only: cheapest discovery, only place ID + resource name + pagination token
+// Official Text Search Essentials IDs Only SKU triggers: places.id, places.name, places.attributions, nextPageToken
+// For our objective, we need place ID and pagination token
+export const SEARCH_ID_ONLY_MASK = [
+  'places.id',
+  'places.name',
+  'nextPageToken',
+] as const;
 
-export const DISCOVERY_FIELD_MASK = [
+// Discovery essential — usable baseline (Pro SKU): displayName, formattedAddress, location, businessStatus, types, primaryType, id, name
+export const SEARCH_DISCOVERY_MASK = [
   'places.id',
   'places.name',
   'places.displayName',
@@ -38,13 +42,31 @@ export const DISCOVERY_FIELD_MASK = [
   'places.businessStatus',
 ] as const;
 
+// Legacy name kept for backward compat
+export const DISCOVERY_FIELD_MASK = SEARCH_DISCOVERY_MASK;
+
+// Contact fields — isolated to Enterprise SKU (cost boundary)
 export const CONTACT_FIELD_MASK = [
   'places.websiteUri',
   'places.internationalPhoneNumber',
   'places.nationalPhoneNumber',
 ] as const;
 
-export const DETAIL_FIELD_MASK = [
+// Discovery + contact combined (Enterprise) — only when website/phone justified
+export const SEARCH_CONTACT_MASK = [
+  ...SEARCH_DISCOVERY_MASK,
+  ...CONTACT_FIELD_MASK,
+] as const;
+
+// Legacy aliases
+export const TEXT_SEARCH_ESSENTIAL_MASK = SEARCH_DISCOVERY_MASK;
+export const TEXT_SEARCH_CONTACT_MASK = SEARCH_CONTACT_MASK;
+export const NEARBY_SEARCH_MASK = SEARCH_DISCOVERY_MASK;
+export const NEARBY_SEARCH_CONTACT_MASK = SEARCH_CONTACT_MASK;
+
+// Place Details — returns single Place, so masks use bare field names NOT places.* prefix
+// Essential: id, name, displayName, formattedAddress, location, types, primaryType, businessStatus, addressComponents
+export const PLACE_DETAILS_ESSENTIAL_MASK = [
   'id',
   'name',
   'displayName',
@@ -53,35 +75,24 @@ export const DETAIL_FIELD_MASK = [
   'types',
   'primaryType',
   'businessStatus',
-  'websiteUri',
-  'internationalPhoneNumber',
-  'nationalPhoneNumber',
   'addressComponents',
 ] as const;
 
-// For Text Search, combined discovery + contact (but contact moves to Enterprise SKU — cost sensitive)
-// We define two tiers for cost awareness:
-export const TEXT_SEARCH_ESSENTIAL_MASK = [
-  ...DISCOVERY_FIELD_MASK,
+// Contact for Place Details — Enterprise SKU
+export const PLACE_DETAILS_CONTACT_MASK = [
+  'websiteUri',
+  'internationalPhoneNumber',
+  'nationalPhoneNumber',
 ] as const;
 
-export const TEXT_SEARCH_CONTACT_MASK = [
-  ...DISCOVERY_FIELD_MASK,
-  ...CONTACT_FIELD_MASK,
+export const PLACE_DETAILS_FULL_MASK = [
+  ...PLACE_DETAILS_ESSENTIAL_MASK,
+  ...PLACE_DETAILS_CONTACT_MASK,
 ] as const;
 
-export const NEARBY_SEARCH_MASK = [
-  ...DISCOVERY_FIELD_MASK,
-] as const;
-
-export const NEARBY_SEARCH_CONTACT_MASK = [
-  ...DISCOVERY_FIELD_MASK,
-  ...CONTACT_FIELD_MASK,
-] as const;
-
-export const PLACE_DETAILS_MASK = [
-  ...DETAIL_FIELD_MASK,
-] as const;
+// Legacy alias
+export const DETAIL_FIELD_MASK = PLACE_DETAILS_FULL_MASK;
+export const PLACE_DETAILS_MASK = PLACE_DETAILS_FULL_MASK;
 
 // Validation: no wildcard
 export function validateNoWildcardFieldMask(mask: string[] | string): boolean {
@@ -89,10 +100,21 @@ export function validateNoWildcardFieldMask(mask: string[] | string): boolean {
   return !str.includes('*');
 }
 
+// Helpers to check prefix usage
+export function isSearchMask(mask: string[]): boolean {
+  // Search masks should use places.* paths and optionally nextPageToken at top level
+  return mask.every(f => f.startsWith('places.') || f === 'nextPageToken');
+}
+
+export function isDetailsMask(mask: string[]): boolean {
+  // Details masks should NOT use places.* prefix
+  return mask.every(f => !f.startsWith('places.'));
+}
+
 // ---------------------------------------------------------------- Reservation Token — opaque context from guardrails
 
 export interface GoogleRequestReservation {
-  usageId: string; // GoogleApiUsage.id
+  usageId: string;
   sourceId: string;
   collectorRunId: string;
   operation: 'TEXT_SEARCH' | 'NEARBY_SEARCH' | 'PLACE_DETAILS' | 'GEOCODING';
@@ -115,7 +137,6 @@ export function validateReservationContext(
   if (reservation.collectorRunId !== expected.collectorRunId) return { valid: false, error: 'RUN_MISMATCH' };
   if (reservation.operation !== expected.operation) return { valid: false, error: 'OPERATION_MISMATCH' };
   if (reservation.queryFingerprint !== expected.queryFingerprint) return { valid: false, error: 'FINGERPRINT_MISMATCH' };
-  // Status RESERVED should be checked via DB, but token presence indicates intent
   return { valid: true };
 }
 
@@ -123,10 +144,10 @@ export function validateReservationContext(
 
 export interface GooglePlacesRequest {
   method: 'POST' | 'GET';
-  endpoint: string; // path identifier, not full URL with key
-  endpointUrl: string; // full URL without key
-  headers: Record<string, string>; // excluding actual credential
-  fieldMask: string; // X-Goog-FieldMask value
+  endpoint: string;
+  endpointUrl: string;
+  headers: Record<string, string>;
+  fieldMask: string;
   body?: any;
   queryParams?: Record<string, string>;
   operation: 'TEXT_SEARCH' | 'NEARBY_SEARCH' | 'PLACE_DETAILS';
@@ -135,6 +156,45 @@ export interface GooglePlacesRequest {
     pageSize?: number;
     pageCap?: number;
   };
+}
+
+// Place ID canonicalization — bare ID is canonical
+// Input handling contract (4C.4C.1.1): normalize places/ChIJ123 → ChIJ123, reject path injection
+export function canonicalizePlaceId(input: string): { placeId: string; wasNormalized: boolean } {
+  if (!input || typeof input !== 'string') throw new Error('INVALID_REQUEST: placeId required');
+  let trimmed = input.trim();
+  if (trimmed.length === 0) throw new Error('INVALID_REQUEST: placeId required');
+
+  // Reject path injection attempts
+  if (trimmed.includes('..') || trimmed.includes('//') || trimmed.includes('\\')) {
+    throw new Error('INVALID_REQUEST: placeId contains invalid path sequence');
+  }
+
+  // If resource-name form places/ChIJ123, extract bare ID
+  let wasNormalized = false;
+  if (trimmed.startsWith('places/')) {
+    const parts = trimmed.split('/');
+    if (parts.length !== 2 || !parts[1]) throw new Error('INVALID_REQUEST: invalid resource name format');
+    const bare = parts[1];
+    // Validate bare ID does not contain slashes or spaces
+    if (bare.includes('/') || bare.includes(' ') || bare.includes('?') || bare.includes('#')) {
+      throw new Error('INVALID_REQUEST: placeId contains invalid characters');
+    }
+    trimmed = bare;
+    wasNormalized = true;
+  }
+
+  // After normalization, validate bare ID format — must not contain invalid chars
+  if (trimmed.includes('/') || trimmed.includes(' ') || trimmed.includes('?') || trimmed.includes('#') || trimmed.includes('&') || trimmed.includes('%2F')) {
+    throw new Error('INVALID_REQUEST: placeId contains invalid characters');
+  }
+
+  // Basic length check — place IDs are typically 20+ chars starting with ChIJ, but allow broader for test
+  if (trimmed.length < 5 || trimmed.length > 200) {
+    throw new Error('INVALID_REQUEST: placeId length invalid');
+  }
+
+  return { placeId: trimmed, wasNormalized };
 }
 
 export function buildTextSearchRequest(params: {
@@ -146,15 +206,29 @@ export function buildTextSearchRequest(params: {
   includedType?: string;
   languageCode?: string;
   regionCode?: string;
-  useContactFields?: boolean; // if true, includes website/phone (Enterprise SKU)
+  useContactFields?: boolean;
+  useIdOnly?: boolean; // cheapest: only ID + nextPageToken
 }): GooglePlacesRequest {
   if (!params.textQuery || params.textQuery.trim().length === 0) {
     throw new Error('INVALID_REQUEST: textQuery required');
   }
 
-  const fieldMaskArray = params.useContactFields ? TEXT_SEARCH_CONTACT_MASK : TEXT_SEARCH_ESSENTIAL_MASK;
+  let fieldMaskArray: readonly string[];
+  if (params.useIdOnly) {
+    fieldMaskArray = SEARCH_ID_ONLY_MASK;
+  } else if (params.useContactFields) {
+    fieldMaskArray = TEXT_SEARCH_CONTACT_MASK;
+  } else {
+    fieldMaskArray = TEXT_SEARCH_ESSENTIAL_MASK;
+  }
+
   if (!validateNoWildcardFieldMask(fieldMaskArray as any)) {
     throw new Error('FIELD_MASK_WILDCARD_NOT_ALLOWED');
+  }
+
+  // Validate prefix: search masks must use places.* or nextPageToken
+  if (!isSearchMask([...fieldMaskArray])) {
+    throw new Error('INVALID_FIELD_MASK_PREFIX: Text Search must use places.* paths and nextPageToken');
   }
 
   const body: any = {
@@ -182,7 +256,7 @@ export function buildTextSearchRequest(params: {
     pagination: {
       pageToken: params.pageToken,
       pageSize: params.pageSize,
-      pageCap: 3, // future collector explicit page cap — no unlimited loop
+      pageCap: 3,
     },
   };
 }
@@ -196,14 +270,27 @@ export function buildNearbySearchRequest(params: {
   languageCode?: string;
   regionCode?: string;
   useContactFields?: boolean;
+  useIdOnly?: boolean;
 }): GooglePlacesRequest {
   if (!params.locationRestriction) {
     throw new Error('INVALID_REQUEST: locationRestriction required for Nearby Search');
   }
 
-  const fieldMaskArray = params.useContactFields ? NEARBY_SEARCH_CONTACT_MASK : NEARBY_SEARCH_MASK;
+  let fieldMaskArray: readonly string[];
+  if (params.useIdOnly) {
+    fieldMaskArray = SEARCH_ID_ONLY_MASK;
+  } else if (params.useContactFields) {
+    fieldMaskArray = NEARBY_SEARCH_CONTACT_MASK;
+  } else {
+    fieldMaskArray = NEARBY_SEARCH_MASK;
+  }
+
   if (!validateNoWildcardFieldMask(fieldMaskArray as any)) {
     throw new Error('FIELD_MASK_WILDCARD_NOT_ALLOWED');
+  }
+
+  if (!isSearchMask([...fieldMaskArray])) {
+    throw new Error('INVALID_FIELD_MASK_PREFIX: Nearby Search must use places.* paths and nextPageToken');
   }
 
   const body: any = {
@@ -238,29 +325,45 @@ export function buildPlaceDetailsRequest(params: {
   placeId: string;
   languageCode?: string;
   regionCode?: string;
+  useContactFields?: boolean; // if false, essential only; if true, includes contact
 }): GooglePlacesRequest {
   if (!params.placeId || params.placeId.trim().length === 0) {
     throw new Error('INVALID_REQUEST: placeId required');
   }
 
-  const fieldMaskArray = PLACE_DETAILS_MASK;
+  // Canonicalize — normalize places/ChIJ123 → ChIJ123, reject injection, encode safely
+  const { placeId: canonicalId } = canonicalizePlaceId(params.placeId);
+
+  // URL encoding for path component — encode but keep safe chars
+  const encodedId = encodeURIComponent(canonicalId);
+
+  let fieldMaskArray: readonly string[];
+  if (params.useContactFields === false) {
+    fieldMaskArray = PLACE_DETAILS_ESSENTIAL_MASK;
+  } else {
+    // Default includes contact for full detail, but caller can choose essential only for cheaper SKU
+    fieldMaskArray = PLACE_DETAILS_FULL_MASK;
+  }
+
   if (!validateNoWildcardFieldMask(fieldMaskArray as any)) {
     throw new Error('FIELD_MASK_WILDCARD_NOT_ALLOWED');
   }
 
-  // Place Details New: GET https://places.googleapis.com/v1/places/{placeId}
-  const placeId = params.placeId.trim();
-  // Ensure no places/ prefix duplication
-  const resourceName = placeId.startsWith('places/') ? placeId : `places/${placeId}`;
+  // Validate prefix: Place Details must NOT use places.* prefix
+  if (!isDetailsMask([...fieldMaskArray])) {
+    throw new Error('INVALID_FIELD_MASK_PREFIX: Place Details must NOT use places.* prefix, use bare field names like id,displayName');
+  }
 
   const queryParams: Record<string, string> = {};
   if (params.languageCode) queryParams.languageCode = params.languageCode;
   if (params.regionCode) queryParams.regionCode = params.regionCode;
 
+  // CORRECTED URL: https://places.googleapis.com/v1/places/{PLACE_ID} — bare ID, single /places/
+  // Before fix: https://places.googleapis.com/v1/places/places/{placeId} was WRONG
   return {
     method: 'GET',
-    endpoint: `places/${placeId}`,
-    endpointUrl: `https://places.googleapis.com/v1/${resourceName}`,
+    endpoint: `places/${canonicalId}`, // canonical endpoint identifier — bare ID
+    endpointUrl: `https://places.googleapis.com/v1/places/${encodedId}`, // CORRECTED: single /places/
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-FieldMask': fieldMaskArray.join(','),
@@ -299,7 +402,6 @@ export class MockGoogleTransport implements GoogleTransport {
 
   constructor() {
     this.fixtures = new Map();
-    // Preload deterministic fixtures
     this.fixtures.set('text_search_success', {
       places: [
         {
@@ -325,10 +427,19 @@ export class MockGoogleTransport implements GoogleTransport {
           businessStatus: 'OPERATIONAL',
         },
       ],
+      nextPageToken: 'nextPageToken123',
     });
 
     this.fixtures.set('text_search_empty', {
       places: [],
+    });
+
+    this.fixtures.set('text_search_id_only', {
+      places: [
+        { id: 'ChIJ1234567890', name: 'places/ChIJ1234567890' },
+        { id: 'ChIJ0987654321', name: 'places/ChIJ0987654321' },
+      ],
+      nextPageToken: 'nextPageToken123',
     });
 
     this.fixtures.set('nearby_search_success', {
@@ -390,7 +501,6 @@ export class MockGoogleTransport implements GoogleTransport {
   }
 
   async send(req: GoogleTransportRequest): Promise<GoogleTransportResponse> {
-    // Validate reservation required — guardrail integration contract
     const validation = validateReservationContext(req.reservation, {
       sourceId: req.reservation.sourceId,
       collectorRunId: req.reservation.collectorRunId,
@@ -409,15 +519,9 @@ export class MockGoogleTransport implements GoogleTransport {
       };
     }
 
-    // Simulate credential check
-    const credStatus = getGoogleCredentialStatus();
-    // In mock, we allow missing credential for unit tests, but real transport would fail
-
-    // Deterministic fixture selection based on request
     const op = req.request.operation;
     const body = req.request.body || {};
 
-    // Simulate pagination token handling
     if (body.pageToken) {
       if (body.pageToken === 'nextPageToken123') {
         return {
@@ -441,103 +545,59 @@ export class MockGoogleTransport implements GoogleTransport {
       }
     }
 
-    // Simulate error fixtures based on special textQuery values
     if (body.textQuery) {
       const tq = String(body.textQuery).toLowerCase();
       if (tq.includes('auth_error')) {
-        return {
-          status: 'FAILED',
-          error: { classification: 'AUTH_ERROR', message: 'Invalid API key', httpStatus: 401 },
-        };
+        return { status: 'FAILED', error: { classification: 'AUTH_ERROR', message: 'Invalid API key', httpStatus: 401 } };
       }
       if (tq.includes('quota_exceeded')) {
-        return {
-          status: 'FAILED',
-          error: { classification: 'QUOTA_EXCEEDED', message: 'Quota exceeded', httpStatus: 429 },
-        };
+        return { status: 'FAILED', error: { classification: 'QUOTA_EXCEEDED', message: 'Quota exceeded', httpStatus: 429 } };
       }
       if (tq.includes('rate_limited')) {
-        return {
-          status: 'FAILED',
-          error: { classification: 'RATE_LIMITED', message: 'Rate limited', httpStatus: 429 },
-        };
+        return { status: 'FAILED', error: { classification: 'RATE_LIMITED', message: 'Rate limited', httpStatus: 429 } };
       }
       if (tq.includes('server_error')) {
-        return {
-          status: 'FAILED',
-          error: { classification: 'SERVER_ERROR', message: 'Internal server error', httpStatus: 500 },
-        };
+        return { status: 'FAILED', error: { classification: 'SERVER_ERROR', message: 'Internal server error', httpStatus: 500 } };
       }
       if (tq.includes('invalid_request')) {
-        return {
-          status: 'FAILED',
-          error: { classification: 'INVALID_REQUEST', message: 'Invalid request', httpStatus: 400 },
-        };
+        return { status: 'FAILED', error: { classification: 'INVALID_REQUEST', message: 'Invalid request', httpStatus: 400 } };
       }
       if (tq.includes('empty')) {
-        return {
-          status: 'NO_RESULT',
-          data: this.fixtures.get('text_search_empty'),
-          latencyMs: 30,
-        };
+        return { status: 'NO_RESULT', data: this.fixtures.get('text_search_empty'), latencyMs: 30 };
       }
     }
 
-    // Default success based on operation
     if (op === 'TEXT_SEARCH') {
-      return {
-        status: 'SUCCESS',
-        data: this.fixtures.get('text_search_success'),
-        latencyMs: 100,
-      };
+      // If ID-only mask requested, return ID-only fixture
+      if (req.request.fieldMask.includes('places.id') && !req.request.fieldMask.includes('places.displayName')) {
+        return { status: 'SUCCESS', data: this.fixtures.get('text_search_id_only'), latencyMs: 100 };
+      }
+      return { status: 'SUCCESS', data: this.fixtures.get('text_search_success'), latencyMs: 100 };
     }
     if (op === 'NEARBY_SEARCH') {
-      return {
-        status: 'SUCCESS',
-        data: this.fixtures.get('nearby_search_success'),
-        latencyMs: 100,
-      };
+      return { status: 'SUCCESS', data: this.fixtures.get('nearby_search_success'), latencyMs: 100 };
     }
     if (op === 'PLACE_DETAILS') {
-      // Check placeId
       const endpoint = req.request.endpoint;
       if (endpoint.includes('ChIJ9999999999')) {
-        return {
-          status: 'SUCCESS',
-          data: this.fixtures.get('place_details_no_website'),
-          latencyMs: 80,
-        };
+        return { status: 'SUCCESS', data: this.fixtures.get('place_details_no_website'), latencyMs: 80 };
       }
       if (endpoint.includes('ChIJ0000000000')) {
-        return {
-          status: 'SUCCESS',
-          data: this.fixtures.get('place_details_closed'),
-          latencyMs: 80,
-        };
+        return { status: 'SUCCESS', data: this.fixtures.get('place_details_closed'), latencyMs: 80 };
       }
-      return {
-        status: 'SUCCESS',
-        data: this.fixtures.get('place_details_success'),
-        latencyMs: 80,
-      };
+      return { status: 'SUCCESS', data: this.fixtures.get('place_details_success'), latencyMs: 80 };
     }
 
-    return {
-      status: 'FAILED',
-      error: { classification: 'UNKNOWN', message: 'Unknown operation', httpStatus: 400 },
-    };
+    return { status: 'FAILED', error: { classification: 'UNKNOWN', message: 'Unknown operation', httpStatus: 400 } };
   }
 
-  // Helper to get fixture directly for tests
   getFixture(name: string): any {
     return this.fixtures.get(name);
   }
 }
 
-// Real transport — MUST throw GOOGLE_NETWORK_TRANSPORT_DISABLED in 4C.4C.1
 export class RealGoogleTransport implements GoogleTransport {
   async send(req: GoogleTransportRequest): Promise<GoogleTransportResponse> {
-    // Fail-closed before any network
     throw new Error('GOOGLE_NETWORK_TRANSPORT_DISABLED — Real Google transport disabled in Phase 4C.4C.1, ZERO REAL REQUESTS allowed');
   }
 }
@@ -551,7 +611,6 @@ export class GooglePlacesAdapter {
     this.transport = transport;
   }
 
-  // Text Search — requires reservation
   async textSearch(params: {
     textQuery: string;
     reservation: GoogleRequestReservation;
@@ -561,8 +620,8 @@ export class GooglePlacesAdapter {
     locationRestriction?: any;
     includedType?: string;
     useContactFields?: boolean;
+    useIdOnly?: boolean;
   }): Promise<GoogleTransportResponse> {
-    // Guardrail integration: validate reservation before building request
     const fingerprint = params.reservation.queryFingerprint;
     const validation = validateReservationContext(params.reservation, {
       sourceId: params.reservation.sourceId,
@@ -571,19 +630,12 @@ export class GooglePlacesAdapter {
       queryFingerprint: fingerprint,
     });
     if (!validation.valid) {
-      return {
-        status: 'FAILED',
-        error: { classification: 'INVALID_REQUEST', message: `Reservation invalid: ${validation.error}`, httpStatus: 400 },
-      };
+      return { status: 'FAILED', error: { classification: 'INVALID_REQUEST', message: `Reservation invalid: ${validation.error}`, httpStatus: 400 } };
     }
 
-    // Credential check
     const credStatus = getGoogleCredentialStatus();
     if (!credStatus.configured) {
-      return {
-        status: 'FAILED',
-        error: { classification: 'AUTH_ERROR', message: 'GOOGLE_CREDENTIAL_MISSING', httpStatus: 401 },
-      };
+      return { status: 'FAILED', error: { classification: 'AUTH_ERROR', message: 'GOOGLE_CREDENTIAL_MISSING', httpStatus: 401 } };
     }
 
     const request = buildTextSearchRequest({
@@ -594,9 +646,9 @@ export class GooglePlacesAdapter {
       locationRestriction: params.locationRestriction,
       includedType: params.includedType,
       useContactFields: params.useContactFields,
+      useIdOnly: params.useIdOnly,
     });
 
-    // Safe logging — never log API key
     console.log(`[google-adapter] TEXT_SEARCH reservation=${params.reservation.usageId} source=${params.reservation.sourceId} fingerprint=${fingerprint.slice(0,16)}...`);
 
     return await this.transport.send({ request, reservation: params.reservation });
@@ -608,6 +660,7 @@ export class GooglePlacesAdapter {
     includedTypes?: string[];
     maxResultCount?: number;
     useContactFields?: boolean;
+    useIdOnly?: boolean;
   }): Promise<GoogleTransportResponse> {
     const validation = validateReservationContext(params.reservation, {
       sourceId: params.reservation.sourceId,
@@ -616,18 +669,12 @@ export class GooglePlacesAdapter {
       queryFingerprint: params.reservation.queryFingerprint,
     });
     if (!validation.valid) {
-      return {
-        status: 'FAILED',
-        error: { classification: 'INVALID_REQUEST', message: `Reservation invalid: ${validation.error}`, httpStatus: 400 },
-      };
+      return { status: 'FAILED', error: { classification: 'INVALID_REQUEST', message: `Reservation invalid: ${validation.error}`, httpStatus: 400 } };
     }
 
     const credStatus = getGoogleCredentialStatus();
     if (!credStatus.configured) {
-      return {
-        status: 'FAILED',
-        error: { classification: 'AUTH_ERROR', message: 'GOOGLE_CREDENTIAL_MISSING', httpStatus: 401 },
-      };
+      return { status: 'FAILED', error: { classification: 'AUTH_ERROR', message: 'GOOGLE_CREDENTIAL_MISSING', httpStatus: 401 } };
     }
 
     const request = buildNearbySearchRequest({
@@ -635,6 +682,7 @@ export class GooglePlacesAdapter {
       includedTypes: params.includedTypes,
       maxResultCount: params.maxResultCount,
       useContactFields: params.useContactFields,
+      useIdOnly: params.useIdOnly,
     });
 
     console.log(`[google-adapter] NEARBY_SEARCH reservation=${params.reservation.usageId} fingerprint=${params.reservation.queryFingerprint.slice(0,16)}...`);
@@ -645,6 +693,7 @@ export class GooglePlacesAdapter {
   async placeDetails(params: {
     placeId: string;
     reservation: GoogleRequestReservation;
+    useContactFields?: boolean;
   }): Promise<GoogleTransportResponse> {
     const validation = validateReservationContext(params.reservation, {
       sourceId: params.reservation.sourceId,
@@ -653,22 +702,17 @@ export class GooglePlacesAdapter {
       queryFingerprint: params.reservation.queryFingerprint,
     });
     if (!validation.valid) {
-      return {
-        status: 'FAILED',
-        error: { classification: 'INVALID_REQUEST', message: `Reservation invalid: ${validation.error}`, httpStatus: 400 },
-      };
+      return { status: 'FAILED', error: { classification: 'INVALID_REQUEST', message: `Reservation invalid: ${validation.error}`, httpStatus: 400 } };
     }
 
     const credStatus = getGoogleCredentialStatus();
     if (!credStatus.configured) {
-      return {
-        status: 'FAILED',
-        error: { classification: 'AUTH_ERROR', message: 'GOOGLE_CREDENTIAL_MISSING', httpStatus: 401 },
-      };
+      return { status: 'FAILED', error: { classification: 'AUTH_ERROR', message: 'GOOGLE_CREDENTIAL_MISSING', httpStatus: 401 } };
     }
 
     const request = buildPlaceDetailsRequest({
       placeId: params.placeId,
+      useContactFields: params.useContactFields,
     });
 
     console.log(`[google-adapter] PLACE_DETAILS reservation=${params.reservation.usageId} placeId=${params.placeId}`);
@@ -677,7 +721,9 @@ export class GooglePlacesAdapter {
   }
 }
 
-// ---------------------------------------------------------------- Logging safety — safe fields only
+// ---------------------------------------------------------------- Logging safety — never log API key, auth header, credential object
+// Safe logging: operation, usageId, runId, sourceId, fingerprint prefix, status, latency, classification, endpoint, fieldMask
+// Never log: API key, authorization header, credential object, full secret-bearing request headers
 
 export function getSafeRequestLog(req: GooglePlacesRequest, reservation: GoogleRequestReservation) {
   return {
@@ -688,7 +734,6 @@ export function getSafeRequestLog(req: GooglePlacesRequest, reservation: GoogleR
     fingerprintPrefix: reservation.queryFingerprint.slice(0, 16),
     endpoint: req.endpoint,
     fieldMask: req.fieldMask,
-    // Never log API key, auth header, credential
   };
 }
 
@@ -698,6 +743,5 @@ export function getSafeResponseLog(res: GoogleTransportResponse) {
     classification: res.error?.classification,
     httpStatus: res.error?.httpStatus,
     latencyMs: res.latencyMs,
-    // Never log full data that might contain secrets, but data itself is safe (place info)
   };
 }

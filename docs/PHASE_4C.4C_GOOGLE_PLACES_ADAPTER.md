@@ -19,11 +19,12 @@ References:
 - https://developers.google.com/maps/documentation/places/web-service/usage-and-billing (billing, field mask determines SKU)
 - https://developers.google.com/maps/documentation/places/web-service/place-id (place ID format)
 
-## Official Endpoints
+## Official Endpoints (CORRECTED 4C.4C.1.1)
 
 - **Text Search (New)**: `POST https://places.googleapis.com/v1/places:searchText`
   - Body: JSON with `textQuery` required, `pageSize`, `pageToken`, `locationBias`, `locationRestriction`, `includedType`, `languageCode`, `regionCode`, etc.
-  - Response: `{ places: [ Place, ... ], nextPageToken? }`
+  - Response: `{ places: [ Place, ... ], nextPageToken? }` — nextPageToken at top level, NOT inside places array
+  - Field mask example for pagination: `places.id,nextPageToken` (places.id + top-level nextPageToken)
   - Max 60 results across all pages (subject to change)
 
 - **Nearby Search (New)**: `POST https://places.googleapis.com/v1/places:searchNearby`
@@ -31,11 +32,21 @@ References:
   - Does NOT support text input — text queries must use Text Search New
   - Response: `{ places: [ Place, ... ] }`
 
-- **Place Details (New)**: `GET https://places.googleapis.com/v1/places/{placeId}` or `places/PLACE_ID`
+- **Place Details (New)**: `GET https://places.googleapis.com/v1/places/{PLACE_ID}` — CORRECTED, bare place ID, single /places/
+  - BEFORE (WRONG): `https://places.googleapis.com/v1/places/places/{placeId}` — double places/ — FIXED in 4C.4C.1.1
+  - AFTER (CORRECT): `https://places.googleapis.com/v1/places/ChIJ123` for placeId ChIJ123
   - Path param placeId, e.g., `ChIJj61dQgK6j4AR4GeTYWZsKWw`
-  - Resource name form: `places/PLACE_ID`
+  - Resource name form: `places/PLACE_ID` (e.g., `places/ChIJ123`) — used in `name` field of response, NOT in URL double
   - Response: single Place object
   - Less expensive than search when you already have place ID
+
+### Resource Name Input Safety (4C.4C.1.1)
+
+- Canonical internal externalId remains bare `ChIJ123`, NOT `places/ChIJ123`
+- Builder contract: `canonicalizePlaceId()` normalizes `places/ChIJ123` → `ChIJ123` with `wasNormalized=true`
+- Alternative contract A (reject resource-name input) considered, but B (normalize) chosen for safety — prevents accidental `/places/places/` double
+- Path injection rejected: contains `..`, `//`, `\`, `/`, `?`, `#`, `&`, `%2F`, spaces → throws INVALID_REQUEST
+- URL encoding: path component safely encoded via `encodeURIComponent(canonicalId)`
 
 ## Authentication Contract
 
@@ -46,36 +57,55 @@ References:
 - Credential reader exposes only `configured: true/false`, never actual key
 - API key must NEVER be stored in: GoogleCollectionConfig.metadata, DataSource.config, GoogleApiUsage.metadata, GoogleApiCache, CollectorRun.metadata, LeadCandidate, logs, errors, fingerprints, Git, docs
 
-## Field-Mask Strategy — Cost Sensitive
+## Field-Mask Strategy — Cost Sensitive (CORRECTED 4C.4C.1.1)
 
-**Field masking is REQUIRED** — no default fields, omitting returns error. Wildcard `*` allowed in dev but discouraged in prod (large payload, higher billing).
+**Field masking is REQUIRED** — no default fields, omitting returns error. Wildcard `*` allowed in dev but discouraged in prod.
 
 Billing: **Billed at highest SKU applicable to requested fields**. One stray Enterprise field upgrades entire request from Pro to Enterprise.
 
-Official SKUs (from https://developers.google.com/maps/documentation/places/web-service/usage-and-billing and data-fields):
+**Search vs Details prefix — critical regression prevention:**
 
-- **Text Search Essentials (IDs Only)**: `places.id`, `places.name` (resource name `places/PLACE_ID`), `places.attributions`, `nextPageToken`, etc. — unlimited free but not usable alone (IDs only)
+- **Text Search / Nearby Search** response contains `places[...]` array at top level, so field masks use paths like `places.id`, `places.displayName`, `places.formattedAddress` + top-level `nextPageToken` for pagination
+- **Place Details** returns single Place object, so masks use bare names `id`, `displayName`, `formattedAddress` NOT `places.id`
+
+Tests explicitly prevent cross-use: search masks must use `places.*` or `nextPageToken`, details masks must NOT use `places.*`.
+
+Official SKUs:
+
+- **Text Search Essentials (IDs Only)**: `places.id`, `places.name` (resource name `places/PLACE_ID`), `places.attributions`, `nextPageToken` — cheapest, IDs only
 - **Text Search Pro**: `places.displayName`, `places.formattedAddress`, `places.location`, `places.types`, `places.primaryType`, `places.businessStatus`, `places.photos`, etc. — $32/1000 after 5k free
 - **Text Search Enterprise**: `places.websiteUri`, `places.internationalPhoneNumber`, `places.nationalPhoneNumber`, `places.rating`, `places.priceLevel`, etc. — $35/1000
 - **Text Search Enterprise + Atmosphere**: `places.reviews`, `places.editorialSummary`, etc. — $40/1000
 
-Similarly Nearby Search Pro $32/1000, Place Details Essentials $5/1000, Place Details Pro $17/1000, Enterprise $20/1000.
+**Staged masks (4C.4C.1.1):**
 
-**Our strategy:**
+- **SEARCH_ID_ONLY_MASK**: `places.id`, `places.name`, `nextPageToken` — only place ID + resource name + pagination token, excludes displayName, websiteUri, phone, reviews, rating. Cheapest discovery.
+- **SEARCH_DISCOVERY_MASK** (Pro): id, name, displayName, formattedAddress, location, types, primaryType, businessStatus
+- **SEARCH_CONTACT_MASK** (Enterprise): discovery + websiteUri, internationalPhoneNumber, nationalPhoneNumber — isolated cost boundary, not in ID-only or discovery masks
+- **PLACE_DETAILS_ESSENTIAL_MASK**: id, name, displayName, formattedAddress, location, types, primaryType, businessStatus, addressComponents — bare names, no places.* prefix
+- **PLACE_DETAILS_CONTACT_MASK**: websiteUri, internationalPhoneNumber, nationalPhoneNumber — isolated Enterprise
+- **PLACE_DETAILS_FULL_MASK**: essential + contact
 
-- **DISCOVERY_FIELD_MASK** (Pro SKU — usable baseline): id, name, displayName, formattedAddress, location, types, primaryType, businessStatus
-- **CONTACT_FIELD_MASK** (Enterprise SKU — needed for qualification): websiteUri, internationalPhoneNumber, nationalPhoneNumber
-- **DETAIL_FIELD_MASK**: id, name, displayName, formattedAddress, location, types, primaryType, businessStatus, websiteUri, internationalPhoneNumber, nationalPhoneNumber, addressComponents
-- **TEXT_SEARCH_ESSENTIAL_MASK**: discovery only (Pro)
-- **TEXT_SEARCH_CONTACT_MASK**: discovery + contact (Enterprise) — used only when website/phone needed
-- **NEARBY_SEARCH_MASK**: discovery only
-- **PLACE_DETAILS_MASK**: detail (includes contact)
+**nextPageToken handling:**
 
-Centrally controlled constants in `google-places-adapter.ts`, validation `validateNoWildcardFieldMask()` fails if `*` appears. Tests fail if wildcard present.
+- If Text Search ID-only response needs pagination, field mask must include `nextPageToken` at top level (example from official docs: `places.id,nextPageToken`)
+- Verified against official Google docs https://developers.google.com/maps/documentation/places/web-service/text-search — example `X-Goog-FieldMask: places.id,nextPageToken`
+- Do not assume token appears if mask excludes it — must be explicitly requested
 
-We DO NOT request unnecessary fields: reviews, photos, rating, opening hours, editorial, etc., unless technically required.
+**Contact field cost boundary:**
 
-We DO NOT hardcode dollar prices into application logic — only SKU tiers.
+- websiteUri / phone fields isolated from cheaper masks
+- SEARCH_ID_ONLY_MASK excludes displayName, websiteUri, phone
+- Tests explicitly verify exclusion
+
+**Staged Collection Contract (future optimization, NOT activated yet):**
+
+- STAGE A: Text Search / Nearby Search → minimal discovery fields (SEARCH_ID_ONLY_MASK or SEARCH_DISCOVERY_MASK)
+- STAGE B: dedup/cache/place-id evaluation (check existing LeadCandidate unique [discoverySourceId externalType externalId], cache)
+- STAGE C: Place Details essentials when needed (PLACE_DETAILS_ESSENTIAL_MASK)
+- STAGE D: contact fields website/phone ONLY when justified (PLACE_DETAILS_CONTACT_MASK or SEARCH_CONTACT_MASK)
+
+Do NOT activate this strategy in collector yet. Do NOT hardcode dollar pricing.
 
 ## Billing Architecture Findings
 

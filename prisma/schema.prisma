@@ -632,6 +632,14 @@ model GoogleCollectionConfig {
 
   retryLimit Int @default(0) // no retries by default to avoid bypassing budget
 
+  // Phase 4C.4C.5A — Limited Activation Architecture
+  activationMode String @default("DISABLED") // DISABLED | CANARY | PRODUCTION — explicit mode, fail closed default
+
+  canaryScopes Json? // [{countryCode, city, categorySlug}] — explicit allowlist, Manchester+dental ONLY initial
+  canaryPerRunRequestLimit Int? @default(3) // canary-specific tiny limits
+  canaryDailyRequestLimit Int? @default(5)
+  canaryMonthlyRequestLimit Int? // optional, defaults to monthly hard cap 500
+
   metadata Json?
 
   createdAt DateTime @default(now())

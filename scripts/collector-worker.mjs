@@ -1250,6 +1250,57 @@ async function main() {
     isNewState,
   });
 
+  // --- Source-Neutral Dispatch Boundary (Phase 4C.4C.5B) ---
+  const sourceType = (source.type || '').trim().toLowerCase();
+  if (sourceType !== 'overpass' && sourceType !== 'google_places') {
+    logError(`unsupported collection source type: ${source.type}`);
+    if (!dryRun) {
+      await prisma.collectorRun.create({
+        data: {
+          status: 'FAILED',
+          locationId: location.id,
+          categoryId: category.id,
+          sourceId: source.id,
+          startedAt: new Date(),
+          finishedAt: new Date(),
+          durationMs: Date.now() - startTime,
+          queriesAttempted: 0,
+          candidatesFound: 0,
+          errorMessage: `UNSUPPORTED_COLLECTION_SOURCE: DataSource type "${source.type}" is not supported`,
+          metadata: {
+            githubRunId: GITHUB_RUN_ID,
+            category: category.slug,
+            source: source.name,
+            sourceType: source.type,
+            error: 'UNSUPPORTED_COLLECTION_SOURCE',
+          },
+        },
+      });
+    }
+    await prisma.$disconnect();
+    process.exit(1);
+  }
+
+  if (sourceType === 'google_places') {
+    // Google Places collection path — checks activation gates
+    // In Phase 4C.4C.5B, Google remains disabled (source.enabled=false, config.enabled=false, activationMode=DISABLED)
+    log('dispatching to Google Places collection path');
+    const googleConfig = await prisma.googleCollectionConfig.findFirst({ where: { key: 'default' } });
+    const isConfigEnabled = googleConfig?.enabled === true;
+    const isSourceEnabled = source.enabled === true;
+    const activationMode = googleConfig?.activationMode || 'DISABLED';
+
+    if (!isConfigEnabled || !isSourceEnabled || activationMode === 'DISABLED') {
+      logWarn('Google collection path reached but disabled by activation gates', {
+        configEnabled: isConfigEnabled,
+        sourceEnabled: isSourceEnabled,
+        activationMode,
+      });
+      await prisma.$disconnect();
+      process.exit(0);
+    }
+  }
+
   let bbox;
   try {
     if (location.latitude == null || location.longitude == null) {

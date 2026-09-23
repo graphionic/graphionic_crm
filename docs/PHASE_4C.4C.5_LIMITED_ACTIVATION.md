@@ -209,3 +209,138 @@ env:
   GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
 ```
 But NOT in this phase.
+
+---
+
+# Phase 4C.4C.5B — Google Collector Integration (ZERO NETWORK / PRODUCTION-DISABLED)
+
+## Overview
+
+Phase 4C.4C.5B refactors the collector execution architecture behind a unified, source-neutral dispatch boundary (`collectFromSource` / `dispatchCollection`) and prepares the Google collector integration (`src/lib/google-collector-adapter.ts`) for future CANARY operation.
+
+**GOOGLE REMAINS COMPLETELY DISABLED IN PRODUCTION.**
+- `GoogleCollectionConfig.enabled` = `false`
+- `GoogleCollectionConfig.activationMode` = `DISABLED`
+- `Google Places DataSource.enabled` = `false`
+- `collect.yml` contains NO `GOOGLE_MAPS_API_KEY`
+- ZERO Google network requests throughout this phase.
+
+## Source-Neutral Dispatch Architecture
+
+Collection execution is now abstracted behind `dispatchCollection` in `src/lib/collector-dispatcher.ts`:
+- Accepts unified `CollectionDispatchContext` (`prisma`, `source`, `location`, `category`, `collectorRun`, `config`, `options`)
+- Dispatches by canonical `DataSource.type`:
+  - `'overpass'`: delegates to existing Overpass pipeline (100% preserved)
+  - `'google_places'`: delegates to `collectFromGoogleSource`
+  - Unknown/unsupported types: fails closed with `UnsupportedCollectionSourceError` / `UNSUPPORTED_COLLECTION_SOURCE` status.
+
+In `scripts/collector-worker.mjs`, only enabled sources (`enabled: true`) are loaded into active rotation. Since Google Places has `enabled: false`, it is never selected in production.
+
+## 100% OSM Preservation
+
+The existing Overpass collection pipeline remains completely intact:
+- Query generation, bounding box calculation, and tag validation are untouched.
+- Endpoint rotation and retry/backoff logic remain identical.
+- Normalization, candidate persistence, Lead insertion, `CollectorState` updates, and `CollectorRun` metrics are 100% preserved.
+- OSM remains the ONLY active production source.
+
+## Google Activation Gates
+
+Before any Google collector execution can proceed, all gates must pass:
+1. `source.type === 'google_places'`
+2. `source.enabled === true`
+3. `config.enabled === true`
+4. `config.failClosed === true`
+5. `activationMode !== 'DISABLED'`
+6. `activationMode` is valid (`CANARY` or `PRODUCTION`)
+7. `validateGoogleActivationScope` allows `{ countryCode, city, categorySlug }`
+8. `getGoogleCredentialStatus().configured === true`
+9. `source.healthStatus !== 'down'`
+10. Valid budget reservation obtained (if cache miss)
+
+If any gate fails, the adapter immediately returns `{ status: 'SKIPPED', reason: ... }` with 0 network calls and 0 database mutations.
+
+## Request Planning & Mapping
+
+- **Stage A ID Discovery Request Plan**:
+  - Operation: `TEXT_SEARCH`
+  - Query pattern: `${categoryTerm} in ${city} ${countryName}` (e.g., `"dental clinic in Manchester UK"`)
+  - Field mask: `['places.id', 'places.name', 'nextPageToken']` (Essentials ID-only mask)
+  - Page size: bounded to 3 (max 5 for canary)
+  - Pagination: disabled (`CANARY_PAGINATION_ENABLED = false`)
+  - Retries: disabled (`CANARY_RETRY_LIMIT = 0`)
+  - Request planning is pure and executes 0 network calls.
+- **Deterministic Category Mapping**:
+  - `dental` / `dentist` → `"dental clinic"`
+  - `eye` / `optician` → `"optician"`
+  - `pet_store` / `pets` → `"pet store"`
+  - `hospital` → `"hospital"`
+  - `physio` / `physiotherapy` → `"physiotherapy clinic"`
+  - `orthopedic` / `orthopedics` → `"orthopedic clinic"`
+  - `ivf` / `fertility` → `"fertility clinic"`
+  - Fallback: `${category.name || category.slug}`
+- **Deterministic Location Mapping**:
+  - Derives `city`, `countryCode` (e.g. `'GB'`), `countryName` (e.g. `'UK'`), `latitude`, `longitude` from `CollectorLocation`.
+- **Deterministic Fingerprinting**:
+  - Computes secret-free SHA-256 over `op:${operation}|query:${normalizedQuery}|mask:${sortedMask}|size:${pageSize}|src:${sourceId}`.
+
+## Cache-Before-Budget Execution Order
+
+1. Request intent is planned and query fingerprint calculated.
+2. `checkGoogleCache` checks for unexpired response cache (`GoogleApiCache`).
+3. **If Cache HIT**:
+   - Returns cached places immediately into normalization.
+   - ZERO Google API network requests.
+   - ZERO `GoogleApiUsage` reservations consumed.
+   - `googleCacheHits` incremented.
+4. **If Cache MISS**:
+   - Atomic reservation obtained via `reserveGoogleRequestBudgetAtomically` under global `GoogleCollectionConfig` row lock (`FOR UPDATE`).
+   - If budget exceeded → returns `SKIPPED` / `BUDGET_EXHAUSTED`.
+   - Transport executed (mock in tests, gated in production).
+   - Usage status completed (`SUCCESS` or `FAILED`), and response written to `GoogleApiCache`.
+
+## Common Business Processing & Matching
+
+- **Normalization**: Google responses map to canonical `NormalizedBusinessRecord` with `sourceType: 'GOOGLE_PLACES'`, `externalType: 'place'`, `externalId: place_id`.
+- **Cross-Source Matching**:
+  - Searches existing candidates in the same category and city.
+  - Strong matching (`EMAIL_EXACT`, `PHONE_EXACT`) or contextual (`NAME_ADDRESS`, `NAME_POSTAL`, `NAME_GEO`, `NAME_CITY`).
+  - Never merges on `NAME_ALONE` or `COORDINATES_ALONE`.
+- **Evidence Merging**:
+  - Merges into existing candidate's `metadata.sourceEvidence[]` preserving both OSM and Google identities.
+  - Does NOT create duplicate candidates.
+  - If Google provides a new website URL, sets `qualificationRecheckRequired: true` to trigger live website verification.
+- **Candidate Persistence Policy (`MATCH_EXISTING_FIRST`)**:
+  - Stage A ID-only discovery prioritizes matching/enriching existing OSM candidates over flooding the database with low-information candidates.
+  - New candidates are created only when explicit criteria or policies allow.
+
+## Filter Ordering & Qualification Invariants
+
+Existing qualification safety is strictly preserved:
+1. `duplicate_in_run`
+2. `existing_website` (live website rejected)
+3. `no-email` → `NEEDS_ENRICHMENT` (Google Stage A has no email, so it cannot qualify)
+4. `generic email`
+5. `invalid email`
+6. `email-domain-has-live-website`
+7. `QUALIFIED` (strictly requires useful business email + confirmed no live website)
+
+Google Stage A records without email NEVER become `QUALIFIED` Leads.
+
+## Failure Classifications & Health
+
+- `UNSUPPORTED_COLLECTION_SOURCE`: unknown DataSource type
+- `GOOGLE_SOURCE_DISABLED`: source `enabled == false`
+- `GOOGLE_CONFIG_DISABLED`: config `enabled == false`
+- `GOOGLE_ACTIVATION_DISABLED`: mode `DISABLED`
+- `CANARY_SCOPE_NOT_ALLOWED`: location/category not in allowlist
+- `CANARY_SCOPE_NOT_CONFIGURED_FAIL_CLOSED`: allowlist empty in canary mode
+- `GOOGLE_CREDENTIAL_MISSING`: environment variable missing or empty
+- `GOOGLE_SOURCE_DOWN`: source health is `'down'`
+- `GOOGLE_NETWORK_TRANSPORT_DISABLED`: transport boundary invoked while disabled
+
+## Network Trap & Test Verification
+
+- `scripts/test-google-collector-5b.mjs` installs a hard network trap intercepting `fetch` to `places.googleapis.com` or `googleapis.com`. Any attempted network call throws immediately and fails the test.
+- All 34 tests A–BH pass with ZERO external network requests.
+

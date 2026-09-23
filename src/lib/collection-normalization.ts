@@ -468,6 +468,9 @@ export interface SourceEvidence {
 }
 
 export function buildSourceEvidence(record: NormalizedBusinessRecord, matchReasons?: MatchReason[], confidence?: MatchConfidence): SourceEvidence {
+  const collectedAt = record.collectedAt
+    ? (typeof record.collectedAt === 'string' ? record.collectedAt : (record.collectedAt instanceof Date ? record.collectedAt.toISOString() : new Date().toISOString()))
+    : new Date().toISOString();
   return {
     sourceId: record.sourceId,
     sourceType: record.sourceType,
@@ -483,7 +486,7 @@ export function buildSourceEvidence(record: NormalizedBusinessRecord, matchReaso
     postalCode: record.postalCode,
     latitude: record.latitude,
     longitude: record.longitude,
-    collectedAt: record.collectedAt.toISOString(),
+    collectedAt,
     matchReasons,
     confidence,
   };

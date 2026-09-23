@@ -10,7 +10,7 @@
  */
 
 export type SourceType = 'OVERPASS' | 'GOOGLE_MAPS' | 'GOOGLE_PLACES' | 'CUSTOM';
-export type ExternalType = 'node' | 'way' | 'relation' | 'google_place' | 'google_maps';
+export type ExternalType = 'node' | 'way' | 'relation' | 'place' | 'google_place' | 'google_maps'; // canonical for Google is 'place' (place_id), 'google_place' retained for backward compat
 
 export interface NormalizedBusinessRecord {
   sourceId: string | null; // DataSource.id
@@ -851,7 +851,7 @@ export function normalizedFromGooglePlace(
   return {
     sourceId,
     sourceType: 'GOOGLE_PLACES',
-    externalType: 'google_place',
+    externalType: 'place', // canonical per 4C.4B.1: sourceType already identifies Google, externalType=place externalId=place_id
     externalId: place.place_id,
     name: name.slice(0, 200),
     normalizedName: normalizeBusinessNameForComparison(name),

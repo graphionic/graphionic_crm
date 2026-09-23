@@ -72,10 +72,99 @@ Migration `phase_4c4b_google_request_guardrails` additive only:
 - ADD FOREIGN KEY Restrict for usage, Cascade for cache
 No DROP.
 
-## Test Matrix
+## Test Isolation (4C.4B.1 Gate)
 
-A-AT + AU-BL covered in scripts/test-google-4c4b.mjs:
-- A source disabled → denied, B missing config fail-closed, C missing credential, D per-run boundary, E daily, F monthly, G concurrent daily final slot one winner, H concurrent monthly, I concurrent run, J counts immediately, K RESERVED survives crash, L failed counts, M no-result counts, N duplicate active blocked, O DB failure no permission, P timeout fail-closed, Q cache hit no reservation, R cache miss requires reservation, S deterministic fingerprint same, T different operation different, U page token different, V API key excluded, W place_id same-source identity, X synthetic→Normalized, Y phone match, Z website triggers recheck, AA neighboring not merged, AB website never erased, AC email never erased, AD auth error health, AE quota stops, AF retry cannot bypass, AG pagination separate unit, AH metrics accurate, AI cache metrics, AJ no secret exposure, AK production guard, AL no Google fetch, AM no SDK, AN no enrichment mutation, AO EnrichmentConfig false, AP no historical mutation, AQ A-Z regression, AR AA-AZ regression, AS build, AT schema constraints, AU Float not used, AV requestSentAt, AW source-aware cache, AX collectorRun required, AY source required, AZ global daily across multiple sources, BA global mutex, BB invalid limits fail-closed, BC monthly<daily invalid, BD nullable cost, BE CANCELLED pre-call, BF post-send, BG no refund after crash, BH retry new reservation, BI page token distinct, BJ config remains disabled after tests, BK no creds, BL network calls 0.
+**Production DB must never be used for guardrail integration tests**
+
+- **Pure/Unit tests** (`scripts/test-google-guardrails-unit.mjs`): fingerprints, config validation, accounting semantics, health classification, retry policy, pagination, secret exclusion, normalization, website safety, canonical externalType. Safe to run against production DATABASE_URL, no mutation, no ALLOW_PRODUCTION_TEST_MUTATION required.
+- **DB Integration tests** (`scripts/test-google-guardrails-db.mjs`): atomic reservation, FOR UPDATE global mutex, concurrency (G/H/I/BA), usage rows, cache rows, per-run/daily/monthly boundaries, global daily across multiple sources. Require isolated TEST_DATABASE_URL.
+- **Safety contract**: Every DB-mutating test calls `getTestPrismaClient()` which explicitly initializes PrismaClient against TEST_DATABASE_URL via Prisma 6 `datasourceUrl` override (fallback `datasources.db.url`). If TEST_DATABASE_URL absent + production DATABASE_URL (neon.tech) → REFUSE with `DB INTEGRATION TESTS NOT RUN — TEST_DATABASE_URL REQUIRED` / `REFUSING`. No silent fallback to production.
+- **ALLOW_PRODUCTION_TEST_MUTATION**: Emergency-only, must NOT be part of normal verification. Previous 4C.4B report used it for convenience; 4C.4B.1 removes that dependence. Normal verification passes without it.
+- **Concurrency claims**: G/H/I/BA genuinely exercise PostgreSQL transactional behavior (`SELECT ... FOR UPDATE` on GoogleCollectionConfig) only when TEST_DATABASE_URL points to real PostgreSQL. If absent, tests report NOT RUN — TEST_DATABASE_URL REQUIRED rather than touching production.
+- **Mechanism**: `scripts/test-db-client.mjs` implements `getTestPrismaClient()`:
+  ```js
+  new PrismaClient({ datasourceUrl: sanitizedTestUrl })
+  ```
+  Does NOT overwrite production .env, does NOT modify DATABASE_URL.
+
+## Canonical Google External Type (4C.4B.1 Standardization)
+
+- **sourceType**: `GOOGLE_PLACES` (canonical)
+- **externalType**: `place` (canonical) — sourceType already identifies Google, so externalType is generic `place`
+- **externalId**: Google `place_id` (e.g., `ChIJ123...`)
+- **Legacy**: `google_place` retained in ExternalType union for backward compat, but new code uses `place`
+- **Dedup**: Protected by existing `@@unique([discoverySourceId, externalType, externalId])` — same place_id same source blocked
+- **Rationale**: Earlier 4C.4A architecture described `externalType=place`, implementation used `google_place`. Since no production Google candidates exist (0), safest time to standardize to `place` per gate preference. Updated `normalizedFromGooglePlace()` to return `place`.
+
+## Test Matrix (Corrected Terminology)
+
+Pure/Unit (`test-google-guardrails-unit.mjs`) + DB Integration (`test-google-guardrails-db.mjs`) covering A-BL:
+
+- A source disabled → denied (DB)
+- B missing config fail-closed (DB)
+- C missing source → SOURCE_NOT_FOUND (DB) — **corrected**: 4C.4B has no credential model, credential integration belongs to 4C.4C. Tests source missing, not credential.
+- D per-run boundary (DB)
+- E daily boundary (DB)
+- F monthly boundary GLOBAL across days (DB)
+- G concurrent final daily slot one winner genuine PostgreSQL FOR UPDATE (DB concurrency)
+- H concurrent final monthly slot one winner genuine PostgreSQL FOR UPDATE (DB concurrency)
+- I concurrent final run slot one winner genuine PostgreSQL FOR UPDATE (DB concurrency)
+- J counts immediately (DB)
+- K RESERVED survives crash (DB)
+- L failed counts (DB)
+- M no-result counts (DB)
+- N duplicate active blocked (DB)
+- O DB failure no permission (pure code check)
+- P timeout fail-closed maxWait 15000 timeout 20000 (pure)
+- Q cache hit → no reservation (DB)
+- R cache miss → reservation required (DB)
+- S deterministic fingerprint same (pure)
+- T different operation different (pure)
+- U page token different (pure)
+- V API key excluded (pure)
+- W place_id same-source identity sourceType=GOOGLE_PLACES externalType=place externalId=place_id (DB)
+- X synthetic→Normalized sourceType=GOOGLE_PLACES externalType=place externalId=place_id (pure)
+- Y phone match (pure)
+- Z website triggers recheck (pure)
+- AA neighboring not merged (pure)
+- AB website never erased (pure)
+- AC email never erased (pure)
+- AD auth error health down (pure)
+- AE quota stops down (pure)
+- AF retry cannot bypass (pure)
+- AG pagination separate unit (pure)
+- AH usage metrics accurate (DB read-only)
+- AI cache metrics accurate (DB)
+- AJ no secret exposure (pure)
+- AK production guard REFUSING/TEST_DATABASE_URL REQUIRED (pure)
+- AL no Google fetch (pure)
+- AM no SDK network (pure)
+- AN no enrichment mutation (pure)
+- AO EnrichmentConfig false (DB read-only)
+- AP no historical mutation (DB read-only)
+- AQ A-Z regression (pure)
+- AR AA-AZ regression (pure)
+- AS build (pure)
+- AT schema constraints/indexes (pure)
+- AU Float not used Int? (pure)
+- AV requestSentAt accounting (pure)
+- AW source-aware cache uniqueness (pure)
+- AX collectorRun required Restrict (pure)
+- AY source required Restrict usage Cascade cache (pure)
+- AZ global daily across multiple Google sources GLOBAL not per-source (DB)
+- BA global mutex FOR UPDATE documented (pure) — genuine PostgreSQL when TEST_DATABASE_URL available
+- BB invalid zero/negative limits fail-closed (pure)
+- BC monthly<daily invalid (pure)
+- BD nullable cost limits supported (pure)
+- BE CANCELLED pre-call semantics (pure)
+- BF post-send semantics (pure)
+- BG no refund after crash (pure)
+- BH retry new reservation (pure)
+- BI page token distinct fingerprint (pure)
+- BJ config remains disabled after tests (DB read-only)
+- BK no Google credentials (DB read-only)
+- BL Google network calls 0 (pure)
+- CANONICAL sourceType=GOOGLE_PLACES externalType=place externalId=place_id
 
 ## Production Safety
 

@@ -1,235 +1,203 @@
 # Phase 4C.3B.1 — Provider Abstraction, Usage Accounting & Hard Budget Guardrails
+## Phase 4C.3B.1.1 — Budget Reservation Hardening (Blocker Fix)
 
 **Date:** 2026-09-23
-**Status:** Implemented, Tests A-AB passing, Build passing, No schema migration required
+**Status:** Implemented + Hardened, Tests A-AB and AC-AP passing, Build passing, No schema migration
 **Safety:** No real provider HTTP, no credits spent, enabled=false prod, no prod jobs/attempts, collector-worker untouched
+**Commits:** bcd00ac feat: Phase 4C.3B.1 + fix: harden enrichment budget reservations (pending)
 
 ## 1. Goal
-Build provider-neutral enrichment layer that can support Hunter, Dropcontact, Apollo, Snov etc. later without rewriting orchestration, with hard budget guarantees that two simultaneous workers cannot exceed daily/monthly limits.
+Build provider-neutral enrichment layer that can support Hunter, Dropcontact, Apollo, Snov etc. later without rewriting orchestration, with hard budget guarantees that two simultaneous workers cannot exceed daily/monthly limits, and with no legacy bypass.
 
-## 2. Gap Analysis — EnrichmentAttempt sufficient for atomic reservation?
-**Answer: YES, sufficient.**
+## 2. Canonical Reservation Invariant (MUST HOLD)
+```
+A provider-backed enrichment execution MUST NOT create an EnrichmentAttempt STARTED directly.
+The ONLY production path for provider execution is:
+  executeEnrichmentAttempt
+          ↓
+  reserveEnrichmentBudgetAtomically (locks EnrichmentConfig FOR UPDATE, ProviderCredential FOR UPDATE, checks ownership, checks duplicate STARTED, checks budgets, creates STARTED reservation)
+          ↓
+  transaction COMMIT
+          ↓
+  adapter.enrich (test-only, zero network)
+No production code may create STARTED provider attempts outside reserveEnrichmentBudgetAtomically.
+```
 
-- `EnrichmentAttempt` already has:
-  - `candidateId`, `jobId`, `providerCredentialId`, `providerType`, `providerLabel`
-  - `status` (STARTED, SUCCESS, NO_RESULT, FAILED), `startedAt`, `finishedAt`, `durationMs`
-  - `costUnits`, `creditsUsed` (Float), `emailFound`, `domainFound`, `websiteFound`, `failureReason`, `metadata` JSON
-  - `createdAt`, `updatedAt`
-  - Indexes: candidateId, jobId, providerCredentialId, status, createdAt
-- Reservation strategy: Create STARTED attempt with `creditsUsed = estimatedCredits`, `costUnits = estimatedCredits`, `metadata.reservation=true`, `metadata.ownerToken`, `metadata.estimatedCredits`. This record counts immediately in usage aggregates (attemptsToday, creditsToday, candidatesProcessedToday distinct). Conservative: if worker crashes after reservation, reservation still counts against budget.
-- Serialization: `SELECT * FROM "EnrichmentConfig" WHERE key='default' FOR UPDATE` + `SELECT * FROM "ProviderCredential" WHERE id=$credId FOR UPDATE` inside `$transaction`. This serializes concurrent budget checks. Global daily candidate limit uses distinct candidateId today — same candidate retries don't consume new slot but attempts/credits still increase.
-- No new ledger model needed. No migration. Timezone UTC via `getUTCStartOfDay()` using `setUTCHours(0,0,0,0)` and `getUTCStartOfMonth()` using `setUTCDate(1)+setUTCHours(0,0,0,0)`.
+## 3. Gap Analysis — EnrichmentAttempt sufficient?
+YES, sufficient. STARTED with creditsUsed=maximum as reservation counting immediately, conservative crash-counts, plus SELECT FOR UPDATE on EnrichmentConfig and ProviderCredential serializes concurrent checks. No new ledger model needed.
 
-If not sufficient, we would have returned SCHEMA DECISION REQUIRED. We did not.
+## 4. Provider Abstraction
 
-## 3. Provider Abstraction
-
-### Interface
+### Interface — Maximum Cost Contract
 ```ts
 interface EnrichmentProvider {
-  providerType: string; // e.g., 'hunter', 'test-success'
+  providerType: string;
   providerLabel: string;
-  capabilities: { canFindEmail, canFindDomain, canFindWebsite, supportsConfidence, estimatedCostPerRequest }
-  estimateCost?(candidate): number
-  enrich(candidate, context: { credentialId?, ownerToken, attemptId }): Promise<NormalizedEnrichmentResult>
-  normalizeResult?(raw): NormalizedEnrichmentResult
-  healthCheck?(): Promise<{ healthy, kind? }>
+  capabilities: { canFindEmail, canFindDomain, canFindWebsite, supportsConfidence, estimatedCostPerRequest (deprecated), maximumCostPerRequest? }
+  getMaximumCreditCost?(candidate): number; // PREFERRED — MAXIMUM possible charge BEFORE execution
+  estimateCost?(candidate): number; // deprecated alias interpreted as maximum
+  enrich(candidate, context): Promise<NormalizedEnrichmentResult>
 }
 ```
+**Contract:** Adapter must declare MAXIMUM possible credit charge for one execution BEFORE provider call. Reservation amount = maximum. Provider execution may report actual <= reserved, but MUST NEVER legitimately report actual > reserved. If it does, it's contract violation `PROVIDER_COST_EXCEEDED_RESERVATION`, kept at reserved amount conservatively, no budget increase after call.
 
 ### Normalized Result
-```ts
-type NormalizedEnrichmentResult = {
-  status: 'SUCCESS'|'NO_RESULT'|'FAILED',
-  email?, domain?, website?,
-  confidence? 0-1,
-  costUnits?, creditsUsed?,
-  providerReference?,
-  metadata? safe only,
-  failureKind?, failureReason?
-}
-```
+`status SUCCESS|NO_RESULT|FAILED`, email/domain/website, confidence, costUnits, creditsUsed, providerReference, metadata safe, failureKind
 
 ### Registry
-- `ProviderRegistryImpl` with `register`, `resolve`, `availableProviders`, `isRegistered`, `clear`
-- `productionProviderRegistry` — empty in 4C.3B.1, no real adapters, no test adapters. Fail-closed.
-- `testProviderRegistry` — isolated for tests only.
-- Unknown provider → `NO_PROVIDER_ADAPTER`, never generic HTTP.
+- `productionProviderRegistry` — empty prod, fail-closed, 0 adapters
+- `testProviderRegistry` — isolated test only
+- Unknown → `NO_PROVIDER_ADAPTER`, never generic HTTP
 
 ### Failure Classification
-`AUTH_ERROR`, `RATE_LIMITED`, `TIMEOUT`, `PROVIDER_DOWN`, `INVALID_REQUEST`, `NO_CREDITS`, `UNKNOWN_PROVIDER_ERROR`, `NO_RESULT`, `SUCCESS`
-Safe diagnostic metadata only, never auth headers/keys.
+`AUTH_ERROR`, `RATE_LIMITED`, `TIMEOUT`, `PROVIDER_DOWN`, `INVALID_REQUEST`, `NO_CREDITS`, `UNKNOWN_PROVIDER_ERROR`, `NO_RESULT`, `SUCCESS`, plus `ACTIVE_RESERVATION_EXISTS`, `BUDGET_RESERVATION_TIMEOUT`, `PROVIDER_COST_EXCEEDED_RESERVATION`
 
-## 4. Usage Accounting (UTC)
+## 5. Usage Accounting (UTC)
+Derived from EnrichmentAttempt immutable records, **including STARTED reservations**.
 
-Derived from `EnrichmentAttempt` immutable records.
+- `attemptsToday` count `createdAt >= UTC startOfDay`
+- `candidatesProcessedToday` distinct `candidateId` where `createdAt >= startOfDay`
+- `successfulToday`, `noResultToday`, `failedToday`
+- `creditsUsedToday`, `costUnitsToday` sum `createdAt >= startOfDay`
+- `creditsUsedThisMonth` sum `createdAt >= startOfMonth`
+- Unique candidate semantics: retries same candidate NOT consume another candidate slot, attempts/credits still increase
+- Timestamp authoritative: `createdAt` (reservation creation time), `startedAt` same tx
 
-- `getGlobalEnrichmentUsage(tx?)`:
-  - `attemptsToday` count where `createdAt >= UTC start of day`
-  - `candidatesProcessedToday` distinct `candidateId` where `createdAt >= startOfDay`
-  - `successfulToday`, `noResultToday`, `failedToday`
-  - `creditsUsedToday`, `costUnitsToday` sum where `createdAt >= startOfDay`
-  - `creditsUsedThisMonth`, `costUnitsThisMonth` sum where `createdAt >= startOfMonth`
-- `getProviderUsage(credentialId)`:
-  - attempts today/month, success/noResult/failed today, credits today/month per credential
-- `hasCandidateBeenProcessedToday(candidateId)` — for unique candidate semantics
-- Unique candidate daily count: retries same candidate NOT consume another candidate slot, attempts/credits still increase.
+## 6. Budget Gates
+Global: enabled, dailyCandidateLimit unique, dailyCredit, monthlyCredit
+Provider: enabled, dailyLimit, monthlyLimit (credit limits)
+Both use `tx` client under lock for authoritative check.
 
-## 5. Budget Gates
+## 7. Provider Selection
+Deterministic priority DESC provider ASC label ASC id ASC, filters enabled + adapter registered + under budget (advisory, reservation re-checks authoritatively). Explicit block reasons.
 
-### Global Gate `checkGlobalEnrichmentBudget({ candidateId, estimatedCredits, tx })`
-- Verify `EnrichmentConfig.enabled` → else `ENRICHMENT_DISABLED`
-- If not already counted today and `dailyCandidateLimit` reached → `GLOBAL_DAILY_CANDIDATE_LIMIT_REACHED`
-- If `providerDailyCreditLimit` and `creditsUsedToday + estimated > limit` → `GLOBAL_DAILY_CREDIT_LIMIT_REACHED`
-- If `providerMonthlyCreditLimit` and `creditsUsedThisMonth + estimated > limit` → `GLOBAL_MONTHLY_CREDIT_LIMIT_REACHED`
-- Returns `{ allowed, reason, usage, candidateAlreadyCountedToday }`
+## 8. Atomic Reservation — Hardened
 
-### Provider Gate `checkProviderBudget({ providerCredentialId, estimatedCredits, tx })`
-- Verify credential exists → else `NO_PROVIDER_CONFIGURED`
-- Verify `enabled` → else `PROVIDER_DISABLED`
-- `dailyLimit` (credit limit) → if `creditsToday + estimated > dailyLimit` → `PROVIDER_DAILY_LIMIT_REACHED`
-- `monthlyLimit` → if `creditsThisMonth + estimated > monthlyLimit` → `PROVIDER_MONTHLY_LIMIT_REACHED`
-- Clear semantics: credit limits, not attempt counts.
+**Lock order preserved:** 1. EnrichmentConfig 2. ProviderCredential 3. ownership validation 4. budget queries 5. duplicate STARTED check 6. reservation 7. job attempt increment 8. commit
 
-## 6. Provider Selection `selectEnrichmentProvider`
+```ts
+// Inside $transaction { maxWait:15000, timeout:20000 }
+await tx.$queryRaw`SELECT * FROM "EnrichmentConfig" WHERE key='default' FOR UPDATE`;
+await tx.$queryRaw`SELECT * FROM "ProviderCredential" WHERE id=${credId} FOR UPDATE`;
+const job = await tx.enrichmentJob.findUnique({ where:{ id:jobId } });
+if (job.status !== 'PROCESSING' || job.lockedBy !== ownerToken) throw JOB_OWNERSHIP_LOST;
 
-Deterministic: `priority DESC`, `provider ASC`, `label ASC`, `id ASC`
-- Fetches enabled credentials ordered same way
-- Filters to those with adapter registered in registry and under budget
-- If none eligible:
-  - All adapters missing → `NO_PROVIDER_ADAPTER`
-  - Otherwise first budget block reason encountered → `PROVIDER_DAILY_LIMIT_REACHED` etc.
-  - Else `NO_PROVIDER_CONFIGURED`
-- Returns `{ selected: true, credential, adapter }` or `{ selected: false, reason, details }`
+// Duplicate guard — at most ONE active STARTED per job
+const existingStarted = await tx.enrichmentAttempt.findFirst({ where:{ jobId, status:'STARTED' } });
+if (existingStarted) return { reserved:false, reason:'ACTIVE_RESERVATION_EXISTS', existingAttemptId };
 
-## 7. Atomic Reservation `reserveEnrichmentBudgetAtomically`
+const globalCheck = await checkGlobalEnrichmentBudget({ candidateId, estimatedCredits, tx });
+if (!allowed) return { reserved:false, reason };
+const providerCheck = await checkProviderBudget({ providerCredentialId, estimatedCredits, tx });
+if (!allowed) return { reserved:false, reason };
 
-Transaction with row locking:
-```sql
-SELECT * FROM "EnrichmentConfig" WHERE key='default' FOR UPDATE;
-SELECT * FROM "ProviderCredential" WHERE id=$credId FOR UPDATE;
--- verify job PROCESSING + lockedBy ownerToken
--- checkGlobalEnrichmentBudget inside tx
--- checkProviderBudget inside tx
--- CREATE EnrichmentAttempt STARTED creditsUsed=estimated costUnits=estimated metadata reservation
--- UPDATE EnrichmentJob attemptCount increment where lockedBy=ownerToken
+const attempt = await tx.enrichmentAttempt.create({
+  status:'STARTED', creditsUsed:estimatedCredits (maximum), costUnits:estimatedCredits,
+  metadata:{ ownerToken, reservedAt, estimatedCredits, maximumCredits:estimatedCredits, reservation:true }
+});
+await tx.enrichmentJob.updateMany({ where:{ id:jobId, lockedBy:ownerToken, status:'PROCESSING' }, data:{ attemptCount:{increment:1} } });
 ```
 
-- Conservative lifecycle: crash after reservation counts against budget
-- Hard limit guarantee: Two simultaneous workers cannot exceed global daily candidate, global daily credit, global monthly credit, provider daily, provider monthly because row locks serialize budget checks.
+- Duplicate reservation: same job concurrent → exactly ONE STARTED, other `ACTIVE_RESERVATION_EXISTS`, attemptCount +1 only, credits once
+- Reclaimed job: Worker A reserves STARTED, crashes, lock expires, Worker B reclaims same job → B blocked due to unresolved STARTED, no second STARTED, no second credit reservation, no provider execution
+- Unresolved STARTED remains counted in daily/monthly usage (conservative, no overspend)
+- Timeout: explicit `maxWait 15000 timeout 20000`, on P2028 fail closed `BUDGET_RESERVATION_TIMEOUT`, no provider execution
 
-## 8. Orchestrator `executeEnrichmentAttempt`
+## 9. Orchestrator Execution Order — Fail-Closed
 
-Flow: ownership → enabled → global budget → select provider → provider budget → reserve → adapter enrich (test-only) → normalize → update attempt SUCCESS/NO_RESULT/FAILED with `finalCredits = max(estimated, actual)` conservative.
+```
+verify owner
+↓
+advisory budget/provider selection
+↓
+maximum credit cost (getMaximumCreditCost)
+↓
+atomic reservation COMMIT
+↓
+provider execution (ONLY if reservation succeeded)
 
-Production worker must still fail-closed no real adapter.
+Provider execution MUST NOT happen if:
+ENRICHMENT_DISABLED, NO_PROVIDER, BUDGET LIMIT, ACTIVE_RESERVATION_EXISTS, JOB_OWNERSHIP_LOST, BUDGET_RESERVATION_TIMEOUT
+```
 
-## 9. Fallback Policy Foundation
+Cost enforcement:
+- Reserved = maximum
+- If actual > reserved → `PROVIDER_COST_EXCEEDED_RESERVATION` violation, keep reserved amount, no budget increase after call, record `reservedCredits`, `reportedActualCredits` safe metadata
+- If actual < reserved → KEEP reserved 2 conservatively (no refund), hard budget correctness > utilization
+- Zero-cost provider supported: maximum 0, still respects candidate limit, ownership, creates attempt lifecycle
 
-`defaultFallbackPolicy = { allowFallback: false, maxProvidersPerCandidate: 1, treatNoResultAsFallback: false, treatFailedAsFallback: false }`
-- Differentiates FAILED vs NO_RESULT for future use
-- Disabled by default for 4C.3B.1
+## 10. Legacy Bypass Removal
 
-## 10. Provider Health Foundation
+**BLOCKER 1 fixed:** `src/lib/enrichment.ts:startEnrichmentAttempt` previously could create STARTED without budget. Now throws `LEGACY_BYPASS_REMOVED` and instructs to use `reserveEnrichmentBudgetAtomically`. Internal `_legacyStartEnrichmentAttemptInternal` kept private for backward compat but not exported as production path. Repository search now shows **only one** production canonical STARTED creation path: `enrichment-providers.ts:reserveEnrichmentBudgetAtomically`.
 
-Reuse `ProviderCredential.status` field as health: `configured`, `connected`, `error`, `disabled` → mapped to `UNKNOWN/HEALTHY/DEGRADED/DOWN` in UI.
+Classification table:
 
-## 11. Observability
+| File | Pattern | Classification |
+|------|---------|----------------|
+| `src/lib/enrichment-providers.ts` | `enrichmentAttempt.create` + `STARTED` | PRODUCTION CANONICAL — reserveEnrichmentBudgetAtomically |
+| `src/lib/enrichment.ts` | `EnrichmentAttemptStatus.STARTED` in `_legacyStartEnrichmentAttemptInternal` | LEGACY REMOVED — disabled, throws, not exported for provider execution |
+| `scripts/enrichment-worker.mjs` | none | No STARTED creation — fail-closed before claim |
+| Test files `test-enrichment-4c3a*.mjs`, `test-enrichment-4c3b1*.mjs`, `test-enrichment-4c3b1-1.mjs` | direct `prisma.enrichmentAttempt.create` | TEST ONLY — isolated TEST_ prefix |
 
-- `getBudgetStatus()` → `ENRICHMENT_DISABLED`, `WITHIN_BUDGET`, `DAILY_CANDIDATE_LIMIT_REACHED`, `DAILY_CREDIT_LIMIT_REACHED`, `MONTHLY_CREDIT_LIMIT_REACHED`, `NO_PROVIDER_AVAILABLE`
-- `getProvidersForUI()` → id, provider, label, enabled, priority, health, adapterAvailable, adapterStatus `Available`/`Not Integrated`, usage (attemptsToday, creditsToday etc), limits (dailyLimit, monthlyLimit), keyHint, maskedKey `••••...hint`, never `encryptedValue`
-- API `GET /api/enrichment/stats` extended to return `budgetStatus`, `budgetUsage` (candidatesProcessedToday, attemptsToday, creditsToday etc), `providers` array, still `requireActiveUser()` 401, no secrets
-- Enrichment Tab in Settings → Lead Collection:
-  - Budget Status cards
-  - Global Usage UTC accounting: Candidates Today X/100, Attempts Today, Credits Today X/—, Credits Month
-  - Provider table: Provider, Label, Enabled, Priority, Health, Adapter Status Available/Not Integrated, Attempts Today/Month, Credits Today/Month, Daily Limit, Monthly Limit
-  - No mutating buttons (enable/seed/start/change/execute)
+## 11. Fallback Safety
+`defaultFallbackPolicy = { allowFallback:false, maxProvidersPerCandidate:1, ... }` — one candidate cannot burn credits across multiple providers.
 
-## 12. Test Adapters (TEST-ONLY)
+## 12. Observability
+`getBudgetStatus` → `ENRICHMENT_DISABLED`, `WITHIN_BUDGET`, `DAILY_CANDIDATE_LIMIT_REACHED`, `DAILY_CREDIT_LIMIT_REACHED`, `MONTHLY_CREDIT_LIMIT_REACHED`, `NO_PROVIDER_AVAILABLE`
+`getProvidersForUI` → maskedKey, never encryptedValue
+Stats API extended safe authenticated
+Enrichment Tab read-only
 
-- `SuccessTestProvider` `test-success` — returns SUCCESS with fake email/domain, configurable `fakeCredits`
-- `NoResultTestProvider` `test-noresult` — returns NO_RESULT
-- `FailedTestProvider` `test-failed` — returns FAILED with configurable `failureKind` (default PROVIDER_DOWN)
-- Zero network, deterministic, never registered in production registry
+## 13. Test Adapters (TEST-ONLY)
+- `SuccessTestProvider test-success` — SUCCESS, fakeCredits configurable, implements `getMaximumCreditCost`
+- `NoResultTestProvider test-noresult`
+- `FailedTestProvider test-failed`
+- `ZeroCostTestProvider test-zero` — 0 credits, still counts candidate
+- `CostViolationTestProvider test-violation` — reserved 1 actual 2 to test contract violation
+- Zero network, deterministic, never in production registry
 
-## 13. Test Matrix A-AB Results
+## 14. Test Matrix
 
-All passed in `scripts/test-enrichment-4c3b1.mjs` (300s run):
+### A-AB (4C.3B.1)
+All passed: disabled, under limit, limit reached, unique semantics, daily/monthly credits, provider disabled, adapter missing, priority, tie-break, provider limits, no provider, unknown fail-closed, SUCCESS/NO_RESULT/FAILED normalized, secret leakage, 401, same candidate retry, simultaneous global candidate boundary (9+2 concurrent only 1 reserved), simultaneous global credit boundary, simultaneous provider credit boundary, crash after reservation conservative, stale worker blocked, production registry isolation, no external calls.
 
-- **A** enrichment disabled → blocked ENRICHMENT_DISABLED
-- **B** under daily candidate limit → allowed
-- **C** daily candidate limit reached → blocked GLOBAL_DAILY_CANDIDATE_LIMIT_REACHED
-- **D** unique candidate semantics — 3 attempts same candidate = 1 unique, 3 attempts
-- **E** global daily credits under limit → allowed
-- **F** global daily credits overflow — exact limit and decimal 9.5+1 >10 blocked
-- **G** monthly global credits — blocked MONTHLY
-- **H** provider disabled → PROVIDER_DISABLED
-- **I** adapter missing → NO_PROVIDER_ADAPTER fail-closed
-- **J** provider priority — higher priority selected
-- **K** stable tie-break — provider ASC, deterministic same ID on repeated calls
-- **L** provider daily limit → PROVIDER_DAILY_LIMIT_REACHED
-- **M** provider monthly limit → PROVIDER_MONTHLY_LIMIT_REACHED
-- **N** no available provider → NO_PROVIDER_CONFIGURED
-- **O** unknown provider fail-closed — no generic HTTP
-- **P** SUCCESS normalized — email/domain/confidence/credits
-- **Q** NO_RESULT normalized
-- **R** FAILED normalized — failureKind
-- **S** secret leakage — UI maskedKey, no encryptedValue, stats route no secrets
-- **T** unauthenticated API — requireActiveUser present
-- **U** same candidate retry unique count — unique 1, attempts 3
-- **V** simultaneous global candidate boundary — 9 existing + 2 concurrent, only 1 reserved, other GLOBAL_DAILY_CANDIDATE_LIMIT_REACHED (row lock serializes)
-- **W** simultaneous global credit boundary — 9 credits + 2 concurrent 1 each, only 1 reserved
-- **X** simultaneous provider credit boundary — 9 provider credits + 2 concurrent, only 1 reserved
-- **Y** crash after reservation — STARTED attempt counts as candidate, conservative accounting blocks second candidate when limit 1
-- **Z** stale worker cannot reserve after ownership loss — JOB_OWNERSHIP_LOST
-- **AA** production registry isolation — production registry 0 adapters, test registry isolated, no test adapters in prod
-- **AB** no external network calls — no fetch/axios/http in provider layer, no real provider classes (HunterProvider etc), worker no real fetch
+### AC-AP (4C.3B.1.1 Hardening)
+- **AC** legacy bypass removed — canonical STARTED creation count 1, duplicate guard present
+- **AD** same job duplicate reservation race — `Promise.all` same job same owner → exactly 1 STARTED, other `ACTIVE_RESERVATION_EXISTS`
+- **AE** attemptCount duplicate protection — +1 only
+- **AF** duplicate credits protection — credits once
+- **AG** reclaimed job with unresolved STARTED — new owner blocked, no second STARTED
+- **AH** unresolved STARTED remains counted — candidates 1 credits 1
+- **AI** max-cost contract — `getMaximumCreditCost` present
+- **AJ** actual <= reserved normal completion — keeps conservative
+- **AK** actual > reserved contract violation — keeps original, flagged `PROVIDER_COST_EXCEEDED_RESERVATION`, `COST_VIOLATION`
+- **AL** actual lower than reserved — keeps 2 conservative
+- **AM** zero-cost adapter — 0 credits, 1 candidate, respects candidate limit
+- **AN** reservation timeout — explicit `maxWait 15000 timeout 20000`, `BUDGET_RESERVATION_TIMEOUT` fail-closed, no provider execution
+- **AO** no provider call on duplicate block — only 1 attempt
+- **AP** production STARTED creation path count — canonical only (enrichment-providers.ts)
 
-Plus regression:
-- 4C.3A A-L passed
-- 4C.3A.1 A-U passed
-- prisma validate, prisma generate, node --check enrichment-worker.mjs, npm run build passed
+Plus regression 4C.3A A-L and 4C.3A.1 A-U still passing.
 
-## 14. Hard Limit Guarantee
+## 15. Hard Limit Guarantee
+Two simultaneous workers cannot exceed global daily candidate, global daily credit, global monthly credit, provider daily, provider monthly because row locks serialize. Proven by V,W,X and AD,AG. Duplicate guard adds at most ONE active STARTED per job ownership period.
 
-**Question:** Can two simultaneous workers exceed global daily candidate, global daily credit, global monthly credit, provider daily, provider monthly?
+## 16. Future Reconciliation Requirement
+STARTED attempts that remain unresolved after crash (e.g., `startedAt < now-30m AND status=STARTED`) should be surfaced for manual/automated reconciliation in future phase. Not implemented now.
 
-**Answer: NO**
-
-Proof: `reserveEnrichmentBudgetAtomically` does:
-1. `SELECT ... FOR UPDATE` on `EnrichmentConfig` (global) and `ProviderCredential` (provider) — serializes concurrent transactions. Second transaction waits for first to commit (maxWait 15s, timeout 20s).
-2. Inside same transaction, re-checks budget using fresh usage (including reservation just committed by first tx if it committed).
-3. Only if still under limit, creates STARTED attempt counting immediately.
-
-Thus at boundary 9/10, two concurrent reserves: first commits, second sees usage 10 and fails. Same for credits. Tested in V, W, X with `Promise.all` and `FOR UPDATE`.
-
-## 15. Files Changed
-
-- `src/lib/enrichment-providers.ts` — NEW: provider interface, registry, selection, usage accounting UTC, global/provider budget gates, atomic reservation, orchestrator, fallback disabled, failure classification, test adapters, budget status, UI providers
-- `src/app/api/enrichment/stats/route.ts` — extended to return budgetStatus, budgetUsage, providers safe
-- `src/app/(app)/settings/lead-collection/client.tsx` — Enrichment Tab upgraded to 4C.3B.1 Budget Guardrails, read-only
-- `scripts/test-enrichment-4c3b1.mjs` — NEW: A-AB test matrix
+## 17. Files Changed from baad5e5
+- `src/lib/enrichment-providers.ts` — NEW + hardened: max cost contract, duplicate guard ACTIVE_RESERVATION_EXISTS, timeout BUDGET_RESERVATION_TIMEOUT, cost violation handling, zero-cost support, lock order preserved, explicit transaction policy
+- `src/lib/enrichment.ts` — legacy bypass removed: `startEnrichmentAttempt` now throws LEGACY_BYPASS_REMOVED, internal `_legacyStartEnrichmentAttemptInternal` private
+- `src/app/api/enrichment/stats/route.ts` — budgetStatus, budgetUsage, providers safe
+- `src/app/(app)/settings/lead-collection/client.tsx` — Budget Guardrails UI read-only
+- `scripts/test-enrichment-4c3b1.mjs` — A-AB
+- `scripts/test-enrichment-4c3b1-1.mjs` — AC-AP new
 - `docs/PHASE_4C.3B.1_PROVIDER_BUDGET_GUARDRAILS.md` — this file
-- No changes to `collector-worker.mjs`, `collect.yml`, fair rotation, TRUE_NO_SITE, `EnrichmentConfig.enabled=false` prod
+- No changes to collector-worker.mjs, collect.yml, fair rotation, TRUE_NO_SITE, enabled=false
 
-## 16. Commit Control
+## 18. STRICT DO NOT Compliance
+- [x] No real provider integration, no fetch/axios/http for provider, no credits spent, no credentials, no prod enable, no prod jobs/attempts, no prod candidates/Leads mutated, no collector/workflow triggered, no enrichment schedule, no collector-worker/fair rotation/TRUE_NO_SITE modified, no push without approval
 
-No schema change, so commit allowed but DO NOT PUSH until approval.
-
-```
-feat: Phase 4C.3B.1 provider budget guardrails — provider abstraction, UTC usage accounting, hard budget gates, atomic reservation, test adapters, observability
-```
-
-## 17. STRICT DO NOT Compliance
-
-- [x] No Hunter/Dropcontact/Apollo/Snov/OpenAI/Google Places real provider integration
-- [x] No fetch/axios/http for provider
-- [x] No credits spent
-- [x] No real API credentials added
-- [x] No enrichment prod enabled
-- [x] No prod jobs/attempts seeded
-- [x] No prod candidates/Leads mutated
-- [x] No collector/workflow_dispatch triggered
-- [x] No enrichment schedule added
-- [x] No collector-worker.mjs / fair rotation / TRUE_NO_SITE modified
-- [x] No push without approval
+## 19. Commit Control
+- bcd00ac feat: Phase 4C.3B.1
+- NEW fix: harden enrichment budget reservations — DO NOT PUSH until approval

@@ -1,14 +1,28 @@
 /**
- * ClientForge CRM — Phase 4C.3B.1 Provider Abstraction, Usage Accounting & Hard Budget Guardrails
+ * ClientForge CRM — Phase 4C.3B.1.1 Budget Reservation Hardening
+ * Phase 4C.3B.1 Provider Abstraction, Usage Accounting & Hard Budget Guardrails — hardened
  * No real provider HTTP calls — provider execution is test-only adapters
  *
+ * CANONICAL RESERVATION INVARIANT (MUST HOLD):
+ * A provider-backed enrichment execution MUST NOT create an EnrichmentAttempt STARTED directly.
+ * The ONLY production path for provider execution is:
+ *   executeEnrichmentAttempt
+ *           ↓
+ *   reserveEnrichmentBudgetAtomically (locks EnrichmentConfig FOR UPDATE, ProviderCredential FOR UPDATE, checks ownership, checks duplicate STARTED, checks budgets, creates STARTED reservation)
+ *           ↓
+ *   transaction COMMIT
+ *           ↓
+ *   adapter.enrich (test-only, zero network)
+ * No production code may create STARTED provider attempts outside reserveEnrichmentBudgetAtomically.
+ *
  * Key concepts:
- * - Provider interface normalized
+ * - Provider interface normalized with MAXIMUM credit cost contract (getMaximumCreditCost)
  * - Registry with fail-closed for unknown provider
- * - Selection with priority and budget awareness
- * - Usage accounting from EnrichmentAttempt (UTC boundaries)
- * - Global and provider budget gates with atomic reservation via row locking
- * - Failure classification
+ * - Selection with priority and budget awareness (advisory, reservation re-checks authoritatively)
+ * - Usage accounting from EnrichmentAttempt (UTC boundaries) including STARTED reservations
+ * - Global and provider budget gates with atomic reservation via row locking (config first, provider second)
+ * - Duplicate reservation guard: at most ONE active STARTED per job, unresolved STARTED blocks retry after reclaim
+ * - Failure classification, timeout fail-closed, cost contract enforcement
  * - Fallback policy foundation (disabled by default)
  */
 
@@ -43,7 +57,10 @@ export type ProviderFailureKind =
   | 'NO_CREDITS'
   | 'UNKNOWN_PROVIDER_ERROR'
   | 'NO_RESULT' // not failure, but classification for completeness
-  | 'SUCCESS';
+  | 'SUCCESS'
+  | 'ACTIVE_RESERVATION_EXISTS'
+  | 'BUDGET_RESERVATION_TIMEOUT'
+  | 'PROVIDER_COST_EXCEEDED_RESERVATION';
 
 export type ProviderError = {
   kind: ProviderFailureKind;
@@ -76,7 +93,8 @@ export type ProviderCapabilities = {
   canFindDomain: boolean;
   canFindWebsite: boolean;
   supportsConfidence: boolean;
-  estimatedCostPerRequest: number; // default credit cost
+  estimatedCostPerRequest: number; // deprecated alias, use getMaximumCreditCost for hard budget
+  maximumCostPerRequest?: number; // explicit maximum, if not set fallback to estimatedCostPerRequest
 };
 
 // ---------------------------------------------------------------- Provider interface
@@ -85,7 +103,10 @@ export interface EnrichmentProvider {
   providerType: string; // e.g., 'hunter', 'dropcontact', 'mock-success'
   providerLabel: string; // human label
   capabilities: ProviderCapabilities;
-  // Optional cost estimation per candidate
+  // MAXIMUM possible credit cost — hard budget contract: reserved amount must be >= maximum charge
+  // Preferred: getMaximumCreditCost
+  getMaximumCreditCost?(candidate: { id: string; companyName: string; city?: string | null; businessCategory?: string }): number;
+  // Deprecated alias: estimateCost is interpreted as maximum cost for backward compat
   estimateCost?(candidate: { id: string; companyName: string; city?: string | null; businessCategory?: string }): number;
   // Main enrich method — for 4C.3B.1 only test adapters implement, real adapters throw
   enrich(
@@ -152,7 +173,10 @@ export type ProviderBudgetBlockReason =
   | 'NO_PROVIDER_ADAPTER'
   | 'PROVIDER_DAILY_LIMIT_REACHED'
   | 'PROVIDER_MONTHLY_LIMIT_REACHED'
-  | 'UNKNOWN_PROVIDER';
+  | 'UNKNOWN_PROVIDER'
+  | 'ACTIVE_RESERVATION_EXISTS'
+  | 'BUDGET_RESERVATION_TIMEOUT'
+  | 'PROVIDER_COST_EXCEEDED_RESERVATION';
 
 export type BudgetBlockReason = GlobalBudgetBlockReason | ProviderBudgetBlockReason;
 
@@ -442,10 +466,18 @@ export async function selectEnrichmentProvider(params: {
 // ---------------------------------------------------------------- Atomic reservation — uses row locking to prevent concurrent overspend
 // EnrichmentAttempt STARTED acts as reservation counting immediately
 // Conservative accounting: even if worker crashes after reservation, reservation counts
+// Lock order: 1. EnrichmentConfig 2. ProviderCredential 3. ownership validation 4. budget queries 5. duplicate STARTED check 6. reservation 7. job increment 8. commit
 
 export type ReservationResult =
   | { reserved: true; attempt: any; globalUsage: GlobalUsage; providerUsage: ProviderUsage }
-  | { reserved: false; reason: BudgetBlockReason; globalUsage: GlobalUsage; providerUsage?: ProviderUsage };
+  | { reserved: false; reason: BudgetBlockReason; globalUsage: GlobalUsage; providerUsage?: ProviderUsage; existingAttemptId?: string };
+
+export class BudgetReservationTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BUDGET_RESERVATION_TIMEOUT';
+  }
+}
 
 export async function reserveEnrichmentBudgetAtomically(params: {
   jobId: string;
@@ -454,70 +486,101 @@ export async function reserveEnrichmentBudgetAtomically(params: {
   providerType: string;
   providerLabel?: string | null;
   ownerToken: string;
-  estimatedCredits?: number;
+  estimatedCredits?: number; // interpreted as MAXIMUM possible cost
 }): Promise<ReservationResult> {
   const { jobId, candidateId, providerCredentialId, providerType, providerLabel, ownerToken, estimatedCredits = 1 } = params;
 
-  return await prisma.$transaction(async (tx) => {
-    // Serialize budget checks by locking EnrichmentConfig and ProviderCredential rows FOR UPDATE
-    await tx.$queryRaw`SELECT * FROM "EnrichmentConfig" WHERE key='default' FOR UPDATE`;
-    await tx.$queryRaw`SELECT * FROM "ProviderCredential" WHERE id=${providerCredentialId} FOR UPDATE`;
+  try {
+    return await prisma.$transaction(async (tx) => {
+      // 1. EnrichmentConfig global lock
+      await tx.$queryRaw`SELECT * FROM "EnrichmentConfig" WHERE key='default' FOR UPDATE`;
+      // 2. ProviderCredential lock
+      await tx.$queryRaw`SELECT * FROM "ProviderCredential" WHERE id=${providerCredentialId} FOR UPDATE`;
 
-    // Verify job ownership still valid inside same transaction
-    const job = await tx.enrichmentJob.findUnique({ where: { id: jobId } });
-    if (!job) throw new Error(`Job ${jobId} not found`);
-    if (job.status !== 'PROCESSING' || job.lockedBy !== ownerToken) {
-      throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: job ${jobId} not owned by ${ownerToken}`);
-    }
+      // 3. Ownership validation inside same tx
+      const job = await tx.enrichmentJob.findUnique({ where: { id: jobId } });
+      if (!job) throw new Error(`Job ${jobId} not found`);
+      if (job.status !== 'PROCESSING' || job.lockedBy !== ownerToken) {
+        throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: job ${jobId} not owned by ${ownerToken}`);
+      }
 
-    // Check global budget with current tx (includes uncommitted? No, but we have lock)
-    const globalCheck = await checkGlobalEnrichmentBudget({ candidateId, estimatedCredits, tx });
-    if (!globalCheck.allowed) {
-      return { reserved: false, reason: globalCheck.reason!, globalUsage: globalCheck.usage };
-    }
+      // 4. Duplicate STARTED guard — at most ONE active STARTED per job ownership period
+      // Since every canonical reservation locks EnrichmentConfig first, concurrent reservations are globally serialized
+      // Second invocation will observe STARTED created by first
+      const existingStarted = await tx.enrichmentAttempt.findFirst({
+        where: { jobId, status: 'STARTED' },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (existingStarted) {
+        const globalUsage = await getGlobalEnrichmentUsage(tx);
+        const providerUsage = await getProviderUsage(providerCredentialId, tx);
+        return {
+          reserved: false,
+          reason: 'ACTIVE_RESERVATION_EXISTS',
+          globalUsage,
+          providerUsage,
+          existingAttemptId: existingStarted.id,
+        };
+      }
 
-    // Check provider budget
-    const providerCheck = await checkProviderBudget({ providerCredentialId, estimatedCredits, tx });
-    if (!providerCheck.allowed) {
-      return { reserved: false, reason: providerCheck.reason!, globalUsage: globalCheck.usage, providerUsage: providerCheck.usage };
-    }
+      // 5. Budget queries under lock (authoritative)
+      const globalCheck = await checkGlobalEnrichmentBudget({ candidateId, estimatedCredits, tx });
+      if (!globalCheck.allowed) {
+        return { reserved: false, reason: globalCheck.reason!, globalUsage: globalCheck.usage };
+      }
 
-    // Create STARTED attempt with reserved credits — this is the reservation
-    const attempt = await tx.enrichmentAttempt.create({
-      data: {
-        jobId,
-        candidateId,
-        providerCredentialId,
-        providerType,
-        providerLabel: providerLabel || null,
-        status: 'STARTED',
-        startedAt: new Date(),
-        creditsUsed: estimatedCredits,
-        costUnits: estimatedCredits,
-        metadata: {
-          ownerToken,
-          reservedAt: new Date().toISOString(),
-          estimatedCredits,
-          reservation: true,
+      const providerCheck = await checkProviderBudget({ providerCredentialId, estimatedCredits, tx });
+      if (!providerCheck.allowed) {
+        return { reserved: false, reason: providerCheck.reason!, globalUsage: globalCheck.usage, providerUsage: providerCheck.usage };
+      }
+
+      // 6. Create STARTED attempt with reserved credits — reservation, maximum cost
+      const attempt = await tx.enrichmentAttempt.create({
+        data: {
+          jobId,
+          candidateId,
+          providerCredentialId,
+          providerType,
+          providerLabel: providerLabel || null,
+          status: 'STARTED',
+          startedAt: new Date(),
+          creditsUsed: estimatedCredits, // maximum
+          costUnits: estimatedCredits,
+          metadata: {
+            ownerToken,
+            reservedAt: new Date().toISOString(),
+            estimatedCredits,
+            maximumCredits: estimatedCredits,
+            reservation: true,
+          },
         },
-      },
-    });
+      });
 
-    // Increment job attemptCount
-    const updated = await tx.enrichmentJob.updateMany({
-      where: { id: jobId, lockedBy: ownerToken, status: 'PROCESSING' },
-      data: { attemptCount: { increment: 1 }, lastAttemptAt: new Date() },
-    });
-    if (updated.count !== 1) throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: increment failed for job ${jobId}`);
+      // 7. Increment job attemptCount with ownership guard
+      const updated = await tx.enrichmentJob.updateMany({
+        where: { id: jobId, lockedBy: ownerToken, status: 'PROCESSING' },
+        data: { attemptCount: { increment: 1 }, lastAttemptAt: new Date() },
+      });
+      if (updated.count !== 1) throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: increment failed for job ${jobId}`);
 
-    const globalUsage = await getGlobalEnrichmentUsage(tx);
-    const providerUsage = await getProviderUsage(providerCredentialId, tx);
+      const globalUsage = await getGlobalEnrichmentUsage(tx);
+      const providerUsage = await getProviderUsage(providerCredentialId, tx);
 
-    return { reserved: true, attempt, globalUsage, providerUsage };
-  });
+      return { reserved: true, attempt, globalUsage, providerUsage };
+    }, { maxWait: 15000, timeout: 20000 });
+  } catch (e: any) {
+    if (e.code === 'P2028' || e.message?.includes('Unable to start a transaction') || e.name === 'BudgetReservationTimeoutError') {
+      // Fail closed on timeout
+      const globalUsage = await getGlobalEnrichmentUsage();
+      throw new BudgetReservationTimeoutError(`BUDGET_RESERVATION_TIMEOUT: ${e.message}`);
+    }
+    throw e;
+  }
 }
 
 // ---------------------------------------------------------------- Provider execution orchestrator (test adapters only for 4C.3B.1)
+// Execution order: verify owner → advisory budget/provider selection → maximum credit cost → atomic reservation COMMIT → provider execution
+// Provider execution MUST NOT happen if: ENRICHMENT_DISABLED, NO_PROVIDER, BUDGET LIMIT, ACTIVE_RESERVATION_EXISTS, JOB_OWNERSHIP_LOST, BUDGET_RESERVATION_TIMEOUT
 
 export type ExecutionResult = {
   success: boolean;
@@ -532,7 +595,7 @@ export async function executeEnrichmentAttempt(params: {
   candidateId: string;
   ownerToken: string;
   registry?: ProviderRegistryImpl;
-  estimatedCredits?: number;
+  estimatedCredits?: number; // interpreted as maximum
 }): Promise<ExecutionResult> {
   const { jobId, candidateId, ownerToken, registry = productionProviderRegistry, estimatedCredits } = params;
 
@@ -543,51 +606,78 @@ export async function executeEnrichmentAttempt(params: {
     throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: job ${jobId} not owned by ${ownerToken}`);
   }
 
-  // Check global budget
+  // Check global budget (advisory, authoritative check inside reservation)
   const globalCheck = await checkGlobalEnrichmentBudget({ candidateId, estimatedCredits: estimatedCredits || 1 });
   if (!globalCheck.allowed) {
     return { success: false, reason: globalCheck.reason, error: { kind: 'UNKNOWN_PROVIDER_ERROR', message: `Global budget blocked: ${globalCheck.reason}` } };
   }
 
-  // Select provider
+  // Select provider (advisory)
   const selection = await selectEnrichmentProvider({ candidateId, estimatedCredits: estimatedCredits || 1, registry });
   if (!selection.selected) {
     return { success: false, reason: selection.reason, error: { kind: 'UNKNOWN_PROVIDER_ERROR', message: `No provider: ${selection.reason}` } };
   }
 
   const { credential, adapter } = selection;
-  const estCredits = adapter.estimateCost ? adapter.estimateCost({ id: candidateId, companyName: 'test', city: null, businessCategory: 'test' }) : (estimatedCredits || adapter.capabilities.estimatedCostPerRequest || 1);
+  // Maximum cost contract: adapter must declare MAXIMUM possible charge BEFORE execution
+  // Preferred getMaximumCreditCost, fallback estimateCost, fallback capabilities
+  const maxCostFromAdapter = adapter.getMaximumCreditCost
+    ? adapter.getMaximumCreditCost({ id: candidateId, companyName: 'test', city: null, businessCategory: 'test' })
+    : adapter.estimateCost
+      ? adapter.estimateCost({ id: candidateId, companyName: 'test', city: null, businessCategory: 'test' })
+      : (adapter.capabilities.maximumCostPerRequest ?? adapter.capabilities.estimatedCostPerRequest ?? 1);
+  const reservedCredits = estimatedCredits ?? maxCostFromAdapter;
 
-  // Reserve atomically
-  const reservation = await reserveEnrichmentBudgetAtomically({
-    jobId,
-    candidateId,
-    providerCredentialId: credential.id,
-    providerType: adapter.providerType,
-    providerLabel: adapter.providerLabel,
-    ownerToken,
-    estimatedCredits: estCredits,
-  });
+  // Reserve atomically — COMMIT before provider call
+  let reservation: ReservationResult;
+  try {
+    reservation = await reserveEnrichmentBudgetAtomically({
+      jobId,
+      candidateId,
+      providerCredentialId: credential.id,
+      providerType: adapter.providerType,
+      providerLabel: adapter.providerLabel,
+      ownerToken,
+      estimatedCredits: reservedCredits,
+    });
+  } catch (e: any) {
+    if (e.name === 'BUDGET_RESERVATION_TIMEOUT' || e.code === 'P2028') {
+      return { success: false, reason: 'BUDGET_RESERVATION_TIMEOUT', error: { kind: 'BUDGET_RESERVATION_TIMEOUT', message: e.message, retryable: true } };
+    }
+    throw e;
+  }
 
   if (!reservation.reserved) {
-    return { success: false, reason: reservation.reason, error: { kind: 'NO_CREDITS', message: `Budget reservation failed: ${reservation.reason}` } };
+    // Map ACTIVE_RESERVATION_EXISTS to appropriate error kind
+    const kind: ProviderFailureKind = reservation.reason === 'ACTIVE_RESERVATION_EXISTS' ? 'ACTIVE_RESERVATION_EXISTS' : reservation.reason === 'BUDGET_RESERVATION_TIMEOUT' ? 'BUDGET_RESERVATION_TIMEOUT' : 'NO_CREDITS';
+    return { success: false, reason: reservation.reason, error: { kind, message: `Budget reservation failed: ${reservation.reason}`, safeMetadata: { existingAttemptId: (reservation as any).existingAttemptId } } };
   }
 
   const attempt = reservation.attempt;
 
   try {
-    // Execute adapter (test-only, no network)
+    // Execute adapter (test-only, no network) — ONLY after reservation COMMIT
     const result = await adapter.enrich(
       { id: candidateId, companyName: 'test-candidate', city: null, businessCategory: 'test', country: null },
       { credentialId: credential.id, ownerToken, attemptId: attempt.id }
     );
 
-    // Normalize and reconcile actual cost
     const normalized = adapter.normalizeResult ? adapter.normalizeResult(result) : result;
 
-    // Update attempt with actual result and actual cost (conservative: if actual > estimated, keep higher)
-    const actualCredits = normalized.creditsUsed ?? normalized.costUnits ?? estCredits;
-    const finalCredits = Math.max(estCredits, actualCredits); // conservative
+    // Cost contract enforcement:
+    // - reservedCredits is MAXIMUM
+    // - actual must be <= reserved, else PROVIDER_COST_EXCEEDED_RESERVATION contract violation, keep reserved amount conservatively
+    // - if actual < reserved, KEEP reserved conservatively (no refund)
+    const actualCredits = normalized.creditsUsed ?? normalized.costUnits ?? reservedCredits;
+    let finalCredits = reservedCredits; // keep conservative
+    let costViolation = false;
+    let violationMeta: any = null;
+    if (actualCredits > reservedCredits) {
+      costViolation = true;
+      violationMeta = { reservedCredits, reportedActualCredits: actualCredits, violation: 'PROVIDER_COST_EXCEEDED_RESERVATION' };
+      // Do NOT increase beyond reservation
+      finalCredits = reservedCredits;
+    }
 
     let updatedAttempt;
     if (normalized.status === 'SUCCESS') {
@@ -602,15 +692,22 @@ export async function executeEnrichmentAttempt(params: {
           websiteFound: normalized.website || null,
           creditsUsed: finalCredits,
           costUnits: finalCredits,
-          providerResponseCode: '200',
+          providerResponseCode: costViolation ? 'COST_VIOLATION' : '200',
+          failureReason: costViolation ? 'PROVIDER_COST_EXCEEDED_RESERVATION' : null,
           metadata: {
             ...(attempt.metadata as any),
             completedAt: new Date().toISOString(),
             actualResult: normalized,
             finalCredits,
+            reservedCredits,
+            reportedActualCredits: actualCredits,
+            ...(costViolation ? { costViolation: violationMeta } : {}),
           },
         },
       });
+      if (costViolation) {
+        return { success: true, result: normalized, attempt: updatedAttempt, reason: 'PROVIDER_COST_EXCEEDED_RESERVATION', error: { kind: 'PROVIDER_COST_EXCEEDED_RESERVATION', message: `Provider reported ${actualCredits} > reserved ${reservedCredits}`, safeMetadata: violationMeta } };
+      }
     } else if (normalized.status === 'NO_RESULT') {
       updatedAttempt = await prisma.enrichmentAttempt.update({
         where: { id: attempt.id },
@@ -625,6 +722,9 @@ export async function executeEnrichmentAttempt(params: {
             completedAt: new Date().toISOString(),
             actualResult: normalized,
             finalCredits,
+            reservedCredits,
+            reportedActualCredits: actualCredits,
+            ...(costViolation ? { costViolation: violationMeta } : {}),
           },
         },
       });
@@ -643,6 +743,9 @@ export async function executeEnrichmentAttempt(params: {
             completedAt: new Date().toISOString(),
             actualResult: normalized,
             finalCredits,
+            reservedCredits,
+            reportedActualCredits: actualCredits,
+            ...(costViolation ? { costViolation: violationMeta } : {}),
           },
         },
       });
@@ -650,7 +753,6 @@ export async function executeEnrichmentAttempt(params: {
 
     return { success: true, result: normalized, attempt: updatedAttempt };
   } catch (e: any) {
-    // Provider execution failed — still count reservation conservatively
     const failureKind: ProviderFailureKind = e.kind || 'UNKNOWN_PROVIDER_ERROR';
     await prisma.enrichmentAttempt.update({
       where: { id: attempt.id },
@@ -659,11 +761,15 @@ export async function executeEnrichmentAttempt(params: {
         finishedAt: new Date(),
         durationMs: Date.now() - attempt.startedAt.getTime(),
         failureReason: e.message || 'unknown_error',
+        // Keep reserved credits conservatively
+        creditsUsed: reservedCredits,
+        costUnits: reservedCredits,
         metadata: {
           ...(attempt.metadata as any),
           failedAt: new Date().toISOString(),
           error: e.message,
           failureKind,
+          reservedCredits,
         },
       },
     });
@@ -687,7 +793,7 @@ export const defaultFallbackPolicy: FallbackPolicy = {
   treatFailedAsFallback: false,
 };
 
-// ---------------------------------------------------------------- Test adapters — deterministic, no network, configurable fake credits
+// ---------------------------------------------------------------- Test adapters — deterministic, no network, configurable fake credits, maximum cost contract
 
 export class SuccessTestProvider implements EnrichmentProvider {
   providerType = 'test-success';
@@ -698,11 +804,18 @@ export class SuccessTestProvider implements EnrichmentProvider {
     canFindWebsite: false,
     supportsConfidence: true,
     estimatedCostPerRequest: 1,
+    maximumCostPerRequest: 1,
   };
   private fakeCredits: number;
 
   constructor(fakeCredits = 1) {
     this.fakeCredits = fakeCredits;
+    this.capabilities.estimatedCostPerRequest = fakeCredits;
+    this.capabilities.maximumCostPerRequest = fakeCredits;
+  }
+
+  getMaximumCreditCost() {
+    return this.fakeCredits;
   }
 
   estimateCost() {
@@ -710,7 +823,7 @@ export class SuccessTestProvider implements EnrichmentProvider {
   }
 
   async enrich(candidate: any, context: any): Promise<NormalizedEnrichmentResult> {
-    // Zero network calls, deterministic
+    // Zero network calls, deterministic, reports actual <= reserved (equal)
     return {
       status: 'SUCCESS',
       email: `contact@${candidate.companyName?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'test'}.test`,
@@ -734,10 +847,16 @@ export class NoResultTestProvider implements EnrichmentProvider {
     canFindWebsite: false,
     supportsConfidence: false,
     estimatedCostPerRequest: 1,
+    maximumCostPerRequest: 1,
   };
   private fakeCredits: number;
   constructor(fakeCredits = 1) {
     this.fakeCredits = fakeCredits;
+    this.capabilities.estimatedCostPerRequest = fakeCredits;
+    this.capabilities.maximumCostPerRequest = fakeCredits;
+  }
+  getMaximumCreditCost() {
+    return this.fakeCredits;
   }
   estimateCost() {
     return this.fakeCredits;
@@ -761,12 +880,18 @@ export class FailedTestProvider implements EnrichmentProvider {
     canFindWebsite: false,
     supportsConfidence: false,
     estimatedCostPerRequest: 1,
+    maximumCostPerRequest: 1,
   };
   private fakeCredits: number;
   private failureKind: ProviderFailureKind;
   constructor(fakeCredits = 1, failureKind: ProviderFailureKind = 'PROVIDER_DOWN') {
     this.fakeCredits = fakeCredits;
     this.failureKind = failureKind;
+    this.capabilities.estimatedCostPerRequest = fakeCredits;
+    this.capabilities.maximumCostPerRequest = fakeCredits;
+  }
+  getMaximumCreditCost() {
+    return this.fakeCredits;
   }
   estimateCost() {
     return this.fakeCredits;
@@ -779,6 +904,79 @@ export class FailedTestProvider implements EnrichmentProvider {
       costUnits: this.fakeCredits,
       creditsUsed: this.fakeCredits,
       metadata: { test: true, failureKind: this.failureKind },
+    };
+  }
+}
+
+// Zero-cost test adapter for AM
+export class ZeroCostTestProvider implements EnrichmentProvider {
+  providerType = 'test-zero';
+  providerLabel = 'Test Zero Cost Provider';
+  capabilities: ProviderCapabilities = {
+    canFindEmail: true,
+    canFindDomain: true,
+    canFindWebsite: false,
+    supportsConfidence: true,
+    estimatedCostPerRequest: 0,
+    maximumCostPerRequest: 0,
+  };
+  getMaximumCreditCost() {
+    return 0;
+  }
+  estimateCost() {
+    return 0;
+  }
+  async enrich(candidate: any, context: any): Promise<NormalizedEnrichmentResult> {
+    return {
+      status: 'SUCCESS',
+      email: `zero@${candidate.companyName?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'test'}.test`,
+      domain: `${candidate.companyName?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'test'}.test`,
+      confidence: 1,
+      costUnits: 0,
+      creditsUsed: 0,
+      providerReference: `zero-ref-${context.attemptId}`,
+      metadata: { test: true, zeroCost: true },
+    };
+  }
+}
+
+// Violating cost provider for AK — reports actual > reserved
+export class CostViolationTestProvider implements EnrichmentProvider {
+  providerType = 'test-violation';
+  providerLabel = 'Test Cost Violation Provider';
+  capabilities: ProviderCapabilities = {
+    canFindEmail: true,
+    canFindDomain: false,
+    canFindWebsite: false,
+    supportsConfidence: true,
+    estimatedCostPerRequest: 1,
+    maximumCostPerRequest: 1,
+  };
+  private reserved: number;
+  private actual: number;
+  constructor(reserved = 1, actual = 2) {
+    this.reserved = reserved;
+    this.actual = actual;
+    this.capabilities.estimatedCostPerRequest = reserved;
+    this.capabilities.maximumCostPerRequest = reserved;
+  }
+  getMaximumCreditCost() {
+    return this.reserved;
+  }
+  estimateCost() {
+    return this.reserved;
+  }
+  async enrich(candidate: any, context: any): Promise<NormalizedEnrichmentResult> {
+    // Intentionally violates contract: reports actual > reserved
+    return {
+      status: 'SUCCESS',
+      email: `violation@test.test`,
+      domain: `test.test`,
+      confidence: 0.9,
+      costUnits: this.actual,
+      creditsUsed: this.actual,
+      providerReference: `violation-ref-${context.attemptId}`,
+      metadata: { test: true, violation: true },
     };
   }
 }

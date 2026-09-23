@@ -298,6 +298,10 @@ export async function releaseExpiredEnrichmentLocks() {
 }
 
 // ---------------------------------------------------------------- STEP 9 — Attempt recording foundation — OWNERSHIP GUARDED
+// LEGACY BYPASS REMOVED in 4C.3B.1.1 — provider attempts MUST go through reserveEnrichmentBudgetAtomically
+// Canonical invariant: A provider-backed enrichment execution MUST NOT create STARTED directly.
+// Only production path: executeEnrichmentAttempt → reserveEnrichmentBudgetAtomically → STARTED → COMMIT → adapter.enrich
+// This function is now intentionally disabled to prevent budget bypass. Use reserveEnrichmentBudgetAtomically from enrichment-providers.ts
 
 export async function startEnrichmentAttempt(params: {
   jobId: string;
@@ -305,18 +309,31 @@ export async function startEnrichmentAttempt(params: {
   providerCredentialId?: string | null;
   providerType?: string | null;
   providerLabel?: string | null;
-  ownerToken: string; // REQUIRED: must match job.lockedBy
+  ownerToken: string;
+}) {
+  throw new Error(
+    `LEGACY_BYPASS_REMOVED: startEnrichmentAttempt() is disabled in 4C.3B.1.1. Provider-backed attempts must go through reserveEnrichmentBudgetAtomically() in src/lib/enrichment-providers.ts which enforces global budget, provider budget, ownership, duplicate STARTED guard, and row locking. If you need a test helper, use direct Prisma create in isolated test code with TEST_ prefix.`
+  );
+}
+
+// Internal TEST-ONLY helper for 4C.3A legacy tests that need to create attempts without budget (isolated, not for provider execution)
+// Not exported as production path, but kept for backward compat inside this module if needed — use with TEST_ prefix only
+async function _legacyStartEnrichmentAttemptInternal(params: {
+  jobId: string;
+  candidateId: string;
+  providerCredentialId?: string | null;
+  providerType?: string | null;
+  providerLabel?: string | null;
+  ownerToken: string;
 }) {
   const { jobId, candidateId, providerCredentialId, providerType, providerLabel, ownerToken } = params;
   if (!ownerToken) throw new Error('ownerToken required');
-
   return await prisma.$transaction(async (tx) => {
     const job = await tx.enrichmentJob.findUnique({ where: { id: jobId } });
     if (!job) throw new Error(`Job ${jobId} not found`);
     if (job.status !== EnrichmentJobStatus.PROCESSING || job.lockedBy !== ownerToken) {
       throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: job ${jobId} not owned by ${ownerToken}, current owner ${job.lockedBy} status ${job.status}`);
     }
-
     const attempt = await tx.enrichmentAttempt.create({
       data: {
         jobId,
@@ -326,26 +343,14 @@ export async function startEnrichmentAttempt(params: {
         providerLabel: providerLabel || null,
         status: EnrichmentAttemptStatus.STARTED,
         startedAt: new Date(),
-        metadata: {
-          ownerToken,
-          startedBy: ownerToken,
-          startedAt: new Date().toISOString(),
-        },
+        metadata: { ownerToken, startedBy: ownerToken, startedAt: new Date().toISOString(), legacyTestOnly: true },
       },
     });
-
     const updated = await tx.enrichmentJob.updateMany({
       where: { id: jobId, lockedBy: ownerToken, status: EnrichmentJobStatus.PROCESSING },
-      data: {
-        attemptCount: { increment: 1 },
-        lastAttemptAt: new Date(),
-      },
+      data: { attemptCount: { increment: 1 }, lastAttemptAt: new Date() },
     });
-
-    if (updated.count !== 1) {
-      throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: failed to increment attemptCount for job ${jobId}, ownership lost`);
-    }
-
+    if (updated.count !== 1) throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: failed to increment attemptCount for job ${jobId}, ownership lost`);
     return attempt;
   });
 }

@@ -340,15 +340,283 @@ async function fetchOverpass(baseUrl, query, options = {}) {
   };
 }
 
-// --- Lead parsing — Phase 4C.2C enhanced with url/contact:url robustness ---
-function parseOsmElement(el, categorySlug, location) {
-  const tags = el.tags || {};
-  const name = (tags.name || '').trim();
-  if (!name || name.length < 3 || name.length > 100) return null;
+// --- Phase 4C.4A.1: Normalization helpers (JS mirror of collection-normalization.ts) ---
+function trimAndCollapseWhitespace(s) {
+  return s.trim().replace(/\s+/g, ' ');
+}
+function normalizeBusinessNameForComparison(name) {
+  if (!name) return '';
+  let n = String(name).normalize('NFKC');
+  n = trimAndCollapseWhitespace(n);
+  n = n.toLowerCase();
+  n = n.replace(/[‘’´`]/g, "'").replace(/[“”]/g, '"');
+  n = trimAndCollapseWhitespace(n);
+  const suffixes = [
+    /\s+ltd\.?$/i,
+    /\s+limited$/i,
+    /\s+llc\.?$/i,
+    /\s+inc\.?$/i,
+    /\s+incorporated$/i,
+    /\s+corp\.?$/i,
+    /\s+corporation$/i,
+    /\s+co\.?$/i,
+    /\s+pvt\.?\s*ltd\.?$/i,
+    /\s+private\s+limited$/i,
+    /\s+plc$/i,
+    /\s+gmbh$/i,
+  ];
+  for (const re of suffixes) {
+    const prev = n;
+    n = n.replace(re, '').trim();
+    if (n !== prev) break;
+  }
+  n = trimAndCollapseWhitespace(n);
+  return n;
+}
+function normalizeEmailForComparison(email) {
+  if (!email) return null;
+  const trimmed = String(email).trim().toLowerCase();
+  return trimmed || null;
+}
+function normalizePhoneForComparison(phone) {
+  if (!phone) return null;
+  const trimmed = String(phone).trim();
+  if (!trimmed) return null;
+  let normalized = trimmed.replace(/[^\d+]/g, '');
+  if (normalized.includes('+')) {
+    const plusCount = (normalized.match(/\+/g) || []).length;
+    if (plusCount > 1) {
+      normalized = normalized.replace(/\+/g, (match, offset) => (offset === 0 ? '+' : ''));
+    }
+    if (!normalized.startsWith('+')) {
+      normalized = normalized.replace(/\+/g, '');
+    }
+  }
+  if (!normalized || normalized === '+') return null;
+  return normalized;
+}
+function getDigitsOnlyPhone(phone) {
+  if (!phone) return null;
+  const digits = String(phone).replace(/\D/g, '');
+  return digits || null;
+}
+function normalizeWebsiteHostForComparison(website) {
+  if (!website) return null;
+  let w = String(website).trim().toLowerCase();
+  if (!w) return null;
+  w = w.replace(/^https?:\/\//, '').replace(/^ftp:\/\//, '').replace(/^www\./, '');
+  const slashIdx = w.indexOf('/');
+  if (slashIdx !== -1) w = w.slice(0, slashIdx);
+  const qIdx = w.indexOf('?');
+  if (qIdx !== -1) w = w.slice(0, qIdx);
+  const hashIdx = w.indexOf('#');
+  if (hashIdx !== -1) w = w.slice(0, hashIdx);
+  const colonIdx = w.indexOf(':');
+  if (colonIdx !== -1) w = w.slice(0, colonIdx);
+  w = w.replace(/\.$/, '').trim();
+  if (!w || w.length < 4 || !w.includes('.')) return null;
+  return w;
+}
+function normalizeAddressForComparison(address) {
+  if (!address) return null;
+  let a = String(address).normalize('NFKC');
+  a = trimAndCollapseWhitespace(a);
+  a = a.toLowerCase();
+  a = a.replace(/\s*,\s*/g, ', ');
+  a = a.replace(/\s+/g, ' ');
+  a = a.trim();
+  return a || null;
+}
+function normalizeCityForComparison(city) {
+  if (!city) return null;
+  let c = String(city).normalize('NFKC');
+  c = trimAndCollapseWhitespace(c);
+  c = c.toLowerCase();
+  return c || null;
+}
+function normalizePostalCodeForComparison(postal) {
+  if (!postal) return null;
+  let p = String(postal).trim().toLowerCase().replace(/\s+/g, '');
+  return p || null;
+}
+function normalizeCountryCodeForComparison(code) {
+  if (!code) return null;
+  return String(code).trim().toUpperCase() || null;
+}
+function haversineDistanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+function buildSourceEvidenceFromNormalized(record) {
+  return {
+    sourceId: record.sourceId || null,
+    sourceType: record.sourceType,
+    externalType: record.externalType,
+    externalId: record.externalId,
+    rawName: record.name,
+    rawEmail: record.email,
+    rawPhone: record.phone,
+    rawWebsite: record.website,
+    address: record.address,
+    city: record.city,
+    country: record.country,
+    postalCode: record.postalCode,
+    latitude: record.latitude,
+    longitude: record.longitude,
+    collectedAt: record.collectedAt ? record.collectedAt.toISOString() : new Date().toISOString(),
+  };
+}
 
-  // Phase 4C.2C: support website, contact:website, url, contact:url, website:en for future robustness
-  // Do NOT treat Facebook/Instagram as business websites
-  const website = (
+// --- Cross-source matching hook (available for future Google, NOT aggressive for OSM in 4C.4A.1) ---
+function matchNormalizedRecordsHook(incoming, existing, options = {}) {
+  const geoThreshold = options.geoThresholdMeters ?? 75;
+  const reasons = [];
+  const existingNormalizedName = existing.normalizedName ?? normalizeBusinessNameForComparison(existing.companyName || '');
+  const existingNormalizedEmail = existing.normalizedEmail ?? normalizeEmailForComparison(existing.email || null);
+  const existingNormalizedPhone = existing.normalizedPhone ?? normalizePhoneForComparison(existing.phone || null);
+  const existingPhoneDigits = getDigitsOnlyPhone(existing.normalizedPhone || existing.phone || null);
+  const incomingPhoneDigits = getDigitsOnlyPhone(incoming.normalizedPhone || incoming.phone || null);
+  const existingNormalizedAddress = existing.normalizedAddress ?? normalizeAddressForComparison(existing.address || null);
+  const existingNormalizedCity = existing.normalizedCity ?? normalizeCityForComparison(existing.city || null);
+  const existingNormalizedPostal = existing.normalizedPostalCode ?? normalizePostalCodeForComparison(existing.postcode || existing.postalCode || null);
+
+  if (
+    incoming.sourceId &&
+    existing.discoverySourceId &&
+    incoming.sourceId === existing.discoverySourceId &&
+    incoming.externalId &&
+    existing.externalId &&
+    incoming.externalId === existing.externalId &&
+    incoming.externalType &&
+    existing.externalType &&
+    incoming.externalType === existing.externalType
+  ) {
+    reasons.push('SAME_EXTERNAL_ID');
+    return { matched: true, confidence: 'EXACT', reasons, candidateId: existing.id, explain: `Same source ${incoming.sourceId} and external ${incoming.externalType}/${incoming.externalId}` };
+  }
+  if (incoming.normalizedEmail && existingNormalizedEmail && incoming.normalizedEmail === existingNormalizedEmail) {
+    reasons.push('EMAIL_EXACT');
+    return { matched: true, confidence: 'STRONG', reasons, candidateId: existing.id, explain: `Email exact ${incoming.normalizedEmail}` };
+  }
+  if (incoming.normalizedPhone && existingNormalizedPhone) {
+    if (incoming.normalizedPhone === existingNormalizedPhone) {
+      reasons.push('PHONE_EXACT');
+      return { matched: true, confidence: 'STRONG', reasons, candidateId: existing.id, explain: `Phone exact ${incoming.normalizedPhone}` };
+    }
+    if (incomingPhoneDigits && existingPhoneDigits && incomingPhoneDigits === existingPhoneDigits) {
+      reasons.push('PHONE_EXACT');
+      return { matched: true, confidence: 'STRONG', reasons, candidateId: existing.id, explain: `Phone digits exact ${incomingPhoneDigits}` };
+    }
+  }
+  if (incoming.normalizedName && existingNormalizedName && incoming.normalizedName === existingNormalizedName) {
+    if (incoming.normalizedAddress && existingNormalizedAddress && incoming.normalizedAddress === existingNormalizedAddress) {
+      reasons.push('NAME_ADDRESS');
+      return { matched: true, confidence: 'PROBABLE', reasons, candidateId: existing.id, explain: `Name exact + address exact: ${incoming.normalizedName} + ${incoming.normalizedAddress}` };
+    }
+    if (incoming.normalizedPostalCode && existingNormalizedPostal && incoming.normalizedPostalCode === existingNormalizedPostal) {
+      reasons.push('NAME_POSTAL');
+      return { matched: true, confidence: 'PROBABLE', reasons, candidateId: existing.id, explain: `Name exact + postal exact: ${incoming.normalizedName} + ${incoming.normalizedPostalCode}` };
+    }
+    if (incoming.latitude != null && incoming.longitude != null && existing.latitude != null && existing.longitude != null) {
+      const dist = haversineDistanceMeters(incoming.latitude, incoming.longitude, existing.latitude, existing.longitude);
+      if (dist <= geoThreshold) {
+        reasons.push('NAME_GEO');
+        return { matched: true, confidence: 'PROBABLE', reasons, candidateId: existing.id, explain: `Name exact + geo ${dist.toFixed(1)}m <= ${geoThreshold}m: ${incoming.normalizedName}` };
+      }
+    }
+    if (incoming.normalizedCity && existingNormalizedCity && incoming.normalizedCity === existingNormalizedCity) {
+      reasons.push('NAME_CITY');
+      return { matched: true, confidence: 'PROBABLE', reasons, candidateId: existing.id, explain: `Name exact + city exact: ${incoming.normalizedName} + ${incoming.normalizedCity}` };
+    }
+    reasons.push('WEAK_NAME_ONLY');
+    return { matched: false, confidence: 'NONE', reasons, explain: `Weak name-only match: ${incoming.normalizedName}` };
+  }
+  return { matched: false, confidence: 'NONE', reasons: [], explain: 'No matching signals' };
+}
+
+function decideAutoMergeHook(match) {
+  if (!match.matched) return { shouldAutoMerge: false, confidence: match.confidence, reasons: match.reasons, explain: `No match — ${match.explain}` };
+  if (match.confidence === 'EXACT') return { shouldAutoMerge: true, confidence: 'EXACT', reasons: match.reasons, explain: `EXACT auto-merge eligible: ${match.reasons.join(',')}` };
+  if (match.confidence === 'STRONG') return { shouldAutoMerge: true, confidence: 'STRONG', reasons: match.reasons, explain: `STRONG auto-merge eligible: ${match.reasons.join(',')}` };
+  if (match.confidence === 'PROBABLE') return { shouldAutoMerge: false, confidence: 'PROBABLE', reasons: match.reasons, explain: `PROBABLE not auto-merged in Phase 4C.4A — requires additional signal: ${match.reasons.join(',')}` };
+  return { shouldAutoMerge: false, confidence: match.confidence, reasons: match.reasons, explain: `Not auto-merge eligible: ${match.explain}` };
+}
+
+// Public hook for future sources — OSM in 4C.4A.1 keeps same-source authoritative
+async function findExistingBusinessMatch(normalizedRecord, prismaClient, sourceId) {
+  // For this phase, we preserve same-source exact identity as authoritative
+  // This hook is wired for future Google integration, but does NOT aggressively merge historical OSM node/way candidates
+  // It searches by email/phone exact (STRONG) for observability, but caller decides whether to auto-merge
+  try {
+    if (normalizedRecord.normalizedEmail) {
+      const byEmail = await prismaClient.leadCandidate.findFirst({
+        where: { email: normalizedRecord.normalizedEmail },
+      });
+      if (byEmail) {
+        const match = matchNormalizedRecordsHook(normalizedRecord, {
+          id: byEmail.id,
+          companyName: byEmail.companyName,
+          email: byEmail.email,
+          phone: byEmail.phone,
+          address: byEmail.address,
+          city: byEmail.city,
+          postcode: byEmail.postcode,
+          latitude: byEmail.latitude,
+          longitude: byEmail.longitude,
+          externalId: byEmail.externalId,
+          externalType: byEmail.externalType,
+          discoverySourceId: byEmail.discoverySourceId,
+        });
+        if (match.matched && (match.confidence === 'STRONG' || match.confidence === 'EXACT')) {
+          return { existing: byEmail, match, decision: decideAutoMergeHook(match) };
+        }
+      }
+    }
+    if (normalizedRecord.normalizedPhone) {
+      const byPhone = await prismaClient.leadCandidate.findFirst({
+        where: { phone: normalizedRecord.phone },
+      });
+      if (byPhone) {
+        const match = matchNormalizedRecordsHook(normalizedRecord, {
+          id: byPhone.id,
+          companyName: byPhone.companyName,
+          email: byPhone.email,
+          phone: byPhone.phone,
+          address: byPhone.address,
+          city: byPhone.city,
+          postcode: byPhone.postcode,
+          latitude: byPhone.latitude,
+          longitude: byPhone.longitude,
+          externalId: byPhone.externalId,
+          externalType: byPhone.externalType,
+          discoverySourceId: byPhone.discoverySourceId,
+        });
+        if (match.matched && (match.confidence === 'STRONG' || match.confidence === 'EXACT')) {
+          return { existing: byPhone, match, decision: decideAutoMergeHook(match) };
+        }
+      }
+    }
+  } catch (e) {
+    // Hook must never throw, return null on error
+    logWarn('findExistingBusinessMatch hook error', { error: e.message });
+  }
+  return null;
+}
+
+// --- Lead parsing — Phase 4C.2C enhanced with url/contact:url robustness + 4C.4A.1 normalized adapter ---
+function parseOsmElement(el, categorySlug, location) {
+  // Legacy-compatible parsing preserved for parity, now produces NormalizedBusinessRecord as well
+  const tags = el.tags || {};
+  const rawName = (tags.name || '').trim();
+  if (!rawName || rawName.length < 3 || rawName.length > 100) return null;
+
+  // Phase 4C.2C: support website, contact:website, url, contact:url, website:en
+  const websiteRaw = (
     tags.website ||
     tags['contact:website'] ||
     tags.url ||
@@ -356,13 +624,13 @@ function parseOsmElement(el, categorySlug, location) {
     tags['website:en'] ||
     ''
   ).trim();
-  const email = (tags.email || tags['contact:email'] || '').trim();
-  const phone = (tags.phone || tags['contact:phone'] || '').trim();
+  const emailRaw = (tags.email || tags['contact:email'] || '').trim();
+  const phoneRaw = (tags.phone || tags['contact:phone'] || '').trim();
 
-  if (email) {
-    if (email.length > 80) return null;
-    if (!email.includes('@') || !email.split('@')[1]?.includes('.')) return null;
-    if (['example.com', 'test.com', 'noreply', 'no-reply', '.png', '.jpg'].some(b => email.toLowerCase().includes(b))) {
+  if (emailRaw) {
+    if (emailRaw.length > 80) return null;
+    if (!emailRaw.includes('@') || !emailRaw.split('@')[1]?.includes('.')) return null;
+    if (['example.com', 'test.com', 'noreply', 'no-reply', '.png', '.jpg'].some(b => emailRaw.toLowerCase().includes(b))) {
       return null;
     }
   }
@@ -376,9 +644,11 @@ function parseOsmElement(el, categorySlug, location) {
   if (tags['addr:city']) addressParts.push(tags['addr:city']);
   if (tags['addr:postcode']) addressParts.push(tags['addr:postcode']);
 
-  const address = addressParts.join(', ') || tags.address || location.city || '';
+  const addressDisplay = (addressParts.join(', ') || tags.address || location.city || '').slice(0, 200);
+  const cityDisplay = (tags['addr:city'] || location.city || '').slice(0, 100);
+  const countryDisplay = location.countryCode || location.country || 'UK';
+  const postcodeDisplay = (tags['addr:postcode'] || '').slice(0, 20) || null;
 
-  // Phase 4C.2A — extract more data
   let latitude = null;
   let longitude = null;
   if (el.type === 'node' && typeof el.lat === 'number' && typeof el.lon === 'number') {
@@ -392,17 +662,71 @@ function parseOsmElement(el, categorySlug, location) {
     longitude = el.lon;
   }
 
-  const postcode = (tags['addr:postcode'] || '').slice(0, 20) || null;
+  // Display values preserved exactly as before (CRM visible)
+  const company_name = rawName.slice(0, 100);
+  const business_category = categorySlug;
+  const website = websiteRaw.slice(0, 200);
+  const email = emailRaw.slice(0, 150);
+  const phone = phoneRaw.slice(0, 40);
+  const address = addressDisplay;
+  const city = cityDisplay;
+  const country = countryDisplay;
+  const postcode = postcodeDisplay;
+
+  // Normalized comparison values (new, does not affect display)
+  const normalizedName = normalizeBusinessNameForComparison(rawName);
+  const normalizedEmail = normalizeEmailForComparison(emailRaw);
+  const normalizedPhone = normalizePhoneForComparison(phoneRaw);
+  const normalizedWebsiteHost = normalizeWebsiteHostForComparison(websiteRaw);
+  const normalizedAddress = normalizeAddressForComparison(addressDisplay);
+  const normalizedCity = normalizeCityForComparison(cityDisplay);
+  const normalizedPostalCode = normalizePostalCodeForComparison(postcodeDisplay);
+  const normalizedCountryCode = normalizeCountryCodeForComparison(location.countryCode || null);
+
+  // NormalizedBusinessRecord (source-neutral contract)
+  const normalizedRecord = {
+    sourceId: null, // will be filled with actual source.id in main loop
+    sourceType: 'OVERPASS',
+    externalType: el.type,
+    externalId: String(el.id),
+    name: company_name,
+    normalizedName,
+    email: emailRaw || null,
+    normalizedEmail,
+    phone: phoneRaw || null,
+    normalizedPhone,
+    website: websiteRaw || null,
+    normalizedWebsiteHost,
+    websiteEvidence: websiteRaw || null,
+    address: addressDisplay || null,
+    normalizedAddress,
+    city: cityDisplay || null,
+    normalizedCity,
+    region: null,
+    country: countryDisplay || null,
+    countryCode: location.countryCode || null,
+    normalizedCountryCode,
+    postalCode: postcodeDisplay,
+    normalizedPostalCode,
+    latitude,
+    longitude,
+    category: categorySlug,
+    rawSourceData: tags,
+    collectedAt: new Date(),
+  };
+
+  const sourceEvidence = buildSourceEvidenceFromNormalized(normalizedRecord);
 
   return {
-    company_name: name.slice(0, 100),
-    business_category: categorySlug, // MUST continue from LeadCategory.slug, not OSM tags
-    website: website.slice(0, 200),
-    email: email.slice(0, 150),
-    phone: phone.slice(0, 40),
-    address: address.slice(0, 200),
-    city: (tags['addr:city'] || location.city || '').slice(0, 100),
-    country: location.countryCode || location.country || 'UK',
+    // Legacy fields (display, qualification)
+    company_name,
+    business_category,
+    website,
+    email,
+    phone,
+    address,
+    city,
+    country,
     postcode,
     latitude,
     longitude,
@@ -412,6 +736,19 @@ function parseOsmElement(el, categorySlug, location) {
     externalType: el.type,
     rawTags: tags,
     source: `overpass_${(location.countryCode || 'unknown').toLowerCase()}`,
+
+    // New normalized contract (does not change display)
+    normalizedRecord,
+    sourceEvidence,
+    // Normalized comparison helpers for future matching
+    normalizedName,
+    normalizedEmail,
+    normalizedPhone,
+    normalizedWebsiteHost,
+    normalizedAddress,
+    normalizedCity,
+    normalizedPostalCode,
+    normalizedCountryCode,
   };
 }
 
@@ -1191,16 +1528,34 @@ async function main() {
     process.exit(1);
   }
 
-  // 9. Parse leads — Phase 4C.2A enhanced with lat/lng, postcode, rawTags
+  // 9. Parse leads — Phase 4C.2A enhanced with lat/lng, postcode, rawTags + 4C.4A.1 normalized adapter
+  // Actual OSM production path before 4C.4A.1:
+  // Overpass HTTP response → elements[] → parseOsmElement (name, website from 5 keys, email, phone, address, city, country, lat/lng, externalType/Id, rawTags) → parsedLeads → filtering → LeadCandidate persistence → Lead qualification
+  // After 4C.4A.1:
+  // Overpass HTTP response → elements[] → parseOsmElement now produces NormalizedBusinessRecord (OSM Adapter) → normalizedRecord + legacy display fields → same filtering → same persistence but with sourceEvidence in metadata
+  // Boundary: OSM-specific parsing BEFORE normalization, qualification AFTER uses normalized fields where safe but display preserved
   const parsedLeads = [];
   for (const el of elements) {
     const parsed = parseOsmElement(el, category.slug, location);
-    if (parsed) parsedLeads.push(parsed);
+    if (parsed) {
+      // Fill sourceId into normalized contract (was null in parser, now authoritative)
+      if (parsed.normalizedRecord) {
+        parsed.normalizedRecord.sourceId = source.id;
+        parsed.normalizedRecord.sourceType = 'OVERPASS';
+        // Ensure sourceEvidence also has sourceId
+        if (parsed.sourceEvidence) {
+          parsed.sourceEvidence.sourceId = source.id;
+          parsed.sourceEvidence.sourceType = 'OVERPASS';
+        }
+      }
+      parsedLeads.push(parsed);
+    }
   }
   const parsedCount = parsedLeads.length;
   const emailPresentCount = parsedLeads.filter(l => l.email && l.email.trim()).length;
   const emailPresenceRate = parsedCount ? (emailPresentCount / parsedCount) : 0;
   log(`parsed`, { raw: candidatesFound, parsed: parsedCount, emailPresent: emailPresentCount, emailPresenceRate: `${(emailPresenceRate*100).toFixed(2)}%` });
+  log(`normalized adapter active`, { sampleNormalized: parsedLeads[0]?.normalizedRecord ? `${parsedLeads[0].normalizedRecord.name} normalizedName=${parsedLeads[0].normalizedRecord.normalizedName} email=${parsedLeads[0].normalizedRecord.email} normalizedEmail=${parsedLeads[0].normalizedRecord.normalizedEmail}` : 'none' });
 
   // 10. Phase 4C.2A — Candidate persistence + filtering
   let noEmailRejected = 0;
@@ -1245,6 +1600,7 @@ async function main() {
   });
 
   // Helper to persist candidate with dedup: sourceId + externalType + externalId unique
+  // Phase 4C.4A.1: preserve sourceEvidence in metadata without mutating historical records
   async function upsertCandidate(parsedLead, status, rejectionReason = null) {
     try {
       const externalId = parsedLead.externalId || String(parsedLead.osm_id);
@@ -1261,7 +1617,17 @@ async function main() {
         },
       });
 
+      // Build sourceEvidence from normalized record if available
+      const newEvidence = parsedLead.sourceEvidence || (parsedLead.normalizedRecord ? buildSourceEvidenceFromNormalized({ ...parsedLead.normalizedRecord, sourceId: source.id }) : null);
+
       if (existing) {
+        // Preserve existing metadata.sourceEvidence array, append new evidence if not already present
+        const existingMeta = typeof existing.metadata === 'object' && existing.metadata ? existing.metadata : {};
+        const existingEvidenceArray = Array.isArray(existingMeta.sourceEvidence) ? existingMeta.sourceEvidence : existingMeta.sourceEvidence ? [existingMeta.sourceEvidence] : [];
+        // Avoid duplicate evidence for same externalId+sourceId
+        const isDuplicateEvidence = newEvidence && existingEvidenceArray.some(ev => ev.externalId === newEvidence.externalId && ev.sourceId === newEvidence.sourceId && ev.externalType === newEvidence.externalType);
+        const mergedEvidence = isDuplicateEvidence ? existingEvidenceArray : newEvidence ? [...existingEvidenceArray, newEvidence] : existingEvidenceArray;
+
         // Update existing candidate with latest data, keep qualifiedLeadId if already qualified
         const updated = await prisma.leadCandidate.update({
           where: { id: existing.id },
@@ -1282,11 +1648,17 @@ async function main() {
             rejectionReason,
             rawTags: parsedLead.rawTags || null,
             metadata: {
-              ...(typeof existing.metadata === 'object' && existing.metadata ? existing.metadata : {}),
+              ...existingMeta,
               lastSeenRunId: run.id,
               lastSeenAt: new Date().toISOString(),
               osmId: parsedLead.osm_id,
               osmType: parsedLead.osm_type,
+              // Preserve sourceEvidence for multi-source future, but do not retroactively populate old records beyond appending
+              sourceEvidence: mergedEvidence.length ? mergedEvidence : undefined,
+              // Normalized comparison helpers for observability (not used for dedup in this phase for OSM same-source)
+              normalizedName: parsedLead.normalizedName || existingMeta.normalizedName,
+              normalizedEmail: parsedLead.normalizedEmail || existingMeta.normalizedEmail,
+              normalizedPhone: parsedLead.normalizedPhone || existingMeta.normalizedPhone,
             },
           },
         });
@@ -1318,6 +1690,14 @@ async function main() {
               discoveredAt: new Date().toISOString(),
               sourceCity: location.city,
               sourceCountry: location.countryCode,
+              sourceEvidence: newEvidence ? [newEvidence] : [],
+              normalizedName: parsedLead.normalizedName,
+              normalizedEmail: parsedLead.normalizedEmail,
+              normalizedPhone: parsedLead.normalizedPhone,
+              normalizedWebsiteHost: parsedLead.normalizedWebsiteHost,
+              normalizedAddress: parsedLead.normalizedAddress,
+              normalizedCity: parsedLead.normalizedCity,
+              normalizedPostalCode: parsedLead.normalizedPostalCode,
             },
           },
         });

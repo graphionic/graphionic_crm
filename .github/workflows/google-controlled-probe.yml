@@ -44,7 +44,7 @@ jobs:
           echo "Field mask: places.id,places.name,nextPageToken"
           echo "Page size: 1"
           echo "Hostname restriction: places.googleapis.com"
-          node scripts/google-controlled-probe.mjs
+          npx tsx scripts/google-controlled-probe.mjs
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}

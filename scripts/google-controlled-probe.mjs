@@ -51,6 +51,39 @@ async function main(){
   safeLog('CONTROLLED GOOGLE PROBE — Phase 4C.4C.4');
   requireControlledProbeAuth();
 
+  // Smoke mode — loads complete dependency graph but does NOT mutate DB or send network
+  if(process.env.GOOGLE_CONTROLLED_PROBE_SMOKE_TEST === 'true'){
+    safeLog('SMOKE MODE — GOOGLE_CONTROLLED_PROBE_SMOKE_TEST=true — validating runtime without DB mutation or network');
+    try{
+      const { getGoogleCredentialStatus, getGoogleApiKeyForTransport, getCanonicalEnvVarName } = await import('../src/lib/google-credential-reader.ts');
+      const guard = await import('../src/lib/google-request-guardrails.ts');
+      const adapter = await import('../src/lib/google-places-adapter.ts');
+      const norm = await import('../src/lib/collection-normalization.ts');
+      // Validate builders
+      const req = adapter.buildTextSearchRequest({ textQuery:'dental clinic in Manchester UK', pageSize:1, useIdOnly:true });
+      if(!req.endpointUrl.includes('places.googleapis.com')) throw new Error('Builder validation failed');
+      if(!adapter.SEARCH_ID_ONLY_MASK) throw new Error('SEARCH_ID_ONLY_MASK missing');
+      // Validate credential reader
+      const status = getGoogleCredentialStatus();
+      // Validate guardrails
+      if(typeof guard.reserveGoogleControlledProbeAtomically !== 'function') throw new Error('Controlled probe reservation missing');
+      if(typeof guard.checkGoogleCache !== 'function') throw new Error('Cache check missing');
+      if(typeof guard.classifyGoogleError !== 'function') throw new Error('classify missing');
+      // Validate normalization
+      if(typeof norm.normalizedFromGooglePlace !== 'function') throw new Error('normalization missing');
+      safeLog(`Runtime validation OK — credential reader, guardrails, adapter builders, normalization loaded`);
+      safeLog(`Canonical env var: ${getCanonicalEnvVarName()}`);
+      safeLog(`Field mask: ${adapter.SEARCH_ID_ONLY_MASK.join(',')}`);
+      safeLog(`Operation: TEXT_SEARCH, Query: dental clinic in Manchester UK, PageSize: 1`);
+      safeLog(`MAX_NETWORK_REQUESTS=${MAX_NETWORK_REQUESTS}, retries ZERO, pagination ZERO`);
+      safeLog(`CONTROLLED_PROBE_RUNTIME_SMOKE_OK — no DB mutation, no network, runtime valid`);
+      return;
+    }catch(e){
+      console.error('Smoke test failed', e.message, e.stack?.slice(0,500));
+      process.exit(1);
+    }
+  }
+
   // Import modules after auth check
   const { getGoogleCredentialStatus, getGoogleApiKeyForTransport } = await import('../src/lib/google-credential-reader.ts');
   const { reserveGoogleControlledProbeAtomically, checkGoogleCache, completeGoogleReservation, cancelGoogleReservation, classifyGoogleError, getCacheExpiry } = await import('../src/lib/google-request-guardrails.ts');

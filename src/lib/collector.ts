@@ -741,6 +741,12 @@ export async function getLeadCandidateById(id: string) {
       discoverySource: true,
       discoveryRun: { include: { location: true, category: true, source: true } },
       qualifiedLead: true,
+      enrichmentJob: true,
+      enrichmentAttemptRecords: {
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        include: { providerCredential: { select: { provider: true, label: true, keyHint: true } } },
+      },
     },
   });
 }

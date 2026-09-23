@@ -182,6 +182,49 @@ model CollectorConfig {
   updatedAt DateTime @updatedAt
 }
 
+// ---------------------------------------------------------------- PHASE 4C.3A — ENRICHMENT ENGINE FOUNDATION
+
+model EnrichmentConfig {
+  id  String @id @default(cuid())
+  key String @unique @default("default")
+
+  // Critical: default enrichment MUST be disabled
+  enabled Boolean @default(false)
+
+  // Budget / rate-limit foundation
+  dailyCandidateLimit Int @default(100) // max candidates to enrich per day
+  batchSize           Int @default(25) // per-run batch size
+  maxAttemptsPerCandidate Int @default(3) // max attempts per candidate
+  retryCooldownMinutes    Int @default(60) // cooldown between retries
+  jobLockDurationMinutes  Int @default(10) // lock duration for claimed jobs
+
+  providerDailyCreditLimit   Int? // global daily credit limit
+  providerMonthlyCreditLimit Int? // global monthly credit limit
+
+  metadata Json? // extensible for future provider-specific config
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum EnrichmentJobStatus {
+  PENDING
+  PROCESSING
+  VERIFICATION_PENDING
+  COMPLETED
+  FAILED
+  EXHAUSTED
+  CANCELLED
+}
+
+enum EnrichmentAttemptStatus {
+  STARTED
+  SUCCESS
+  NO_RESULT
+  FAILED
+  SKIPPED
+}
+
 model CollectorLocation {
   id String @id @default(cuid())
 
@@ -271,7 +314,7 @@ model DataSource {
 model ProviderCredential {
   id String @id @default(cuid())
 
-  provider String // openai | google_maps | enrichment | resend | custom
+  provider String // openai | google_maps | enrichment | resend | custom | hunter | dropcontact | apollo | snov
   label    String? // optional label for multiple keys per provider
 
   encryptedValue String // AES-256-GCM encrypted API key, never plaintext
@@ -280,11 +323,19 @@ model ProviderCredential {
   enabled Boolean @default(true)
   status  String  @default("configured") // configured | connected | error | missing
 
+  // Phase 4C.3A — enrichment budget foundation (additive, optional)
+  priority     Int  @default(50) // 0-100, higher = preferred provider
+  dailyLimit   Int? // max attempts/credits per day
+  monthlyLimit Int? // max attempts/credits per month
+
   lastUsedAt   DateTime?
   lastTestedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Relations — Phase 4C.3A
+  enrichmentAttempts EnrichmentAttempt[]
 
   @@unique([provider, label])
   @@index([provider])
@@ -429,7 +480,7 @@ model LeadCandidate {
   status          LeadCandidateStatus @default(DISCOVERED)
   rejectionReason String? // existing_website, generic_email, invalid_email, email_domain_has_live_website, duplicate, enrichment_failed
 
-  // future enrichment foundation ONLY (no behavior yet)
+  // future enrichment foundation ONLY (no behavior yet) — legacy counters
   enrichmentAttempts Int       @default(0)
   lastEnrichmentAt   DateTime?
   enrichmentProvider String?
@@ -444,6 +495,10 @@ model LeadCandidate {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Phase 4C.3A — enrichment relations
+  enrichmentJob      EnrichmentJob?
+  enrichmentAttemptRecords EnrichmentAttempt[]
+
   // Composite unique for OSM dedup: same source + externalType + externalId should be unique, but allow nulls and future providers coexistence
   // We use a unique constraint on source + externalType + externalId where externalId not null
   // Prisma does not support partial unique, so we document and enforce via application logic + unique index on combined fields
@@ -455,4 +510,95 @@ model LeadCandidate {
   @@index([qualifiedLeadId])
   @@index([discoverySourceId])
   @@index([externalId])
+}
+
+model EnrichmentJob {
+  id String @id @default(cuid())
+
+  // Candidate — at most ONE active job per candidate (unique)
+  candidateId String @unique
+  candidate   LeadCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  status EnrichmentJobStatus @default(PENDING)
+
+  priority Int @default(50) // 0-100, higher = sooner
+
+  attemptCount Int @default(0)
+  maxAttempts  Int @default(3)
+
+  nextAttemptAt DateTime?
+
+  // Concurrency protection
+  lockedAt      DateTime?
+  lockedBy      String? // workerId
+  lockExpiresAt DateTime?
+
+  lastAttemptAt DateTime?
+  completedAt   DateTime?
+
+  // Staged results (provider-neutral)
+  resultEmail   String?
+  resultDomain  String?
+  resultWebsite String?
+
+  failureReason String?
+
+  metadata Json? // extensible, safe summary only — never secrets
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  attempts EnrichmentAttempt[]
+
+  @@index([status])
+  @@index([nextAttemptAt])
+  @@index([priority])
+  @@index([lockedBy])
+  @@index([lockExpiresAt])
+  @@index([candidateId])
+}
+
+model EnrichmentAttempt {
+  id String @id @default(cuid())
+
+  jobId String
+  job   EnrichmentJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  candidateId String
+  candidate   LeadCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  // Provider identity — snapshot, never secret
+  providerCredentialId String?
+  providerCredential   ProviderCredential? @relation(fields: [providerCredentialId], references: [id], onDelete: SetNull)
+
+  providerType String? // hunter | dropcontact | apollo | mock | etc
+  providerLabel String? // label snapshot
+
+  status EnrichmentAttemptStatus @default(STARTED)
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  durationMs Int?
+
+  // Found data
+  emailFound   String?
+  domainFound  String?
+  websiteFound String?
+
+  failureReason        String?
+  providerResponseCode String? // HTTP code or provider-specific code, safe
+
+  costUnits   Float? // credits, cost units
+  creditsUsed Float?
+
+  metadata Json? // safe summary only
+
+  createdAt DateTime @default(now())
+
+  @@index([jobId])
+  @@index([candidateId])
+  @@index([providerCredentialId])
+  @@index([status])
+  @@index([startedAt])
+  @@index([providerType])
 }

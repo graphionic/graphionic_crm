@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 
-type Tab = "overview" | "general" | "locations" | "categories" | "sources" | "rules" | "runs" | "states" | "candidates";
+type Tab = "overview" | "general" | "locations" | "categories" | "sources" | "rules" | "runs" | "states" | "candidates" | "enrichment";
 
 function formatCountdown(nextEligible: string | null) {
   if (!nextEligible) return "Now";
@@ -121,6 +121,13 @@ export default function LeadCollectionClient({
   const [detailOpen, setDetailOpen] = useState(false);
   const [rawTagsOpen, setRawTagsOpen] = useState(false);
 
+  // Enrichment State — Phase 4C.3A
+  const [enrichmentStats, setEnrichmentStats] = useState<any>(null);
+  const [enrichmentLoading, setEnrichmentLoading] = useState(false);
+  const [enrichmentJobs, setEnrichmentJobs] = useState<any>(null);
+  const [enrichmentJobsPage, setEnrichmentJobsPage] = useState(1);
+  const [enrichmentJobsStatus, setEnrichmentJobsStatus] = useState("All");
+
   useEffect(() => {
     const t = setTimeout(() => setCandidateSearchDebounced(candidateSearch), 400);
     return () => clearTimeout(t);
@@ -181,6 +188,33 @@ export default function LeadCollectionClient({
     }
   }, []);
 
+  const fetchEnrichmentStats = useCallback(async () => {
+    setEnrichmentLoading(true);
+    try {
+      const res = await fetch("/api/enrichment/stats");
+      if (!res.ok) throw new Error("Failed to fetch enrichment stats");
+      const data = await res.json();
+      setEnrichmentStats(data);
+    } catch (e: any) {
+      console.error(e);
+    } finally {
+      setEnrichmentLoading(false);
+    }
+  }, []);
+
+  const fetchEnrichmentJobs = useCallback(async () => {
+    try {
+      const params = new URLSearchParams({ page: String(enrichmentJobsPage), pageSize: "25" });
+      if (enrichmentJobsStatus && enrichmentJobsStatus !== "All") params.set("status", enrichmentJobsStatus);
+      const res = await fetch(`/api/enrichment/jobs?${params.toString()}`);
+      if (!res.ok) throw new Error("Failed to fetch jobs");
+      const data = await res.json();
+      setEnrichmentJobs(data);
+    } catch (e: any) {
+      console.error(e);
+    }
+  }, [enrichmentJobsPage, enrichmentJobsStatus]);
+
   useEffect(() => {
     if (activeTab === "candidates") {
       fetchCandidateStats();
@@ -192,6 +226,19 @@ export default function LeadCollectionClient({
       fetchCandidates();
     }
   }, [activeTab, fetchCandidates]);
+
+  useEffect(() => {
+    if (activeTab === "enrichment") {
+      fetchEnrichmentStats();
+      fetchEnrichmentJobs();
+    }
+  }, [activeTab, fetchEnrichmentStats, fetchEnrichmentJobs]);
+
+  useEffect(() => {
+    if (activeTab === "enrichment") {
+      fetchEnrichmentJobs();
+    }
+  }, [enrichmentJobsPage, enrichmentJobsStatus]);
 
   useEffect(() => {
     setCandidatePage(1);
@@ -388,6 +435,7 @@ export default function LeadCollectionClient({
     { id: "runs", label: "Runs", count: runs.length },
     { id: "states", label: "States", count: states.length },
     { id: "candidates", label: "Candidates", count: candidateStats?.total ?? overview.counts?.candidateCount ?? null },
+    { id: "enrichment", label: "Enrichment", count: enrichmentStats?.totalJobs ?? null },
     { id: "locations", label: "Locations", count: locations.length },
     { id: "categories", label: "Categories", count: categories.length },
     { id: "sources", label: "Sources", count: sources.length },
@@ -799,14 +847,36 @@ export default function LeadCollectionClient({
                     </div>
                   </div>
 
-                  {/* Enrichment */}
+                  {/* Enrichment — Phase 4C.3A */}
                   <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 14 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", color: "#9299A8", textTransform: "uppercase", marginBottom: 10 }}>Enrichment (Future)</div>
+                    <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", color: "#9299A8", textTransform: "uppercase", marginBottom: 10 }}>Enrichment — Phase 4C.3A</div>
                     <div style={{ display: "grid", gap: 6, fontSize: 12 }}>
-                      <div><span style={{ color: "#9299A8" }}>Enrichment Attempts:</span> {selectedCandidate.enrichmentAttempts ?? 0}</div>
-                      <div><span style={{ color: "#9299A8" }}>Last Enrichment At:</span> {selectedCandidate.lastEnrichmentAt ? new Date(selectedCandidate.lastEnrichmentAt).toLocaleString() : "—"}</div>
-                      <div><span style={{ color: "#9299A8" }}>Enrichment Provider:</span> {selectedCandidate.enrichmentProvider || "—"}</div>
-                      <div style={{ fontSize: 10, color: "#9299A8" }}>Currently empty — part of future enrichment architecture, displayed for traceability.</div>
+                      <div><span style={{ color: "#9299A8" }}>Legacy Attempts:</span> {selectedCandidate.enrichmentAttempts ?? 0} — <span style={{ fontSize: 10, color: "#9299A8" }}>legacy counter, use Job below</span></div>
+                      {selectedCandidate.enrichmentJob ? (
+                        <>
+                          <div><span style={{ color: "#9299A8" }}>Job Status:</span> <span style={{ padding: "2px 6px", borderRadius: 4, background: selectedCandidate.enrichmentJob.status==="PENDING"?"#FFF6E3":selectedCandidate.enrichmentJob.status==="PROCESSING"?"#F0ECFA":"#FAF9F7", fontSize: 11, fontWeight: 600 }}>{selectedCandidate.enrichmentJob.status}</span></div>
+                          <div><span style={{ color: "#9299A8" }}>Attempt Count:</span> {selectedCandidate.enrichmentJob.attemptCount}/{selectedCandidate.enrichmentJob.maxAttempts}</div>
+                          <div><span style={{ color: "#9299A8" }}>Next Attempt:</span> {selectedCandidate.enrichmentJob.nextAttemptAt ? new Date(selectedCandidate.enrichmentJob.nextAttemptAt).toLocaleString() : "—"}</div>
+                          <div><span style={{ color: "#9299A8" }}>Locked:</span> {selectedCandidate.enrichmentJob.lockedBy ? `${selectedCandidate.enrichmentJob.lockedBy.slice(0,12)}… exp ${selectedCandidate.enrichmentJob.lockExpiresAt ? new Date(selectedCandidate.enrichmentJob.lockExpiresAt).toLocaleTimeString() : ""}` : "—"}</div>
+                          <div><span style={{ color: "#9299A8" }}>Result:</span> {selectedCandidate.enrichmentJob.resultEmail || selectedCandidate.enrichmentJob.resultDomain || selectedCandidate.enrichmentJob.resultWebsite || "—"}</div>
+                          <div><span style={{ color: "#9299A8" }}>Failure Reason:</span> {selectedCandidate.enrichmentJob.failureReason || "—"}</div>
+                        </>
+                      ) : (
+                        <div style={{ fontSize: 11, color: "#9299A8" }}>No enrichment job — candidate in clean queue, eligible for future seeding (Phase 4C.3A foundation only, no auto-seeding)</div>
+                      )}
+                      {selectedCandidate.enrichmentAttemptRecords && selectedCandidate.enrichmentAttemptRecords.length > 0 && (
+                        <div style={{ marginTop: 8, borderTop: "1px solid #F0EEEA", paddingTop: 8 }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "#151927", marginBottom: 4 }}>Recent Attempts ({selectedCandidate.enrichmentAttemptRecords.length})</div>
+                          {selectedCandidate.enrichmentAttemptRecords.slice(0,5).map((a: any) => (
+                            <div key={a.id} style={{ fontSize: 10, color: "#60697A", display: "flex", gap: 6, marginBottom: 2 }}>
+                              <span style={{ fontWeight: 600 }}>{a.status}</span>
+                              <span>{a.providerType || "—"} {a.providerLabel ? `(${a.providerLabel})` : ""}</span>
+                              <span>{a.emailFound || a.domainFound || a.websiteFound || ""}</span>
+                              <span style={{ color: "#9299A8" }}>{new Date(a.startedAt).toLocaleTimeString()}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1082,6 +1152,167 @@ export default function LeadCollectionClient({
               </table>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Enrichment Tab — Phase 4C.3A Foundation */}
+      {activeTab === "enrichment" && (
+        <div style={{ display: "grid", gap: 16 }}>
+          <div>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: "#151927" }}>Enrichment Engine — Phase 4C.3A Foundation</h3>
+            <p style={{ fontSize: 12, color: "#60697A", marginTop: 4 }}>Provider-agnostic enrichment jobs for NEEDS_ENRICHMENT candidates. No external API calls in this phase. Default disabled, fail-closed.</p>
+          </div>
+
+          {enrichmentLoading ? (
+            <div style={{ padding: 24, textAlign: "center", color: "#9299A8", fontSize: 12, background: "white", border: "1px solid #E5E3DF", borderRadius: 12 }}>Loading enrichment stats...</div>
+          ) : !enrichmentStats ? (
+            <div style={{ padding: 24, textAlign: "center", color: "#EC6262", fontSize: 12, background: "white", border: "1px solid #E5E3DF", borderRadius: 12 }}>Failed to load enrichment stats</div>
+          ) : (
+            <>
+              {/* Config summary */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+                <div style={{ background: enrichmentStats.config?.enabled ? "#FDECEC" : "#EEF8F4", border: `1px solid ${enrichmentStats.config?.enabled ? "#FBD5D5" : "#D5F0E5"}`, borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", color: enrichmentStats.config?.enabled ? "#C53030" : "#276749", textTransform: "uppercase" }}>Enrichment Status</div>
+                  <div style={{ fontSize: 16, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.config?.enabled ? "● Enabled" : "● Disabled"}</div>
+                  <div style={{ fontSize: 10, color: "#60697A", marginTop: 2 }}>{enrichmentStats.config?.enabled ? "Provider calls allowed (4C.3B)" : "Fail-closed, no external calls"}</div>
+                </div>
+                <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", color: "#9299A8", textTransform: "uppercase" }}>Daily Limit / Batch</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.config?.dailyCandidateLimit} / {enrichmentStats.config?.batchSize}</div>
+                  <div style={{ fontSize: 10, color: "#60697A", marginTop: 2 }}>Max attempts {enrichmentStats.config?.maxAttemptsPerCandidate}, cooldown {enrichmentStats.config?.retryCooldownMinutes}m</div>
+                </div>
+                <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", color: "#9299A8", textTransform: "uppercase" }}>Lock Duration</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.config?.jobLockDurationMinutes}m</div>
+                  <div style={{ fontSize: 10, color: "#60697A", marginTop: 2 }}>Provider daily limit {enrichmentStats.config?.providerDailyCreditLimit ?? "—"} monthly {enrichmentStats.config?.providerMonthlyCreditLimit ?? "—"}</div>
+                </div>
+                <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", color: "#9299A8", textTransform: "uppercase" }}>Providers</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.providerCount ?? 0} configured</div>
+                  <div style={{ fontSize: 10, color: "#60697A", marginTop: 2 }}>{enrichmentStats.providerCount ? "Enrichment providers ready" : "No enrichment provider configured"}</div>
+                </div>
+              </div>
+
+              {/* Job metrics */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+                <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}>Eligible Candidates</div>
+                  <div style={{ fontSize: 20, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.eligibleCandidates ?? 0}</div>
+                  <div style={{ fontSize: 10, color: "#60697A" }}>Clean queue for enrichment</div>
+                </div>
+                <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}>Pending Jobs</div>
+                  <div style={{ fontSize: 20, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.pending ?? 0}</div>
+                  <div style={{ fontSize: 10, color: "#60697A" }}>Awaiting worker</div>
+                </div>
+                <div style={{ background: "white", border: "1px solid #F4BE52", borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#B7791F", textTransform: "uppercase" }}>Processing</div>
+                  <div style={{ fontSize: 20, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.processing ?? 0}</div>
+                  <div style={{ fontSize: 10, color: "#60697A" }}>Locked by worker</div>
+                </div>
+                <div style={{ background: "white", border: "1px solid #C5E9F1", borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#2B6CB0", textTransform: "uppercase" }}>Verification Pending</div>
+                  <div style={{ fontSize: 20, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.verificationPending ?? 0}</div>
+                  <div style={{ fontSize: 10, color: "#60697A" }}>Awaiting TRUE_NO_SITE</div>
+                </div>
+                <div style={{ background: "white", border: "1px solid #D5F0E5", borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#276749", textTransform: "uppercase" }}>Completed</div>
+                  <div style={{ fontSize: 20, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.completed ?? 0}</div>
+                  <div style={{ fontSize: 10, color: "#60697A" }}>Successfully enriched</div>
+                </div>
+                <div style={{ background: "white", border: "1px solid #FBD5D5", borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#C53030", textTransform: "uppercase" }}>Failed</div>
+                  <div style={{ fontSize: 20, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.failed ?? 0}</div>
+                  <div style={{ fontSize: 10, color: "#60697A" }}>Will retry if attempts remain</div>
+                </div>
+                <div style={{ background: "white", border: "1px solid #E0D6F5", borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#553C9A", textTransform: "uppercase" }}>Exhausted</div>
+                  <div style={{ fontSize: 20, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.exhausted ?? 0}</div>
+                  <div style={{ fontSize: 10, color: "#60697A" }}>Max attempts reached</div>
+                </div>
+              </div>
+
+              {/* Daily attempts */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
+                <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}>Attempts Today</div>
+                  <div style={{ fontSize: 18, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.attemptsToday ?? 0}</div>
+                </div>
+                <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}>Success Today</div>
+                  <div style={{ fontSize: 18, fontWeight: 600, color: "#4FAE91", marginTop: 4 }}>{enrichmentStats.successToday ?? 0}</div>
+                </div>
+                <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}>No Result Today</div>
+                  <div style={{ fontSize: 18, fontWeight: 600, color: "#F29B38", marginTop: 4 }}>{enrichmentStats.noResultToday ?? 0}</div>
+                </div>
+                <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}>Failed Today</div>
+                  <div style={{ fontSize: 18, fontWeight: 600, color: "#EC6262", marginTop: 4 }}>{enrichmentStats.failedToday ?? 0}</div>
+                </div>
+                <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}>Credits Used Today</div>
+                  <div style={{ fontSize: 18, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.creditsUsedToday ?? 0}</div>
+                  <div style={{ fontSize: 10, color: "#9299A8" }}>Cost units {enrichmentStats.costUnitsToday ?? 0}</div>
+                </div>
+              </div>
+
+              {/* Jobs table */}
+              <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, overflow: "hidden" }}>
+                <div style={{ padding: "12px 16px", borderBottom: "1px solid #E5E3DF", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#151927" }}>Enrichment Jobs — {enrichmentJobs?.total ?? 0} total</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <select value={enrichmentJobsStatus} onChange={e => { setEnrichmentJobsStatus(e.target.value); setEnrichmentJobsPage(1); }} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 12, background: "white" }}>
+                      <option value="All">All Status</option>
+                      <option value="PENDING">Pending</option>
+                      <option value="PROCESSING">Processing</option>
+                      <option value="VERIFICATION_PENDING">Verification Pending</option>
+                      <option value="COMPLETED">Completed</option>
+                      <option value="FAILED">Failed</option>
+                      <option value="EXHAUSTED">Exhausted</option>
+                      <option value="CANCELLED">Cancelled</option>
+                    </select>
+                    <button onClick={() => { fetchEnrichmentStats(); fetchEnrichmentJobs(); }} style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #E5E3DF", background: "#FAF9F7", fontSize: 11, cursor: "pointer" }}>Refresh</button>
+                  </div>
+                </div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 900 }}>
+                    <thead><tr style={{ background: "#FAF9F7", borderBottom: "1px solid #E5E3DF", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}><th style={{ padding: "10px 12px" }}>Job / Candidate</th><th style={{ padding: "10px 12px" }}>Status</th><th style={{ padding: "10px 12px" }}>Attempts</th><th style={{ padding: "10px 12px" }}>Next Attempt</th><th style={{ padding: "10px 12px" }}>Locked</th><th style={{ padding: "10px 12px" }}>Result</th><th style={{ padding: "10px 12px" }}>Created</th></tr></thead>
+                    <tbody>
+                      {!enrichmentJobs || enrichmentJobs.jobs.length === 0 ? (
+                        <tr><td colSpan={7} style={{ padding: 24, textAlign: "center", color: "#9299A8", fontSize: 12 }}>{enrichmentStats.totalJobs === 0 ? "No enrichment jobs — clean queue ready for future seeding (Phase 4C.3A foundation only, no auto-seeding)" : "No jobs match filter"}</td></tr>
+                      ) : (
+                        enrichmentJobs.jobs.map((j: any) => (
+                          <tr key={j.id} style={{ borderBottom: "1px solid #F0EEEA" }}>
+                            <td style={{ padding: "10px 12px" }}><div style={{ fontWeight: 500, color: "#151927", fontSize: 12 }}>{j.candidate?.companyName || j.candidateId.slice(0,8)}</div><div style={{ fontSize: 10, color: "#9299A8", fontFamily: "monospace" }}>{j.id.slice(0,8)}… / {j.candidateId.slice(0,8)}… {j.candidate?.city ? `(${j.candidate.city})` : ""}</div></td>
+                            <td style={{ padding: "10px 12px" }}><span style={{ fontSize: 10, fontWeight: 600, padding: "3px 7px", borderRadius: 6, background: j.status==="PENDING"?"#FFF6E3":j.status==="PROCESSING"?"#F0ECFA":j.status==="VERIFICATION_PENDING"?"#EAF7FA":j.status==="COMPLETED"?"#EEF8F4":j.status==="FAILED"?"#FDECEC":j.status==="EXHAUSTED"?"#F0EEEA":"#FAF9F7", color: j.status==="PENDING"?"#B7791F":j.status==="PROCESSING"?"#49339A":j.status==="VERIFICATION_PENDING"?"#2B6CB0":j.status==="COMPLETED"?"#276749":j.status==="FAILED"?"#C53030":"#60697A", border: "1px solid #E5E3DF" }}>{j.status}</span></td>
+                            <td style={{ padding: "10px 12px", fontSize: 11 }}>{j.attemptCount}/{j.maxAttempts}</td>
+                            <td style={{ padding: "10px 12px", fontSize: 11, color: "#60697A" }}>{j.nextAttemptAt ? new Date(j.nextAttemptAt).toLocaleString() : "—"}</td>
+                            <td style={{ padding: "10px 12px", fontSize: 11, color: "#9299A8" }}>{j.lockedBy ? `${j.lockedBy.slice(0,12)}… ${j.lockExpiresAt ? `exp ${new Date(j.lockExpiresAt).toLocaleTimeString()}` : ""}` : "—"}</td>
+                            <td style={{ padding: "10px 12px", fontSize: 11, color: "#60697A" }}>{j.resultEmail || j.resultDomain || j.resultWebsite || "—"}</td>
+                            <td style={{ padding: "10px 12px", fontSize: 11, color: "#9299A8" }}>{new Date(j.createdAt).toLocaleDateString()}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                {enrichmentJobs && enrichmentJobs.totalPages > 1 && (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderTop: "1px solid #E5E3DF", background: "#FAF9F7" }}>
+                    <div style={{ fontSize: 11, color: "#60697A" }}>Page {enrichmentJobs.page}/{enrichmentJobs.totalPages} — {enrichmentJobs.total} jobs</div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button disabled={enrichmentJobs.page <= 1} onClick={() => setEnrichmentJobsPage(p => Math.max(1, p-1))} style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #E5E3DF", background: enrichmentJobs.page <=1 ? "#F0EEEA" : "white", fontSize: 11, cursor: enrichmentJobs.page <=1 ? "not-allowed" : "pointer" }}>Prev</button>
+                      <button disabled={enrichmentJobs.page >= enrichmentJobs.totalPages} onClick={() => setEnrichmentJobsPage(p => Math.min(enrichmentJobs.totalPages, p+1))} style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #E5E3DF", background: enrichmentJobs.page >= enrichmentJobs.totalPages ? "#F0EEEA" : "white", fontSize: 11, cursor: enrichmentJobs.page >= enrichmentJobs.totalPages ? "not-allowed" : "pointer" }}>Next</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ padding: "10px 12px", background: "#FAF9F7", border: "1px solid #E5E3DF", borderRadius: 8, fontSize: 11, color: "#60697A" }}>
+                <strong>Phase 4C.3A:</strong> Enrichment engine foundation only. No external provider calls, no credits spent, no auto-seeding, no auto-qualification. Jobs PENDING → PROCESSING (locked) → SUCCESS/NO_RESULT/FAILED → retry or EXHAUSTED → VERIFICATION_PENDING → [future TRUE_NO_SITE] → QUALIFIED → Lead. Default disabled, fail-closed worker. Mock provider available for tests only.
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

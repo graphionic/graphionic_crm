@@ -498,7 +498,7 @@ export async function getNextAssignmentPrediction() {
 }
 
 export async function getCollectorOverview() {
-  const [config, locationsActive, categoriesActive, sourcesActive, rulesActive, statesCount, runs, creds, leadCount, totalLocations, totalCategories, totalSources, allSources, allStates, recentRunsWithMeta] = await Promise.all([
+  const [config, locationsActive, categoriesActive, sourcesActive, rulesActive, statesCount, runs, creds, leadCount, totalLocations, totalCategories, totalSources, allSources, allStates, recentRunsWithMeta, candidateCount, candidatesByStatus] = await Promise.all([
     getCollectorConfig(),
     prisma.collectorLocation.count({ where: { enabled: true } }),
     prisma.leadCategory.count({ where: { enabled: true } }),
@@ -514,9 +514,10 @@ export async function getCollectorOverview() {
     prisma.dataSource.findMany({ orderBy: [{ priority: "desc" }] }),
     prisma.collectorState.findMany({ include: { location: true, category: true, source: true }, orderBy: { updatedAt: "desc" }, take: 100 }),
     prisma.collectorRun.findMany({ orderBy: { startedAt: "desc" }, take: 20, include: { location: true, category: true, source: true } }),
+    prisma.leadCandidate.count(),
+    prisma.leadCandidate.groupBy({ by: ['status'], _count: { status: true } }),
   ]);
 
-  // Source health breakdown
   const healthBreakdown = {
     healthy: allSources.filter((s: any) => s.healthStatus === "healthy").length,
     degraded: allSources.filter((s: any) => s.healthStatus === "degraded").length,
@@ -524,8 +525,8 @@ export async function getCollectorOverview() {
     unknown: allSources.filter((s: any) => s.healthStatus === "unknown").length,
   };
 
-  // Yield metrics from recent runs
   let totalRaw = 0, totalParsed = 0, totalEmailPresent = 0, totalAccepted = 0, totalInserted = 0, totalNoEmail = 0, totalWebsiteRejected = 0, totalRetries = 0;
+  let totalCandidatesPersisted = 0, totalNeedingEnrichment = 0, totalCandidatesRejected = 0, totalCandidatesQualified = 0;
   for (const r of recentRunsWithMeta) {
     const meta: any = r.metadata || {};
     totalRaw += r.candidatesFound || 0;
@@ -536,16 +537,23 @@ export async function getCollectorOverview() {
     totalNoEmail += r.noEmailRejected || 0;
     totalWebsiteRejected += r.websiteRejected || 0;
     totalRetries += meta.fetchResult?.retryDelays?.length || 0;
+    totalCandidatesPersisted += meta.candidatesPersisted || 0;
+    totalNeedingEnrichment += meta.candidatesNeedingEnrichment || 0;
+    totalCandidatesRejected += meta.candidatesRejected || 0;
+    totalCandidatesQualified += meta.candidatesQualified || 0;
   }
   const avgEmailPresenceRate = totalParsed ? (totalEmailPresent / totalParsed) : 0;
   const avgAcceptanceRate = totalParsed ? (totalAccepted / totalParsed) : 0;
 
-  // Next assignment prediction
   const nextAssignment = await getNextAssignmentPrediction();
 
-  // Eligible now count
   const now = new Date();
   const eligibleNow = allStates.filter((s: any) => !s.nextEligibleRunAt || new Date(s.nextEligibleRunAt) <= now).length;
+
+  const candidateBreakdown: any = {};
+  for (const g of candidatesByStatus) {
+    candidateBreakdown[g.status] = g._count.status;
+  }
 
   return {
     config,
@@ -561,6 +569,7 @@ export async function getCollectorOverview() {
       creds,
       leadCount,
       eligibleNow,
+      candidateCount,
     },
     recentRuns: runs,
     healthBreakdown,
@@ -575,9 +584,27 @@ export async function getCollectorOverview() {
       totalRetries,
       avgEmailPresenceRate,
       avgAcceptanceRate,
+      totalCandidatesPersisted,
+      totalNeedingEnrichment,
+      totalCandidatesRejected,
+      totalCandidatesQualified,
     },
+    candidateBreakdown,
     nextAssignment,
     allSources: allSources.slice(0, 10),
     allStates: allStates.slice(0, 20),
   };
+}
+
+export async function getLeadCandidates(params?: { status?: string; limit?: number; city?: string; category?: string }) {
+  const where: any = {};
+  if (params?.status) where.status = params.status;
+  if (params?.city) where.city = { contains: params.city, mode: 'insensitive' };
+  if (params?.category) where.businessCategory = params.category;
+  return prisma.leadCandidate.findMany({
+    where,
+    include: { discoveryRun: true, discoverySource: true, qualifiedLead: true },
+    orderBy: { createdAt: 'desc' },
+    take: params?.limit || 50,
+  });
 }

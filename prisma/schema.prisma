@@ -86,11 +86,19 @@ model Lead {
 
   activities Activity[]
 
+  // Phase 4C.2A — traceability
+  collectorRunId String?
+  collectorRun   CollectorRun? @relation(fields: [collectorRunId], references: [id], onDelete: SetNull)
+
+  // Inverse for qualified candidate (one-to-one)
+  qualifiedFromCandidate LeadCandidate? @relation("CandidateQualifiedLead")
+
   @@index([status])
   @@index([country])
   @@index([segment])
   @@index([nextFollowUpAt])
   @@index([companyName])
+  @@index([collectorRunId])
 }
 
 // ---------------------------------------------------------------- timeline
@@ -252,8 +260,9 @@ model DataSource {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  states CollectorState[]
-  runs   CollectorRun[]
+  states     CollectorState[]
+  runs       CollectorRun[]
+  candidates LeadCandidate[]
 
   @@index([enabled])
   @@index([type])
@@ -366,8 +375,84 @@ model CollectorRun {
 
   createdAt DateTime @default(now())
 
+  // Phase 4C.2A — traceability
+  leads      Lead[]
+  candidates LeadCandidate[] @relation("CandidateDiscoveryRun")
+
   @@index([status])
   @@index([startedAt])
   @@index([locationId])
   @@index([categoryId])
+}
+
+// ---------------------------------------------------------------- PHASE 4C.2A — LEAD CANDIDATE PERSISTENCE + TRACEABILITY
+
+enum LeadCandidateStatus {
+  DISCOVERED
+  NEEDS_ENRICHMENT
+  VERIFICATION_PENDING
+  QUALIFIED
+  REJECTED
+}
+
+model LeadCandidate {
+  id String @id @default(cuid())
+
+  // provider identity — for dedup across providers
+  externalId   String? // OSM id (e.g., 123456) or Google place_id
+  externalType String? // node | way | relation | google_place
+
+  // business identity
+  companyName      String
+  businessCategory String
+
+  address  String?
+  city     String?
+  country  String?
+  postcode String?
+
+  latitude  Float?
+  longitude Float?
+
+  phone   String?
+  email   String?
+  website String?
+
+  // discovery traceability
+  discoverySourceId String?
+  discoverySource   DataSource? @relation(fields: [discoverySourceId], references: [id], onDelete: SetNull)
+
+  discoveryRunId String
+  discoveryRun   CollectorRun @relation("CandidateDiscoveryRun", fields: [discoveryRunId], references: [id], onDelete: Cascade)
+
+  // lifecycle
+  status          LeadCandidateStatus @default(DISCOVERED)
+  rejectionReason String? // existing_website, generic_email, invalid_email, email_domain_has_live_website, duplicate, enrichment_failed
+
+  // future enrichment foundation ONLY (no behavior yet)
+  enrichmentAttempts Int       @default(0)
+  lastEnrichmentAt   DateTime?
+  enrichmentProvider String?
+
+  // qualification
+  qualifiedLeadId String? @unique
+  qualifiedLead   Lead?   @relation("CandidateQualifiedLead", fields: [qualifiedLeadId], references: [id], onDelete: SetNull)
+
+  rawTags  Json? // full OSM tags or Places raw
+  metadata Json? // extensible
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Composite unique for OSM dedup: same source + externalType + externalId should be unique, but allow nulls and future providers coexistence
+  // We use a unique constraint on source + externalType + externalId where externalId not null
+  // Prisma does not support partial unique, so we document and enforce via application logic + unique index on combined fields
+  @@unique([discoverySourceId, externalType, externalId])
+  @@index([status])
+  @@index([discoveryRunId])
+  @@index([businessCategory])
+  @@index([city])
+  @@index([qualifiedLeadId])
+  @@index([discoverySourceId])
+  @@index([externalId])
 }

@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 /**
- * ClientForge CRM — Phase 4B Dynamic Collector Worker
+ * ClientForge CRM — Phase 4C.2A Collector Worker
  * Node.js + Prisma, production GitHub Actions worker
  * 
  * Architecture:
  * GitHub Actions -> Node 20 -> collector-worker.mjs -> Prisma -> Neon
  * Reads: CollectorConfig, CollectorLocation, LeadCategory, DataSource, CollectionRule
- * Writes: CollectorState, CollectorRun, Lead, Setting.collector_heartbeat (legacy)
+ * Writes: CollectorState, CollectorRun, LeadCandidate, Lead, Setting.collector_heartbeat (legacy)
  * 
  * Single assignment per execution: Location + Category + DataSource
  * Fair rotation, lazy state init, conservative Overpass handling
+ * Phase 4C.2A: LeadCandidate persistence + Run traceability, no enrichment yet
  */
 
 import { PrismaClient } from '@prisma/client';
@@ -29,8 +30,8 @@ const prisma = new PrismaClient({
 });
 
 // --- Constants ---
-const SAFE_INTERNAL_CAP = 3; // Conservative cap per spec
-const STALE_RUN_THRESHOLD_MINUTES = 20; // Mark RUNNING older than 20 min as FAILED
+const SAFE_INTERNAL_CAP = 3;
+const STALE_RUN_THRESHOLD_MINUTES = 20;
 const MAX_REDIRECTS = 3;
 const MAX_BODY_BYTES = 200_000;
 const USER_AGENT = 'ClientForge-Collector/1.0';
@@ -45,10 +46,9 @@ const GENERIC_EMAIL_DOMAINS = new Set([
   'me.com', 'mac.com', 'qq.com', '163.com', '126.com'
 ]);
 
-// --- Logging (structured, safe) ---
+// --- Logging ---
 function log(msg, data = {}) {
   const safeData = { ...data };
-  // Never log secrets
   delete safeData.DATABASE_URL;
   delete safeData.apiKey;
   delete safeData.encryptedValue;
@@ -87,9 +87,8 @@ function isGenericDomain(domain) {
   return GENERIC_EMAIL_DOMAINS.has(domain.toLowerCase());
 }
 
-// --- BBOX calculation ---
+// --- BBOX ---
 function computeBbox(latitude, longitude, radiusKm) {
-  // Validate
   if (latitude == null || longitude == null || radiusKm == null) {
     throw new Error('Missing latitude/longitude/radiusKm');
   }
@@ -102,32 +101,22 @@ function computeBbox(latitude, longitude, radiusKm) {
   if (typeof radiusKm !== 'number' || radiusKm <= 0 || radiusKm > 500) {
     throw new Error(`Invalid radiusKm ${radiusKm} must be 1..500`);
   }
-
-  // Approx: 1 degree lat ~ 111km
   const latDelta = radiusKm / 111.0;
-  // Longitude delta depends on latitude, handle near poles safely
   const cosLat = Math.cos((latitude * Math.PI) / 180);
   const safeCos = Math.abs(cosLat) < 0.0001 ? 0.0001 : Math.abs(cosLat);
   const lngDelta = radiusKm / (111.0 * safeCos);
-
   let south = latitude - latDelta;
   let north = latitude + latDelta;
   let west = longitude - lngDelta;
   let east = longitude + lngDelta;
-
-  // Clamp to valid ranges
   south = Math.max(-90, Math.min(90, south));
   north = Math.max(-90, Math.min(90, north));
   west = Math.max(-180, Math.min(180, west));
   east = Math.max(-180, Math.min(180, east));
-
-  // Ensure south <= north, west <= east (handle antimeridian edge not needed for Phase 4B)
   if (south > north) [south, north] = [north, south];
   if (west > east) {
-    // If crossing antimeridian, keep as is but log warning, Overpass handles it
     logWarn('bbox crosses antimeridian', { west, east });
   }
-
   const bboxStr = `${south},${west},${north},${east}`;
   return {
     south,
@@ -141,8 +130,6 @@ function computeBbox(latitude, longitude, radiusKm) {
 }
 
 // --- OSM Tags validation & query generation ---
-// Supported tag format: key=value or "key"="value" or key="value" etc
-// Reject injection: ; { } [ ] ( ) < > \n \r
 const UNSAFE_CHARS_REGEX = /[;{}\[\]()<>\n\r]/;
 const SAFE_TAG_REGEX = /^"?([a-zA-Z0-9_:]+)"?\s*=\s*"?([a-zA-Z0-9_\- ]+)"?$/;
 
@@ -175,7 +162,6 @@ function validateAndNormalizeOsmTag(rawTag) {
   if (value.length < 2 || value.length > 100) {
     return { valid: false, reason: 'value_length', raw: rawTag };
   }
-  // Reconstruct safe tag: ["key"="value"]
   const safe = `"${key}"="${value}"`;
   return { valid: true, key, value, safe, raw: rawTag };
 }
@@ -227,11 +213,10 @@ function buildOverpassQuery(validTags, bboxStr, timeoutSeconds = 25) {
   if (!bboxStr) {
     throw new Error('Missing bbox for query');
   }
-  // Build: [out:json][timeout:25];(node["key"="value"](bbox);way[...];relation[...];);out center 100;
   const timeout = Math.max(10, Math.min(120, timeoutSeconds));
   const clauses = [];
   for (const tag of validTags) {
-    const t = tag.safe; // e.g., "healthcare"="dentist"
+    const t = tag.safe;
     clauses.push(`  node[${t}](${bboxStr});`);
     clauses.push(`  way[${t}](${bboxStr});`);
     clauses.push(`  relation[${t}](${bboxStr});`);
@@ -240,12 +225,12 @@ function buildOverpassQuery(validTags, bboxStr, timeoutSeconds = 25) {
   return query;
 }
 
-// --- Overpass fetching with safety ---
+// --- Overpass fetching ---
 async function fetchOverpass(baseUrl, query, options = {}) {
   const {
     timeoutMs = 25000,
     retryCount = 3,
-    concurrency = 3, // not used here, single query
+    concurrency = 3,
   } = options;
 
   let attempt = 0;
@@ -274,7 +259,6 @@ async function fetchOverpass(baseUrl, query, options = {}) {
 
       clearTimeout(timeout);
 
-      // Handle Retry-After and status codes
       if (res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504) {
         const retryAfterHeader = res.headers.get('Retry-After');
         let retryAfterMs = 0;
@@ -282,7 +266,6 @@ async function fetchOverpass(baseUrl, query, options = {}) {
           const secs = parseInt(retryAfterHeader, 10);
           if (!isNaN(secs)) retryAfterMs = secs * 1000;
         }
-        // Exponential backoff + jitter
         const backoffBase = Math.pow(2, attempt) * 1000;
         const jitter = Math.random() * 1000;
         const delay = Math.max(retryAfterMs, backoffBase + jitter);
@@ -355,7 +338,7 @@ async function fetchOverpass(baseUrl, query, options = {}) {
   };
 }
 
-// --- Lead parsing ---
+// --- Lead parsing — Phase 4C.2A enhanced ---
 function parseOsmElement(el, categorySlug, location) {
   const tags = el.tags || {};
   const name = (tags.name || '').trim();
@@ -365,7 +348,6 @@ function parseOsmElement(el, categorySlug, location) {
   const email = (tags.email || tags['contact:email'] || '').trim();
   const phone = (tags.phone || tags['contact:phone'] || '').trim();
 
-  // Basic email validation
   if (email) {
     if (email.length > 80) return null;
     if (!email.includes('@') || !email.split('@')[1]?.includes('.')) return null;
@@ -385,22 +367,44 @@ function parseOsmElement(el, categorySlug, location) {
 
   const address = addressParts.join(', ') || tags.address || location.city || '';
 
+  // Phase 4C.2A — extract more data
+  let latitude = null;
+  let longitude = null;
+  if (el.type === 'node' && typeof el.lat === 'number' && typeof el.lon === 'number') {
+    latitude = el.lat;
+    longitude = el.lon;
+  } else if (el.center && typeof el.center.lat === 'number' && typeof el.center.lon === 'number') {
+    latitude = el.center.lat;
+    longitude = el.center.lon;
+  } else if (typeof el.lat === 'number' && typeof el.lon === 'number') {
+    latitude = el.lat;
+    longitude = el.lon;
+  }
+
+  const postcode = (tags['addr:postcode'] || '').slice(0, 20) || null;
+
   return {
     company_name: name.slice(0, 100),
-    business_category: categorySlug,
+    business_category: categorySlug, // MUST continue from LeadCategory.slug, not OSM tags
     website: website.slice(0, 200),
     email: email.slice(0, 150),
     phone: phone.slice(0, 40),
     address: address.slice(0, 200),
     city: (tags['addr:city'] || location.city || '').slice(0, 100),
     country: location.countryCode || location.country || 'UK',
+    postcode,
+    latitude,
+    longitude,
     osm_id: el.id,
     osm_type: el.type,
+    externalId: String(el.id),
+    externalType: el.type,
+    rawTags: tags,
     source: `overpass_${(location.countryCode || 'unknown').toLowerCase()}`,
   };
 }
 
-// --- Website verification (shared logic, duplicated for .mjs compatibility) ---
+// --- Website verification ---
 async function hasLiveWebsite(domain, opts = {}) {
   const options = {
     httpsCheck: true,
@@ -445,7 +449,6 @@ async function hasLiveWebsite(domain, opts = {}) {
       }
 
       if (status >= 200 && status < 400) {
-        // Read with limit
         let body = '';
         try {
           const text = await res.text();
@@ -550,66 +553,12 @@ async function recoverStaleRuns() {
   return staleRuns.length;
 }
 
-// --- Fair rotation selection — Phase 4C.1 Improved ---
-/**
- * Phase 4C.1 Fair Rotation Algorithm (documented):
- * 
- * PROBLEM BEFORE: Nested loops loc outer × cat middle × src inner caused location starvation:
- *   London/dental/DE, London/dental/Kumi, London/dental/Mail.ru, London/eye/DE... (London monopolized)
- *   Also eligible states always beat never-run combos, causing repeat of same assignment.
- *   Nulls handling: Prisma asc puts nulls last, so never-run (null) sorted AFTER recently-run, opposite of desired.
- * 
- * SOLUTION AFTER:
- * 1. Read enabled locations, categories, sources (health != down)
- *    - Locations: JS sort lastCollectedAt asc NULLS FIRST, priority desc, city asc
- *    - Categories: JS sort lastRunAt asc NULLS FIRST, priority desc, slug asc
- *    - Sources: JS sort priority desc, health healthy first, name asc
- * 
- * 2. Read all existing states, build set of existing combos
- * 
- * 3. Generate missing combos: all enabled loc × cat × src not in existing set
- *    - Limited to first 100 loc × 20 cat × 5 src = max 10k to avoid explosion, but still fair
- *    - For 8×7×3=168 combos, all generated
- * 
- * 4. If missing combos exist (many untested):
- *    - Sort missing combos by FAIR DIVERSITY:
- *      a) category priority desc, source priority desc (keep high-priority cat/src first) — preserves priority influence
- *      b) location lastCollectedAt asc NULLS FIRST (never-run locations first, then least recently collected) — ensures location diversity before exhausting cat/src of one location
- *      c) category lastRunAt asc NULLS FIRST (never-run categories first as secondary)
- *      d) location priority desc, category priority desc, source priority desc (tie-breaker, priority influences without starvation)
- *      e) location city asc, category slug asc, source name asc (deterministic)
- *    - Pick first missing combo
- *    - This ensures: never-run assignments preferred, location diversity first, priority influences, deterministic
- *    - Example: After London/dental/DE done, missing for dental/DE includes New York, Houston, Manchester... all null lastCollected, so New York (prio 100) first → New York/dental/DE, then Houston/dental/DE, etc. Matches desired conceptual behavior.
- * 
- * 5. Else (no missing, all combos have states):
- *    - Fetch eligible states where nextEligible null or <= now
- *    - Sort eligible by:
- *      a) nextEligible asc NULLS FIRST (earliest eligible first)
- *      b) lastRun asc NULLS FIRST (least recently run first, never-run first) — fairness, prevents starvation
- *      c) consecutiveFailures asc (prefer healthy)
- *      d) location lastCollected asc NULLS FIRST, category lastRun asc NULLS FIRST (prioritize never-run dimensions even among existing)
- *      e) priority sum desc (location+category+source) — higher priority wins tie, but does not starve LOW because lastRun is primary
- *      f) city/slug/name asc deterministic
- *    - Pick first eligible
- * 
- * 6. If no eligible and no missing, return null (no work, next eligible future)
- * 
- * This ensures:
- * - Never-run assignments (missing) preferred over re-running eligible that was recently run (fixes "existing eligible should NOT automatically beat never-run")
- * - Location diversity: when many untested combos, rotate locations before exhausting categories/sources of one location
- * - Priority influences without starvation: priority is tie-breaker after lastRun/lastCollected nulls first
- * - Deterministic: same inputs → same selection, no randomness
- * - Respects nextEligible, excludes disabled/DOWN, preserves unique combo semantics
- * - Scalable: limited slice but fair
- */
+// --- Fair rotation selection — Phase 4C.1 Improved (unchanged in 4C.2A) ---
 async function selectNextAssignment(config, dryRun = false) {
-  // 1. Read enabled with JS sorting nulls first
   let enabledLocations = await prisma.collectorLocation.findMany({ where: { enabled: true } });
   let enabledCategories = await prisma.leadCategory.findMany({ where: { enabled: true } });
   let enabledSources = await prisma.dataSource.findMany({ where: { enabled: true, NOT: { healthStatus: 'down' } } });
 
-  // JS sort: lastCollectedAt asc nulls first, priority desc, city asc
   enabledLocations.sort((a, b) => {
     const aLast = a.lastCollectedAt ? new Date(a.lastCollectedAt).getTime() : 0;
     const bLast = b.lastCollectedAt ? new Date(b.lastCollectedAt).getTime() : 0;
@@ -621,7 +570,6 @@ async function selectNextAssignment(config, dryRun = false) {
     if (a.priority !== b.priority) return b.priority - a.priority;
     return (a.city || '').localeCompare(b.city || '');
   });
-  // Categories: lastRunAt asc nulls first, priority desc, slug asc
   enabledCategories.sort((a, b) => {
     const aLast = a.lastRunAt ? new Date(a.lastRunAt).getTime() : 0;
     const bLast = b.lastRunAt ? new Date(b.lastRunAt).getTime() : 0;
@@ -633,7 +581,6 @@ async function selectNextAssignment(config, dryRun = false) {
     if (a.priority !== b.priority) return b.priority - a.priority;
     return (a.slug || '').localeCompare(b.slug || '');
   });
-  // Sources: priority desc, health healthy first, name asc
   const healthOrder = { healthy: 0, degraded: 1, unknown: 2, down: 3 };
   enabledSources.sort((a, b) => {
     if (a.priority !== b.priority) return b.priority - a.priority;
@@ -658,7 +605,6 @@ async function selectNextAssignment(config, dryRun = false) {
     return null;
   }
 
-  // 2. Existing states
   const existingStates = await prisma.collectorState.findMany({
     where: {
       locationId: { in: enabledLocations.map(l => l.id) },
@@ -668,9 +614,7 @@ async function selectNextAssignment(config, dryRun = false) {
     include: { location: true, category: true, source: true },
   });
   const existingSet = new Set(existingStates.map(s => `${s.locationId}|${s.categoryId}|${s.sourceId}`));
-  const existingMap = new Map(existingStates.map(s => [`${s.locationId}|${s.categoryId}|${s.sourceId}`, s]));
 
-  // 3. Generate missing combos (limit to avoid explosion)
   const locSlice = enabledLocations.slice(0, 100);
   const catSlice = enabledCategories.slice(0, 20);
   const srcSlice = enabledSources.slice(0, 5);
@@ -687,17 +631,10 @@ async function selectNextAssignment(config, dryRun = false) {
   }
   log(`existing combos ${existingSet.size}, missing combos ${missingCombos.length} (from ${locSlice.length}×${catSlice.length}×${srcSlice.length} slice)`);
 
-  // 4. If missing combos exist, prefer them (never-run assignments) over eligible re-runs — location diversity first, category sticky
   if (missingCombos.length) {
-    // Sort missing by fair diversity: cat priority desc, src priority desc, location lastCollected asc nulls first (never-run locations first), location priority desc, cat slug asc deterministic
-    // This ensures desired diversity: London/dental/DE, New York/dental/DE, Houston/dental/DE... then categories/sources rotate
-    // Prevents high-prio location monopolizing: London/dental/DE → London/dental/Kumi → London/dental/Mail.ru → London/eye/DE is NOT acceptable
     missingCombos.sort((a, b) => {
-      // category priority desc — higher priority cat first, influences without starvation
       if (a.cat.priority !== b.cat.priority) return b.cat.priority - a.cat.priority;
-      // source priority desc
       if (a.src.priority !== b.src.priority) return b.src.priority - a.src.priority;
-      // location lastCollected asc nulls first — ensures location diversity before exhausting cat/src of one location
       const aLocLast = a.loc.lastCollectedAt ? new Date(a.loc.lastCollectedAt).getTime() : 0;
       const bLocLast = b.loc.lastCollectedAt ? new Date(b.loc.lastCollectedAt).getTime() : 0;
       const aLocNull = a.loc.lastCollectedAt == null;
@@ -705,12 +642,9 @@ async function selectNextAssignment(config, dryRun = false) {
       if (aLocNull && !bLocNull) return -1;
       if (!aLocNull && bLocNull) return 1;
       if (aLocLast !== bLocLast) return aLocLast - bLocLast;
-      // location priority desc — higher priority location wins tie
       if (a.loc.priority !== b.loc.priority) return b.loc.priority - a.loc.priority;
-      // category slug asc — deterministic, dental before eye when same priority
       const slugCmp = (a.cat.slug || '').localeCompare(b.cat.slug || '');
       if (slugCmp !== 0) return slugCmp;
-      // city asc deterministic
       const cityCmp = (a.loc.city || '').localeCompare(b.loc.city || '');
       if (cityCmp !== 0) return cityCmp;
       return (a.src.name || '').localeCompare(b.src.name || '');
@@ -774,7 +708,6 @@ async function selectNextAssignment(config, dryRun = false) {
     };
   }
 
-  // 5. No missing, check eligible states
   const now = new Date();
   let eligibleStates = await prisma.collectorState.findMany({
     where: {
@@ -789,7 +722,6 @@ async function selectNextAssignment(config, dryRun = false) {
     include: { location: true, category: true, source: true },
   });
 
-  // Sort eligible by fair rotation: nextEligible asc nulls first, lastRun asc nulls first, failures asc, location lastCollected asc nulls first, category lastRun asc nulls first, priority sum desc
   eligibleStates.sort((a, b) => {
     const nextA = a.nextEligibleRunAt ? new Date(a.nextEligibleRunAt).getTime() : 0;
     const nextB = b.nextEligibleRunAt ? new Date(b.nextEligibleRunAt).getTime() : 0;
@@ -806,7 +738,6 @@ async function selectNextAssignment(config, dryRun = false) {
     if (!lastANull && lastBNull) return 1;
     if (lastA !== lastB) return lastA - lastB;
     if (a.consecutiveFailures !== b.consecutiveFailures) return a.consecutiveFailures - b.consecutiveFailures;
-    // location lastCollected asc nulls first
     const aLocLast = a.location?.lastCollectedAt ? new Date(a.location.lastCollectedAt).getTime() : 0;
     const bLocLast = b.location?.lastCollectedAt ? new Date(b.location.lastCollectedAt).getTime() : 0;
     const aLocNull = a.location?.lastCollectedAt == null;
@@ -814,7 +745,6 @@ async function selectNextAssignment(config, dryRun = false) {
     if (aLocNull && !bLocNull) return -1;
     if (!aLocNull && bLocNull) return 1;
     if (aLocLast !== bLocLast) return aLocLast - bLocLast;
-    // category lastRun asc nulls first
     const aCatLast = a.category?.lastRunAt ? new Date(a.category.lastRunAt).getTime() : 0;
     const bCatLast = b.category?.lastRunAt ? new Date(b.category.lastRunAt).getTime() : 0;
     const aCatNull = a.category?.lastRunAt == null;
@@ -851,7 +781,6 @@ async function selectNextAssignment(config, dryRun = false) {
     };
   }
 
-  // 6. No eligible and no missing
   const nextEligibleState = await prisma.collectorState.findFirst({
     where: {
       locationId: { in: enabledLocations.map(l => l.id) },
@@ -875,13 +804,13 @@ async function selectNextAssignment(config, dryRun = false) {
   return null;
 }
 
-// --- Main worker ---
+// --- Main worker — Phase 4C.2A with LeadCandidate persistence ---
 async function main() {
   const dryRun = process.env.COLLECTOR_DRY_RUN === 'true';
   const debugCsv = process.env.COLLECTOR_DEBUG_CSV === 'true';
   const startTime = Date.now();
 
-  log(`starting collector worker`, {
+  log(`starting collector worker Phase 4C.2A`, {
     dryRun,
     debugCsv,
     githubRunId: GITHUB_RUN_ID,
@@ -889,7 +818,6 @@ async function main() {
     nodeVersion: process.version,
   });
 
-  // 1. Read CollectorConfig
   let config = await prisma.collectorConfig.findUnique({ where: { key: 'default' } });
   if (!config) {
     log('no CollectorConfig found, creating default');
@@ -933,11 +861,9 @@ async function main() {
     process.exit(0);
   }
 
-  // 2. Stale RUNNING recovery
   const recovered = await recoverStaleRuns();
   if (recovered) log(`recovered ${recovered} stale runs`);
 
-  // 3. Read CollectionRules
   const rules = await prisma.collectionRule.findMany({ where: { enabled: true } });
   const { map: rulesMap, warnings: ruleWarnings } = buildRulesMap(rules);
   log(`rules`, { enabled: rules.length, warnings: ruleWarnings.length });
@@ -945,11 +871,9 @@ async function main() {
     for (const w of ruleWarnings) logWarn(w);
   }
 
-  // 4. Select assignment
   const assignment = await selectNextAssignment(config, dryRun);
   if (!assignment) {
     log('no eligible assignment — nothing to do, exiting SUCCESS');
-    // Update heartbeat for /live backward compat
     if (!dryRun) {
       const hb = {
         timestamp: new Date().toISOString(),
@@ -978,7 +902,6 @@ async function main() {
     isNewState,
   });
 
-  // 5. Compute BBOX
   let bbox;
   try {
     if (location.latitude == null || location.longitude == null) {
@@ -988,7 +911,6 @@ async function main() {
     log(`bbox`, { bbox: bbox.bboxStr, center: bbox.center, radius: bbox.radiusKm });
   } catch (e) {
     logError(`bbox computation failed`, { error: e.message, location: location.city });
-    // Create FAILED run
     if (!dryRun) {
       await prisma.collectorRun.create({
         data: {
@@ -1011,7 +933,6 @@ async function main() {
           },
         },
       });
-      // Update state failure
       await prisma.collectorState.update({
         where: { id: state.id },
         data: {
@@ -1025,7 +946,6 @@ async function main() {
     process.exit(1);
   }
 
-  // 6. Parse OSM tags and build query
   const { validTags, invalidTags, warnings: osmWarnings } = parseOsmTags(category.osmTags);
   log(`osmTags`, {
     valid: validTags.length,
@@ -1118,12 +1038,12 @@ async function main() {
       tags: validTags.map(t => t.safe),
       rules: Object.keys(rulesMap),
     });
+    log(`[dry-run] would persist candidates, would mark NEEDS_ENRICHMENT for no-email, would qualify TRUE_NO_SITE, but no DB mutations (dry-run guarantee)`);
     log(`[dry-run] no DB mutations, no Overpass call, exiting`);
     await prisma.$disconnect();
     process.exit(0);
   }
 
-  // 7. Create CollectorRun RUNNING
   const run = await prisma.collectorRun.create({
     data: {
       status: 'RUNNING',
@@ -1148,7 +1068,6 @@ async function main() {
   });
   log(`created run ${run.id} RUNNING`);
 
-  // 8. Overpass fetch (network outside transaction)
   const effectiveConcurrency = Math.min(
     config.concurrentRequests,
     source.concurrency,
@@ -1171,7 +1090,7 @@ async function main() {
   let elements = [];
 
   try {
-    queriesAttempted = 1; // One query per assignment (multiple tags in single query)
+    queriesAttempted = 1;
     fetchResult = await fetchOverpass(source.baseUrl, overpassQuery, {
       timeoutMs,
       retryCount,
@@ -1194,7 +1113,6 @@ async function main() {
     logError(`overpass failed`, { error: e.message, attempt: fetchResult?.attempt });
     queryFailures.push({ error: e.message, baseUrl: source.baseUrl, attempt: fetchResult?.attempt });
 
-    // Update run as FAILED
     const durationMs = Date.now() - startTime;
     await prisma.collectorRun.update({
       where: { id: run.id },
@@ -1214,9 +1132,8 @@ async function main() {
       },
     });
 
-    // Update state failure with exponential backoff, cap 2 hours
     const backoffMs = Math.min(
-      2 * 60 * 60 * 1000, // cap 2h
+      2 * 60 * 60 * 1000,
       config.cooldownMs * Math.pow(2, state.consecutiveFailures + 1)
     );
     await prisma.collectorState.update({
@@ -1229,12 +1146,11 @@ async function main() {
       },
     });
 
-    // Update source health conservatively — Phase 4C.1 improved
     const newFailures = state.consecutiveFailures + 1;
     let healthStatus = source.healthStatus;
     if (newFailures >= 5) healthStatus = 'down';
     else if (newFailures >= 3) healthStatus = 'degraded';
-    else healthStatus = 'degraded'; // Even first failure marks degraded for observability, not down
+    else healthStatus = 'degraded';
 
     try {
       await prisma.dataSource.update({
@@ -1246,7 +1162,6 @@ async function main() {
       logWarn(`failed to update source health on failure for ${source.name}`, { error: e.message });
     }
 
-    // Heartbeat
     const hb = {
       timestamp: new Date().toISOString(),
       message: `FAILED: ${location.city}/${category.slug} - ${e.message}`,
@@ -1265,7 +1180,7 @@ async function main() {
     process.exit(1);
   }
 
-  // 9. Parse leads — Phase 4C.1 adds parsed count + yield metrics
+  // 9. Parse leads — Phase 4C.2A enhanced with lat/lng, postcode, rawTags
   const parsedLeads = [];
   for (const el of elements) {
     const parsed = parseOsmElement(el, category.slug, location);
@@ -1276,7 +1191,7 @@ async function main() {
   const emailPresenceRate = parsedCount ? (emailPresentCount / parsedCount) : 0;
   log(`parsed`, { raw: candidatesFound, parsed: parsedCount, emailPresent: emailPresentCount, emailPresenceRate: `${(emailPresenceRate*100).toFixed(2)}%` });
 
-  // 10. Apply CollectionRules + verification + deduplication
+  // 10. Phase 4C.2A — Candidate persistence + filtering
   let noEmailRejected = 0;
   let genericEmailRejected = 0;
   let websiteRejected = 0;
@@ -1285,11 +1200,18 @@ async function main() {
   let leadsAccepted = 0;
   let leadsInserted = 0;
 
-  const inRunSet = new Set();
-  const acceptedLeads = [];
+  // New metrics Phase 4C.2A
+  let candidatesPersisted = 0;
+  let candidatesNeedingEnrichment = 0;
+  let candidatesRejected = 0;
+  let candidatesQualified = 0;
+  const candidateIds = [];
+  const leadIds = [];
 
-  // Rules flags
-  const requireEmail = rulesMap['require_email']?.enabled !== false; // default true
+  const inRunSet = new Set();
+  const acceptedLeadsWithCandidate = []; // { lead, candidateId }
+
+  const requireEmail = rulesMap['require_email']?.enabled !== false;
   const requireNoWebsite = rulesMap['require_no_website']?.enabled !== false;
   const rejectExistingWebsite = rulesMap['reject_existing_website']?.enabled !== false;
   const rejectGeneric = rulesMap['reject_generic']?.enabled !== false;
@@ -1311,42 +1233,190 @@ async function main() {
     followRedirects,
   });
 
-  for (const lead of parsedLeads) {
-    const emailNorm = normalizeEmail(lead.email);
-    const key = `${(lead.company_name || '').toLowerCase().trim()}|${emailNorm}|${(lead.city || '').toLowerCase().trim()}`;
+  // Helper to persist candidate with dedup: sourceId + externalType + externalId unique
+  async function upsertCandidate(parsedLead, status, rejectionReason = null) {
+    try {
+      const externalId = parsedLead.externalId || String(parsedLead.osm_id);
+      const externalType = parsedLead.externalType || parsedLead.osm_type || 'node';
+
+      // Try to find existing candidate by source + externalType + externalId
+      const existing = await prisma.leadCandidate.findUnique({
+        where: {
+          discoverySourceId_externalType_externalId: {
+            discoverySourceId: source.id,
+            externalType,
+            externalId,
+          },
+        },
+      });
+
+      if (existing) {
+        // Update existing candidate with latest data, keep qualifiedLeadId if already qualified
+        const updated = await prisma.leadCandidate.update({
+          where: { id: existing.id },
+          data: {
+            companyName: parsedLead.company_name.slice(0, 200),
+            businessCategory: parsedLead.business_category,
+            address: parsedLead.address?.slice(0, 300) || null,
+            city: parsedLead.city?.slice(0, 100) || location.city,
+            country: parsedLead.country || location.countryCode || 'UK',
+            postcode: parsedLead.postcode || null,
+            latitude: parsedLead.latitude,
+            longitude: parsedLead.longitude,
+            phone: parsedLead.phone || null,
+            email: parsedLead.email ? normalizeEmail(parsedLead.email) : null,
+            website: parsedLead.website || null,
+            discoveryRunId: run.id, // update to latest run
+            status,
+            rejectionReason,
+            rawTags: parsedLead.rawTags || null,
+            metadata: {
+              ...(typeof existing.metadata === 'object' && existing.metadata ? existing.metadata : {}),
+              lastSeenRunId: run.id,
+              lastSeenAt: new Date().toISOString(),
+              osmId: parsedLead.osm_id,
+              osmType: parsedLead.osm_type,
+            },
+          },
+        });
+        return updated;
+      } else {
+        const created = await prisma.leadCandidate.create({
+          data: {
+            externalId,
+            externalType,
+            companyName: parsedLead.company_name.slice(0, 200),
+            businessCategory: parsedLead.business_category,
+            address: parsedLead.address?.slice(0, 300) || null,
+            city: parsedLead.city?.slice(0, 100) || location.city,
+            country: parsedLead.country || location.countryCode || 'UK',
+            postcode: parsedLead.postcode || null,
+            latitude: parsedLead.latitude,
+            longitude: parsedLead.longitude,
+            phone: parsedLead.phone || null,
+            email: parsedLead.email ? normalizeEmail(parsedLead.email) : null,
+            website: parsedLead.website || null,
+            discoverySourceId: source.id,
+            discoveryRunId: run.id,
+            status,
+            rejectionReason,
+            rawTags: parsedLead.rawTags || null,
+            metadata: {
+              osmId: parsedLead.osm_id,
+              osmType: parsedLead.osm_type,
+              discoveredAt: new Date().toISOString(),
+              sourceCity: location.city,
+              sourceCountry: location.countryCode,
+            },
+          },
+        });
+        return created;
+      }
+    } catch (e) {
+      // If unique constraint fails due to null discoverySourceId, fallback to find by company+city
+      logWarn(`candidate upsert failed, fallback`, { error: e.message, company: parsedLead.company_name });
+      try {
+        const fallback = await prisma.leadCandidate.findFirst({
+          where: {
+            companyName: parsedLead.company_name.slice(0, 200),
+            city: parsedLead.city?.slice(0, 100) || location.city,
+            discoverySourceId: source.id,
+          },
+        });
+        if (fallback) {
+          const updated = await prisma.leadCandidate.update({
+            where: { id: fallback.id },
+            data: {
+              address: parsedLead.address?.slice(0, 300) || null,
+              phone: parsedLead.phone || null,
+              email: parsedLead.email ? normalizeEmail(parsedLead.email) : null,
+              website: parsedLead.website || null,
+              discoveryRunId: run.id,
+              status,
+              rejectionReason,
+              rawTags: parsedLead.rawTags || null,
+            },
+          });
+          return updated;
+        }
+      } catch (e2) {
+        logError(`fallback candidate upsert also failed`, { error: e2.message });
+      }
+      return null;
+    }
+  }
+
+  for (const parsedLead of parsedLeads) {
+    const emailNorm = normalizeEmail(parsedLead.email);
+    const key = `${(parsedLead.company_name || '').toLowerCase().trim()}|${emailNorm}|${(parsedLead.city || '').toLowerCase().trim()}`;
 
     // In-run dedup
     if (inRunSet.has(key)) {
       duplicateRejected++;
+      const cand = await upsertCandidate(parsedLead, 'REJECTED', 'duplicate_in_run');
+      if (cand) {
+        candidateIds.push(cand.id);
+        candidatesPersisted++;
+        candidatesRejected++;
+      }
       continue;
     }
 
-    // Require email
+    // Phase 4C.2A — Persist candidate first as DISCOVERED, then update status
+    // For no-email case, we still persist as NEEDS_ENRICHMENT
     if (requireEmail && !emailNorm) {
       noEmailRejected++;
+      const cand = await upsertCandidate(parsedLead, 'NEEDS_ENRICHMENT', null);
+      if (cand) {
+        candidateIds.push(cand.id);
+        candidatesPersisted++;
+        candidatesNeedingEnrichment++;
+      }
+      inRunSet.add(key);
       continue;
     }
 
     // Website present
-    if ((requireNoWebsite || rejectExistingWebsite) && lead.website) {
+    if ((requireNoWebsite || rejectExistingWebsite) && parsedLead.website) {
       websiteRejected++;
+      const cand = await upsertCandidate(parsedLead, 'REJECTED', 'existing_website');
+      if (cand) {
+        candidateIds.push(cand.id);
+        candidatesPersisted++;
+        candidatesRejected++;
+      }
+      inRunSet.add(key);
       continue;
     }
 
     // Generic email
-    const domain = extractEmailDomain(lead.email);
+    const domain = extractEmailDomain(parsedLead.email);
     if (rejectGeneric && domain && isGenericDomain(domain)) {
       genericEmailRejected++;
+      const cand = await upsertCandidate(parsedLead, 'REJECTED', 'generic_email');
+      if (cand) {
+        candidateIds.push(cand.id);
+        candidatesPersisted++;
+        candidatesRejected++;
+      }
+      inRunSet.add(key);
       continue;
     }
 
-    // Email format invalid already filtered in parse, but count
+    // Invalid email
     if (!emailNorm || !emailNorm.includes('@')) {
       invalidRejected++;
+      const cand = await upsertCandidate(parsedLead, 'REJECTED', 'invalid_email');
+      if (cand) {
+        candidateIds.push(cand.id);
+        candidatesPersisted++;
+        candidatesRejected++;
+      }
+      inRunSet.add(key);
       continue;
     }
 
-    // Verify email domain website (Emma Clinic fix)
+    // Verify email domain website (Emma Clinic fix) — must remain unchanged
     if (verifyEmailDomain && domain) {
       const check = await hasLiveWebsite(domain, {
         httpsCheck,
@@ -1358,36 +1428,56 @@ async function main() {
         userAgent: USER_AGENT,
       });
       if (check.live) {
-        log(`FALSE NO_SITE rejected: ${lead.company_name} - ${domain} has live site`, {
+        log(`FALSE NO_SITE rejected: ${parsedLead.company_name} - ${domain} has live site`, {
           reason: check.reason,
           status: check.statusCode,
         });
         websiteRejected++;
+        const cand = await upsertCandidate(parsedLead, 'REJECTED', 'email_domain_has_live_website');
+        if (cand) {
+          candidateIds.push(cand.id);
+          candidatesPersisted++;
+          candidatesRejected++;
+        }
+        inRunSet.add(key);
         continue;
       }
     }
 
-    // Passed all checks
+    // Passed all checks — qualified candidate
     inRunSet.add(key);
-    acceptedLeads.push({ ...lead, email: emailNorm, _key: key, _domain: domain });
-    leadsAccepted++;
+    const cand = await upsertCandidate(parsedLead, 'VERIFICATION_PENDING', null);
+    if (cand) {
+      candidateIds.push(cand.id);
+      candidatesPersisted++;
+      // Will become QUALIFIED after Lead insertion
+      acceptedLeadsWithCandidate.push({ lead: { ...parsedLead, email: emailNorm, _key: key, _domain: domain }, candidateId: cand.id, candidate: cand });
+      leadsAccepted++;
+    } else {
+      // If candidate upsert failed, still count as accepted for compatibility
+      acceptedLeadsWithCandidate.push({ lead: { ...parsedLead, email: emailNorm, _key: key, _domain: domain }, candidateId: null, candidate: null });
+      leadsAccepted++;
+    }
   }
 
-  log(`after filtering`, {
+  log(`after filtering Phase 4C.2A`, {
     accepted: leadsAccepted,
     noEmail: noEmailRejected,
     generic: genericEmailRejected,
     website: websiteRejected,
     duplicateInRun: duplicateRejected,
     invalid: invalidRejected,
+    candidatesPersisted,
+    needingEnrichment: candidatesNeedingEnrichment,
+    rejected: candidatesRejected,
+    qualifiedPending: acceptedLeadsWithCandidate.length,
   });
 
-  // 11. DB dedup and insert (short transactions, outside network)
+  // 11. DB dedup and insert Leads with traceability
   const debugRows = [];
 
-  for (const lead of acceptedLeads) {
+  for (const { lead, candidateId, candidate } of acceptedLeadsWithCandidate) {
     try {
-      // DB dedup check
       if (deduplicate) {
         const existingByEmail = await prisma.lead.findFirst({
           where: { email: lead.email },
@@ -1395,6 +1485,23 @@ async function main() {
         if (existingByEmail) {
           duplicateRejected++;
           log(`duplicate by email: ${lead.email} exists as ${existingByEmail.id}`);
+          // Update candidate as REJECTED duplicate, but keep qualifiedLeadId if existing lead already qualified?
+          if (candidateId) {
+            await prisma.leadCandidate.update({
+              where: { id: candidateId },
+              data: {
+                status: 'REJECTED',
+                rejectionReason: 'duplicate_email',
+                qualifiedLeadId: existingByEmail.id, // link to existing lead for traceability
+                metadata: {
+                  ...(candidate?.metadata || {}),
+                  duplicateOfLeadId: existingByEmail.id,
+                },
+              },
+            });
+            candidatesRejected++;
+            // Adjust qualified count? It was pending, now rejected, so candidatesQualified not yet incremented
+          }
           continue;
         }
         const existingByCompanyCity = await prisma.lead.findFirst({
@@ -1406,11 +1513,21 @@ async function main() {
         if (existingByCompanyCity) {
           duplicateRejected++;
           log(`duplicate by company+city: ${lead.company_name} ${lead.city} exists as ${existingByCompanyCity.id}`);
+          if (candidateId) {
+            await prisma.leadCandidate.update({
+              where: { id: candidateId },
+              data: {
+                status: 'REJECTED',
+                rejectionReason: 'duplicate_company_city',
+                qualifiedLeadId: existingByCompanyCity.id,
+              },
+            });
+            candidatesRejected++;
+          }
           continue;
         }
       }
 
-      // Insert Lead (short transaction)
       const inserted = await prisma.lead.create({
         data: {
           companyName: lead.company_name.slice(0, 120),
@@ -1421,18 +1538,37 @@ async function main() {
           address: lead.address || null,
           city: lead.city || location.city || null,
           country: lead.country || location.countryCode || 'UK',
-          source: `collector_worker_${source.type}_${location.city.toLowerCase().replace(/\s+/g, '_')}`,
+          postcode: lead.postcode || null,
+          source: `collector_worker_${source.type}_${location.city.toLowerCase().replace(/\\s+/g, '_')}`,
           status: 'NEW',
           priority: 'HIGH',
           optedInEmail: true,
           score: 100,
           segment: 'NO_SITE',
           hookLine: `Found ${lead.company_name} on OpenStreetMap - noticed you don't have a website yet. We help ${lead.business_category} businesses in ${lead.city} get more bookings with a simple site.`,
+          collectorRunId: run.id, // Phase 4C.2A traceability
         },
       });
 
       leadsInserted++;
-      log(`inserted lead`, { company: lead.company_name, email: lead.email, city: lead.city, id: inserted.id });
+      leadIds.push(inserted.id);
+      log(`inserted lead`, { company: lead.company_name, email: lead.email, city: lead.city, id: inserted.id, runId: run.id });
+
+      if (candidateId) {
+        await prisma.leadCandidate.update({
+          where: { id: candidateId },
+          data: {
+            status: 'QUALIFIED',
+            qualifiedLeadId: inserted.id,
+            metadata: {
+              ...(candidate?.metadata || {}),
+              qualifiedAt: new Date().toISOString(),
+              leadId: inserted.id,
+            },
+          },
+        });
+        candidatesQualified++;
+      }
 
       if (debugCsv) {
         debugRows.push(lead);
@@ -1440,12 +1576,23 @@ async function main() {
     } catch (e) {
       logError(`failed to insert lead ${lead.company_name} ${lead.email}`, { error: e.message });
       invalidRejected++;
+      if (candidateId) {
+        try {
+          await prisma.leadCandidate.update({
+            where: { id: candidateId },
+            data: {
+              status: 'REJECTED',
+              rejectionReason: `insert_failed: ${e.message.slice(0, 100)}`,
+            },
+          });
+          candidatesRejected++;
+        } catch {}
+      }
     }
   }
 
-  log(`insertion done`, { inserted: leadsInserted, accepted: leadsAccepted });
+  log(`insertion done Phase 4C.2A`, { inserted: leadsInserted, accepted: leadsAccepted, candidatesQualified, candidatesPersisted, leadIds: leadIds.length, candidateIds: candidateIds.length });
 
-  // 12. Update CollectorState (success)
   const nextEligible = new Date(Date.now() + config.collectionFrequencyMinutes * 60 * 1000);
   await prisma.collectorState.update({
     where: { id: state.id },
@@ -1469,19 +1616,14 @@ async function main() {
     },
   });
 
-  // Update location lastCollectedAt
   await prisma.collectorLocation.update({
     where: { id: location.id },
     data: { lastCollectedAt: new Date(), nextCollectAt: nextEligible },
   });
-  // Update category lastRunAt
   await prisma.leadCategory.update({
     where: { id: category.id },
     data: { lastRunAt: new Date() },
   });
-  // Update source health — Phase 4C.1 improved observability
-  // Record lastCheckedAt always, mark degraded if retries used, healthy if no retries
-  // Do NOT mark DOWN because of one temporarily bad run that eventually succeeded
   const hadRetries = fetchResult && fetchResult.retryDelays && fetchResult.retryDelays.length > 0;
   const newHealthStatus = hadRetries ? 'degraded' : 'healthy';
   try {
@@ -1505,9 +1647,8 @@ async function main() {
     logWarn(`failed to update source health for ${source.name}`, { error: e.message });
   }
 
-  // 13. Finalize CollectorRun — Phase 4C.1 adds parsed count + yield metrics
   const durationMs = Date.now() - startTime;
-  const finalStatus = queryFailures.length ? 'PARTIAL' : 'SUCCESS'; // SUCCESS even if 0 leads, per spec
+  const finalStatus = queryFailures.length ? 'PARTIAL' : 'SUCCESS';
   const acceptanceRate = parsedCount ? (leadsAccepted / parsedCount) : 0;
   const insertionRate = parsedCount ? (leadsInserted / parsedCount) : 0;
 
@@ -1541,7 +1682,6 @@ async function main() {
         retryCount,
         warnings: [...osmWarnings, ...ruleWarnings],
         durationMs,
-        // Phase 4C.1 new metrics
         parsedCount,
         emailPresentCount,
         emailPresenceRate: parseFloat(emailPresenceRate.toFixed(4)),
@@ -1558,24 +1698,37 @@ async function main() {
           noEmailRate: parsedCount ? `${((noEmailRejected/parsedCount)*100).toFixed(2)}%` : '0%',
           websiteRejectedRate: parsedCount ? `${((websiteRejected/parsedCount)*100).toFixed(2)}%` : '0%',
         },
+        // Phase 4C.2A traceability
+        candidateIds,
+        leadIds,
+        candidatesPersisted,
+        candidatesNeedingEnrichment,
+        candidatesRejected,
+        candidatesQualified,
       },
     },
   });
 
-  log(`run finalized`, {
+  log(`run finalized Phase 4C.2A`, {
     runId: run.id,
     status: finalStatus,
     duration: `${Math.round(durationMs / 1000)}s`,
     candidates: candidatesFound,
+    parsed: parsedCount,
+    candidatesPersisted,
+    needingEnrichment: candidatesNeedingEnrichment,
+    rejected: candidatesRejected,
+    qualified: candidatesQualified,
     accepted: leadsAccepted,
     inserted: leadsInserted,
     websiteRejected,
     duplicateRejected,
     genericRejected: genericEmailRejected,
     noEmail: noEmailRejected,
+    candidateIds: candidateIds.length,
+    leadIds: leadIds.length,
   });
 
-  // 14. Debug CSV optional
   if (debugCsv && debugRows.length) {
     const csvPath = path.join(process.cwd(), 'collector-debug.csv');
     const header = 'company_name,business_category,website,email,phone,address,city,country,source\n';
@@ -1590,10 +1743,9 @@ async function main() {
     log(`debug CSV written empty (no accepted leads)`, { path: csvPath });
   }
 
-  // 15. Legacy heartbeat for /live backward compat — Phase 4C.1 enhanced
   const hb = {
     timestamp: new Date().toISOString(),
-    message: `Worker ${location.city}/${category.slug}: ${leadsInserted} inserted, ${candidatesFound} raw, ${parsedCount} parsed, ${emailPresentCount} emailPresent (${(emailPresenceRate*100).toFixed(1)}%), ${websiteRejected} websiteRejected - ${finalStatus} - ${fetchResult.retryDelays.length} retries`,
+    message: `Worker ${location.city}/${category.slug}: ${leadsInserted} inserted, ${candidatesFound} raw, ${parsedCount} parsed, ${candidatesPersisted} candidates, ${candidatesNeedingEnrichment} needEnrichment, ${candidatesQualified} qualified - ${finalStatus} - ${fetchResult.retryDelays.length} retries`,
     collectors: 1,
     source: 'collector-worker',
     githubRunId: GITHUB_RUN_ID,
@@ -1607,6 +1759,10 @@ async function main() {
       parsedCount,
       emailPresentCount,
       emailPresenceRate: `${(emailPresenceRate*100).toFixed(2)}%`,
+      candidatesPersisted,
+      candidatesNeedingEnrichment,
+      candidatesRejected,
+      candidatesQualified,
       leadsAccepted,
       leadsInserted,
       acceptanceRate: `${(acceptanceRate*100).toFixed(2)}%`,
@@ -1615,6 +1771,8 @@ async function main() {
       attempt: fetchResult.attempt,
       finalStatus: fetchResult.status,
       health: newHealthStatus,
+      candidateIds: candidateIds.slice(0, 5),
+      leadIds: leadIds.slice(0, 5),
     },
   };
   await prisma.setting.upsert({
@@ -1623,11 +1781,12 @@ async function main() {
     create: { key: 'collector_heartbeat', value: JSON.stringify(hb) },
   });
 
-  // 16. Structured final logs — Phase 4C.1 enhanced with yield
   console.log(`[collector] assignment ${location.city} / ${category.slug} / ${source.name}`);
   console.log(`[collector] candidates=${candidatesFound} parsed=${parsedCount} emailPresent=${emailPresentCount} emailPresenceRate=${(emailPresenceRate*100).toFixed(2)}%`);
+  console.log(`[collector] candidatesPersisted=${candidatesPersisted} needingEnrichment=${candidatesNeedingEnrichment} rejected=${candidatesRejected} qualified=${candidatesQualified}`);
   console.log(`[collector] accepted=${leadsAccepted} inserted=${leadsInserted} acceptanceRate=${(acceptanceRate*100).toFixed(2)}%`);
   console.log(`[collector] websiteRejected=${websiteRejected} duplicateRejected=${duplicateRejected} genericRejected=${genericEmailRejected} noEmailRejected=${noEmailRejected}`);
+  console.log(`[collector] candidateIds=${candidateIds.length} leadIds=${leadIds.length}`);
   console.log(`[collector] retries=${fetchResult.retryDelays.length} attempt=${fetchResult.attempt} status=${fetchResult.status} health=${newHealthStatus}`);
   console.log(`[collector] run=${finalStatus} duration=${Math.round(durationMs / 1000)}s`);
 

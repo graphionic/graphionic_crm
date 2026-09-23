@@ -270,6 +270,8 @@ export default function LeadCollectionClient({
   const yieldMetrics = overview.yieldMetrics || {};
   const healthBreakdown = overview.healthBreakdown || { healthy: 0, degraded: 0, down: 0, unknown: 0 };
   const nextAssignment = overview.nextAssignment || null;
+  const candidateBreakdown = overview.candidateBreakdown || {};
+  const candidateCount = overview.counts?.candidateCount || 0;
 
   return (
     <div style={{ fontFamily: "'Poppins', system-ui, sans-serif" }}>
@@ -278,7 +280,7 @@ export default function LeadCollectionClient({
       <div className="page-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
         <div>
           <h2 style={{ fontSize: 24, fontWeight: 600, color: "#151927", marginBottom: 4 }}>Collector Control Center</h2>
-          <p style={{ fontSize: 13, color: "#60697A" }}>Phase 4C.1 — Fair rotation, observability, yield metrics. All settings stored in Neon PostgreSQL.</p>
+          <p style={{ fontSize: 13, color: "#60697A" }}>Phase 4C.2A — LeadCandidate persistence + Run traceability. Lead table = qualified only. All settings stored in Neon PostgreSQL.</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <span style={{ fontSize: 11, fontWeight: 600, padding: "6px 12px", borderRadius: 6, background: overview.config.enabled ? "#EEF8F4" : "#FDECEC", color: overview.config.enabled ? "#4FAE91" : "#EC6262", border: `1px solid ${overview.config.enabled ? "#D5F0E5" : "#FBD5D5"}` }}>
@@ -315,9 +317,10 @@ export default function LeadCollectionClient({
               <div style={{ fontSize: 11, color: "#60697A", marginTop: 4 }}>{overview.counts.sourcesActive} active / {overview.counts.sourcesTotal} total — Map APIs</div>
             </div>
             <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 16 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", color: "#9299A8", marginBottom: 8, textTransform: "uppercase" }}>Yield (Last 20 Runs)</div>
+              <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", color: "#9299A8", marginBottom: 8, textTransform: "uppercase" }}>Yield (Last 20 Runs) + Candidates</div>
               <div style={{ fontSize: 14, fontWeight: 600, color: "#151927" }}>{yieldMetrics.totalParsed || 0} parsed → {yieldMetrics.totalAccepted || 0} accepted → {yieldMetrics.totalInserted || 0} inserted</div>
               <div style={{ fontSize: 11, color: "#60697A", marginTop: 4 }}>Email presence {(yieldMetrics.avgEmailPresenceRate*100 || 0).toFixed(2)}% — {yieldMetrics.totalNoEmail || 0} noEmail, {yieldMetrics.totalWebsiteRejected || 0} websiteRejected, {yieldMetrics.totalRetries || 0} retries</div>
+              <div style={{ fontSize: 11, color: "#49339A", marginTop: 6, background: "#F0ECFA", padding: "4px 6px", borderRadius: 4 }}>Candidates: {candidateCount} total — {candidateBreakdown.NEEDS_ENRICHMENT || 0} needEnrichment, {candidateBreakdown.QUALIFIED || 0} qualified, {candidateBreakdown.REJECTED || 0} rejected — Last20: {yieldMetrics.totalCandidatesPersisted || 0} persisted, {yieldMetrics.totalNeedingEnrichment || 0} needEnrich, {yieldMetrics.totalCandidatesQualified || 0} qualified</div>
             </div>
           </div>
 
@@ -726,19 +729,19 @@ export default function LeadCollectionClient({
         </div>
       )}
 
-      {/* Runs Tab — Phase 4C.1 Enhanced */}
+      {/* Runs Tab — Phase 4C.2A Enhanced with Candidate Traceability */}
       {activeTab === "runs" && (
         <div style={{ display: "grid", gap: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
-              <h3 style={{ fontSize: 14, fontWeight: 600, color: "#151927" }}>Collector Run History — Phase 4C.1 Enhanced</h3>
-              <p style={{ fontSize: 12, color: "#60697A", marginTop: 4 }}>Every GitHub execution = 1 assignment. SUCCESS = worker completed (0 leads still SUCCESS). Metrics: raw → parsed → emailPresent (1.09% example) → accepted → inserted. Retries, HTTP status, GitHub ID clickable, finishedAt, errorMessage.</p>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: "#151927" }}>Collector Run History — Phase 4C.2A Candidate Persistence</h3>
+              <p style={{ fontSize: 12, color: "#60697A", marginTop: 4 }}>Every GitHub execution = 1 assignment. Phase 4C.2A: parsed candidates persisted as LeadCandidate (DISCOVERED→NEEDS_ENRICHMENT/REJECTED/QUALIFIED), no-email preserved as NEEDS_ENRICHMENT (not lost), Lead table = qualified only, collectorRunId FK + metadata candidateIds/leadIds for traceability. Metrics: raw→parsed→candidatesPersisted→needEnrichment→qualified→inserted. Retries, HTTP, GitHub clickable, finishedAt, error.</p>
             </div>
           </div>
           <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, overflow: "hidden" }}>
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 1100 }}>
-                <thead><tr style={{ background: "#FAF9F7", borderBottom: "1px solid #E5E3DF", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}><th style={{ padding: "10px 14px" }}>Started / Finished</th><th style={{ padding: "10px 14px" }}>Status / Error</th><th style={{ padding: "10px 14px" }}>Location / Category / Source</th><th style={{ padding: "10px 14px" }}>Raw / Parsed / EmailPresent</th><th style={{ padding: "10px 14px" }}>Rejected</th><th style={{ padding: "10px 14px" }}>Accepted / Inserted / Yield</th><th style={{ padding: "10px 14px" }}>Duration / Retries / HTTP / GitHub</th></tr></thead>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 1200 }}>
+                <thead><tr style={{ background: "#FAF9F7", borderBottom: "1px solid #E5E3DF", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}><th style={{ padding: "10px 14px" }}>Started / Finished</th><th style={{ padding: "10px 14px" }}>Status / Error</th><th style={{ padding: "10px 14px" }}>Location / Category / Source</th><th style={{ padding: "10px 14px" }}>Raw / Parsed / EmailPresent / Candidates</th><th style={{ padding: "10px 14px" }}>Rejected</th><th style={{ padding: "10px 14px" }}>Accepted / Inserted / Qualified</th><th style={{ padding: "10px 14px" }}>Duration / Retries / HTTP / GitHub / Traceability</th></tr></thead>
                 <tbody>
                   {runs.length === 0 ? <tr><td colSpan={7} style={{ padding: "20px", textAlign: "center", color: "#9299A8" }}>No runs yet. After 5 manual runs, should show diverse locations, not just London/dental/DE.</td></tr> : runs.map((run: any) => {
                     const meta = run.metadata || {};
@@ -748,16 +751,19 @@ export default function LeadCollectionClient({
                         <td style={{ padding: "10px 14px", color: "#60697A", fontSize: 11 }}>{new Date(run.startedAt).toLocaleString()}<br /><span style={{ fontSize: 10, color: "#9299A8" }}>{run.finishedAt ? new Date(run.finishedAt).toLocaleString() : "running"}</span></td>
                         <td style={{ padding: "10px 14px" }}><span style={{ padding: "3px 8px", borderRadius: 6, background: run.status === "SUCCESS" ? "#EEF8F4" : run.status === "FAILED" ? "#FDECEC" : "#FFF6E3", color: run.status === "SUCCESS" ? "#4FAE91" : run.status === "FAILED" ? "#EC6262" : "#F29B38", fontSize: 11 }}>{run.status}</span>{run.errorMessage ? <div style={{ fontSize: 10, color: "#EC6262", marginTop: 4, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", background: "#FDECEC", padding: "2px 6px", borderRadius: 4 }}>{run.errorMessage.slice(0, 100)}</div> : null}</td>
                         <td style={{ padding: "10px 14px", fontSize: 11, color: "#151927" }}><div style={{ fontWeight: 500 }}>{run.location?.city || "—"} / {run.category?.slug || "—"}</div><div style={{ fontSize: 10, color: "#9299A8" }}>{run.source?.name?.slice(0, 30) || "—"}</div></td>
-                        <td style={{ padding: "10px 14px", color: "#60697A", fontSize: 11 }}>{run.candidatesFound} raw / {meta.parsedCount ?? "?"} parsed / {meta.emailPresentCount ?? 0} email ({meta.yield?.emailPresenceRate || "0%"})</td>
+                        <td style={{ padding: "10px 14px", color: "#60697A", fontSize: 11 }}>{run.candidatesFound} raw / {meta.parsedCount ?? "?"} parsed / {meta.emailPresentCount ?? 0} email ({meta.yield?.emailPresenceRate || "0%"})<br /><span style={{ fontSize: 10, color: "#49339A", background: "#F0ECFA", padding: "2px 4px", borderRadius: 3 }}>{meta.candidatesPersisted ?? "?"} persisted / {meta.candidatesNeedingEnrichment ?? 0} needEnrich / {meta.candidatesQualified ?? 0} qualified / {meta.candidatesRejected ?? 0} rejected</span></td>
                         <td style={{ padding: "10px 14px", fontSize: 11, color: "#9299A8" }}>{run.noEmailRejected}/{run.genericEmailRejected}/{run.websiteRejected}/{run.duplicateRejected}/{run.invalidRejected}<br /><span style={{ fontSize: 10 }}>noEmail/gen/web/dup/inv</span></td>
-                        <td style={{ padding: "10px 14px", color: "#4FAE91", fontWeight: 500, fontSize: 11 }}>{run.leadsAccepted} / {run.leadsInserted}<br /><span style={{ fontSize: 10, color: "#9299A8" }}>{meta.yield?.acceptanceRate || "0%"} accept</span></td>
-                        <td style={{ padding: "10px 14px", color: "#60697A", fontSize: 11 }}>{run.durationMs ? `${Math.round(run.durationMs/1000)}s` : "—"}<br />{meta.fetchResult?.retryDelays?.length || 0} retries (attempt {meta.fetchResult?.attempt || 1})<br />HTTP {meta.fetchResult?.status || "?"}<br />{ghUrl ? <a href={ghUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#49339A", textDecoration: "underline" }}>GH#{meta.githubRunId}</a> : meta.githubRunId ? `GH#${meta.githubRunId}` : ""} {meta.githubRunAttempt ? `a${meta.githubRunAttempt}` : ""}<br /><span style={{ fontSize: 10, fontFamily: "monospace" }}>{meta.bbox ? meta.bbox.slice(0, 30) : ""}</span></td>
+                        <td style={{ padding: "10px 14px", color: "#4FAE91", fontWeight: 500, fontSize: 11 }}>{run.leadsAccepted} / {run.leadsInserted}<br /><span style={{ fontSize: 10, color: "#9299A8" }}>{meta.yield?.acceptanceRate || "0%"} accept — {meta.candidatesQualified || 0} candidate qualified</span></td>
+                        <td style={{ padding: "10px 14px", color: "#60697A", fontSize: 11 }}>{run.durationMs ? `${Math.round(run.durationMs/1000)}s` : "—"}<br />{meta.fetchResult?.retryDelays?.length || 0} retries (attempt {meta.fetchResult?.attempt || 1})<br />HTTP {meta.fetchResult?.status || "?"}<br />{ghUrl ? <a href={ghUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#49339A", textDecoration: "underline" }}>GH#{meta.githubRunId}</a> : meta.githubRunId ? `GH#${meta.githubRunId}` : ""} {meta.githubRunAttempt ? `a${meta.githubRunAttempt}` : ""}<br /><span style={{ fontSize: 10, fontFamily: "monospace" }}>{meta.bbox ? meta.bbox.slice(0, 30) : ""}</span><br />{meta.leadIds?.length ? <span style={{ fontSize: 10, color: "#4FAE91" }}>LeadIds: {meta.leadIds.slice(0,2).join(",").slice(0,30)}{meta.leadIds.length>2?`+${meta.leadIds.length-2}`:""}</span> : null}<br />{meta.candidateIds?.length ? <span style={{ fontSize: 10, color: "#49339A" }}>CandIds: {meta.candidateIds.length} persisted</span> : null}</td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
+          </div>
+          <div style={{ padding: "10px 12px", background: "#FAF9F7", border: "1px solid #E5E3DF", borderRadius: 8, fontSize: 11, color: "#60697A" }}>
+            <strong>Phase 4C.2A:</strong> LeadCandidate = discovery/enrichment storage (DISCOVERED, NEEDS_ENRICHMENT, VERIFICATION_PENDING, QUALIFIED, REJECTED). Lead = qualified CRM only. No-email to NEEDS_ENRICHMENT (not lost) for future enrichment. Traceability: Lead.collectorRunId FK plus Run.metadata candidateIds, leadIds, candidatesPersisted, candidatesNeedingEnrichment, candidatesRejected, candidatesQualified. Fair rotation unchanged, website verification unchanged, no external enrichment API.
           </div>
         </div>
       )}

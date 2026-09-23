@@ -33,16 +33,14 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: crm/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        working-directory: crm
         run: |
           npm ci --ignore-scripts
           ./node_modules/.bin/prisma generate
 
       - name: Run collector worker
-        working-directory: crm
         run: |
           echo "[collector] Starting Phase 4B worker"
           echo "[collector] GitHub Run ID: $GITHUB_RUN_ID"
@@ -55,7 +53,6 @@ jobs:
 
       - name: Upload debug CSV if enabled
         if: always()
-        working-directory: crm
         run: |
           if [ -f collector-debug.csv ]; then
             echo "Debug CSV found, will upload"
@@ -70,13 +67,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: collector-debug-${{ github.run_id }}
-          path: crm/collector-debug.csv
+          path: collector-debug.csv
           if-no-files-found: ignore
           retention-days: 7
 
       - name: Summary
         if: always()
-        working-directory: crm
         run: |
           echo "## Collector Worker Run" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

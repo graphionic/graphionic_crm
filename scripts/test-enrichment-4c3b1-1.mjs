@@ -7,6 +7,9 @@
 import { PrismaClient } from '@prisma/client';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { assertSafeTestEnvironment } from './test-safety.mjs';
+
+assertSafeTestEnvironment();
 
 const prisma = new PrismaClient();
 const PREFIX = 'TEST_ENRICH_4C3B1_1_';

@@ -1155,12 +1155,12 @@ export default function LeadCollectionClient({
         </div>
       )}
 
-      {/* Enrichment Tab — Phase 4C.3A Foundation */}
+      {/* Enrichment Tab — Phase 4C.3B.1 Provider Budget Guardrails */}
       {activeTab === "enrichment" && (
         <div style={{ display: "grid", gap: 16 }}>
           <div>
-            <h3 style={{ fontSize: 14, fontWeight: 600, color: "#151927" }}>Enrichment Engine — Phase 4C.3A Foundation</h3>
-            <p style={{ fontSize: 12, color: "#60697A", marginTop: 4 }}>Provider-agnostic enrichment jobs for NEEDS_ENRICHMENT candidates. No external API calls in this phase. Default disabled, fail-closed.</p>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: "#151927" }}>Enrichment Engine — Phase 4C.3B.1 Budget Guardrails</h3>
+            <p style={{ fontSize: 12, color: "#60697A", marginTop: 4 }}>Provider-agnostic enrichment with hard budget enforcement, atomic reservations, UTC accounting. No real provider HTTP calls in this phase. Default disabled, fail-closed before claim.</p>
           </div>
 
           {enrichmentLoading ? (
@@ -1169,27 +1169,83 @@ export default function LeadCollectionClient({
             <div style={{ padding: 24, textAlign: "center", color: "#EC6262", fontSize: 12, background: "white", border: "1px solid #E5E3DF", borderRadius: 12 }}>Failed to load enrichment stats</div>
           ) : (
             <>
-              {/* Config summary */}
+              {/* Config + Budget Status */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
                 <div style={{ background: enrichmentStats.config?.enabled ? "#FDECEC" : "#EEF8F4", border: `1px solid ${enrichmentStats.config?.enabled ? "#FBD5D5" : "#D5F0E5"}`, borderRadius: 10, padding: 12 }}>
                   <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", color: enrichmentStats.config?.enabled ? "#C53030" : "#276749", textTransform: "uppercase" }}>Enrichment Status</div>
                   <div style={{ fontSize: 16, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.config?.enabled ? "● Enabled" : "● Disabled"}</div>
-                  <div style={{ fontSize: 10, color: "#60697A", marginTop: 2 }}>{enrichmentStats.config?.enabled ? "Provider calls allowed (4C.3B)" : "Fail-closed, no external calls"}</div>
+                  <div style={{ fontSize: 10, color: "#60697A", marginTop: 2 }}>{enrichmentStats.config?.enabled ? "Budget gates enforced" : "Fail-closed, no external calls"}</div>
+                </div>
+                <div style={{ background: enrichmentStats.budgetStatus==="WITHIN_BUDGET" ? "#EEF8F4" : enrichmentStats.budgetStatus==="ENRICHMENT_DISABLED" ? "#FAF9F7" : "#FDECEC", border: `1px solid ${enrichmentStats.budgetStatus==="WITHIN_BUDGET" ? "#D5F0E5" : enrichmentStats.budgetStatus==="ENRICHMENT_DISABLED" ? "#E5E3DF" : "#FBD5D5"}`, borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", color: enrichmentStats.budgetStatus==="WITHIN_BUDGET" ? "#276749" : enrichmentStats.budgetStatus==="ENRICHMENT_DISABLED" ? "#9299A8" : "#C53030", textTransform: "uppercase" }}>Budget Status</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.budgetStatus || "—"}</div>
+                  <div style={{ fontSize: 10, color: "#60697A", marginTop: 2 }}>{enrichmentStats.budgetStatus==="WITHIN_BUDGET" ? "Within budget" : enrichmentStats.budgetStatus==="ENRICHMENT_DISABLED" ? "Enrichment disabled" : enrichmentStats.budgetStatus==="DAILY_CANDIDATE_LIMIT_REACHED" ? "Daily candidate limit reached" : enrichmentStats.budgetStatus==="DAILY_CREDIT_LIMIT_REACHED" ? "Daily credit limit reached" : enrichmentStats.budgetStatus==="MONTHLY_CREDIT_LIMIT_REACHED" ? "Monthly credit limit reached" : enrichmentStats.budgetStatus==="NO_PROVIDER_AVAILABLE" ? "No provider available" : "—"}</div>
                 </div>
                 <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
                   <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", color: "#9299A8", textTransform: "uppercase" }}>Daily Limit / Batch</div>
                   <div style={{ fontSize: 14, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.config?.dailyCandidateLimit} / {enrichmentStats.config?.batchSize}</div>
-                  <div style={{ fontSize: 10, color: "#60697A", marginTop: 2 }}>Max attempts {enrichmentStats.config?.maxAttemptsPerCandidate}, cooldown {enrichmentStats.config?.retryCooldownMinutes}m</div>
-                </div>
-                <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", color: "#9299A8", textTransform: "uppercase" }}>Lock Duration</div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.config?.jobLockDurationMinutes}m</div>
-                  <div style={{ fontSize: 10, color: "#60697A", marginTop: 2 }}>Provider daily limit {enrichmentStats.config?.providerDailyCreditLimit ?? "—"} monthly {enrichmentStats.config?.providerMonthlyCreditLimit ?? "—"}</div>
+                  <div style={{ fontSize: 10, color: "#60697A", marginTop: 2 }}>Max attempts {enrichmentStats.config?.maxAttemptsPerCandidate}, cooldown {enrichmentStats.config?.retryCooldownMinutes}m, lock {enrichmentStats.config?.jobLockDurationMinutes}m</div>
                 </div>
                 <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
                   <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", color: "#9299A8", textTransform: "uppercase" }}>Providers</div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.providerCount ?? 0} configured</div>
-                  <div style={{ fontSize: 10, color: "#60697A", marginTop: 2 }}>{enrichmentStats.providerCount ? "Enrichment providers ready" : "No enrichment provider configured"}</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.providerCount ?? 0} configured / {enrichmentStats.providers?.filter((p:any)=>p.adapterAvailable).length ?? 0} adapters</div>
+                  <div style={{ fontSize: 10, color: "#60697A", marginTop: 2 }}>{enrichmentStats.providers?.length ? `${enrichmentStats.providers.length} credentials, ${enrichmentStats.providers.filter((p:any)=>p.adapterAvailable).length} adapters available` : "No enrichment provider configured"}</div>
+                </div>
+              </div>
+
+              {/* Global Usage — Budget Guardrails */}
+              <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 14 }}>
+                <h4 style={{ fontSize: 12, fontWeight: 600, color: "#151927", marginBottom: 10 }}>Global Usage — UTC Accounting (day = UTC calendar day, month = UTC calendar month)</h4>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
+                  <div style={{ border: "1px solid #E5E3DF", borderRadius: 8, padding: 10 }}>
+                    <div style={{ fontSize: 10, color: "#9299A8", textTransform: "uppercase" }}>Candidates Today</div>
+                    <div style={{ fontSize: 16, fontWeight: 600, color: "#151927" }}>{enrichmentStats.budgetUsage?.candidatesProcessedToday ?? enrichmentStats.eligibleCandidates ?? 0} / {enrichmentStats.config?.dailyCandidateLimit ?? "—"}</div>
+                    <div style={{ fontSize: 10, color: "#60697A" }}>Unique candidates (retries don't count as new)</div>
+                  </div>
+                  <div style={{ border: "1px solid #E5E3DF", borderRadius: 8, padding: 10 }}>
+                    <div style={{ fontSize: 10, color: "#9299A8", textTransform: "uppercase" }}>Attempts Today</div>
+                    <div style={{ fontSize: 16, fontWeight: 600, color: "#151927" }}>{enrichmentStats.budgetUsage?.attemptsToday ?? enrichmentStats.attemptsToday ?? 0}</div>
+                    <div style={{ fontSize: 10, color: "#60697A" }}>Retries count as attempts</div>
+                  </div>
+                  <div style={{ border: "1px solid #E5E3DF", borderRadius: 8, padding: 10 }}>
+                    <div style={{ fontSize: 10, color: "#9299A8", textTransform: "uppercase" }}>Credits Today</div>
+                    <div style={{ fontSize: 16, fontWeight: 600, color: "#151927" }}>{enrichmentStats.budgetUsage?.creditsUsedToday ?? enrichmentStats.creditsUsedToday ?? 0} / {enrichmentStats.config?.providerDailyCreditLimit ?? "—"}</div>
+                    <div style={{ fontSize: 10, color: "#60697A" }}>Cost units {enrichmentStats.budgetUsage?.costUnitsToday ?? enrichmentStats.costUnitsToday ?? 0}</div>
+                  </div>
+                  <div style={{ border: "1px solid #E5E3DF", borderRadius: 8, padding: 10 }}>
+                    <div style={{ fontSize: 10, color: "#9299A8", textTransform: "uppercase" }}>Credits This Month</div>
+                    <div style={{ fontSize: 16, fontWeight: 600, color: "#151927" }}>{enrichmentStats.budgetUsage?.creditsUsedThisMonth ?? 0} / {enrichmentStats.config?.providerMonthlyCreditLimit ?? "—"}</div>
+                    <div style={{ fontSize: 10, color: "#60697A" }}>UTC month accounting</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Provider Table */}
+              <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, overflow: "hidden" }}>
+                <div style={{ padding: "12px 16px", borderBottom: "1px solid #E5E3DF", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#151927" }}>Providers — {enrichmentStats.providers?.length ?? 0} credentials</div>
+                  <div style={{ fontSize: 10, color: "#9299A8" }}>Priority DESC, stable tie-breaker provider/label/id. Adapter Available = real integration, Not Integrated = fail-closed.</div>
+                </div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 1100 }}>
+                    <thead><tr style={{ background: "#FAF9F7", borderBottom: "1px solid #E5E3DF", textAlign: "left", fontSize: 10, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}><th style={{ padding: "8px 10px" }}>Provider / Label</th><th style={{ padding: "8px 10px" }}>Enabled / Priority / Health</th><th style={{ padding: "8px 10px" }}>Adapter Status</th><th style={{ padding: "8px 10px" }}>Attempts Today / Month</th><th style={{ padding: "8px 10px" }}>Credits Today / Month</th><th style={{ padding: "8px 10px" }}>Daily Limit / Monthly Limit</th></tr></thead>
+                    <tbody>
+                      {!enrichmentStats.providers || enrichmentStats.providers.length===0 ? (
+                        <tr><td colSpan={6} style={{ padding: 20, textAlign: "center", color: "#9299A8" }}>No provider credentials — enrichment cannot run, fail-closed.</td></tr>
+                      ) : (
+                        enrichmentStats.providers.map((p:any)=>(
+                          <tr key={p.id} style={{ borderBottom: "1px solid #F0EEEA" }}>
+                            <td style={{ padding: "8px 10px" }}><div style={{ fontWeight: 600, color: "#151927" }}>{p.provider}</div><div style={{ fontSize: 10, color: "#60697A" }}>{p.label || "—"} — {p.maskedKey}</div></td>
+                            <td style={{ padding: "8px 10px" }}><span style={{ padding: "2px 6px", borderRadius: 4, background: p.enabled ? "#EEF8F4" : "#F0EEEA", color: p.enabled ? "#4FAE91" : "#9299A8", fontSize: 10 }}>{p.enabled ? "Enabled" : "Disabled"}</span> <span style={{ fontSize: 10, color: "#60697A" }}>Prio {p.priority} Health {p.health}</span></td>
+                            <td style={{ padding: "8px 10px" }}><span style={{ padding: "2px 6px", borderRadius: 4, background: p.adapterAvailable ? "#EEF8F4" : "#FDECEC", color: p.adapterAvailable ? "#4FAE91" : "#C53030", fontSize: 10 }}>{p.adapterStatus}</span></td>
+                            <td style={{ padding: "8px 10px", fontSize: 11 }}>{p.usage?.attemptsToday ?? 0} / {p.usage?.attemptsThisMonth ?? 0}</td>
+                            <td style={{ padding: "8px 10px", fontSize: 11 }}>{p.usage?.creditsToday ?? 0} / {p.usage?.creditsThisMonth ?? 0}</td>
+                            <td style={{ padding: "8px 10px", fontSize: 11 }}>{p.limits?.dailyLimit ?? "—"} / {p.limits?.monthlyLimit ?? "—"}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
@@ -1232,31 +1288,6 @@ export default function LeadCollectionClient({
                 </div>
               </div>
 
-              {/* Daily attempts */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
-                <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}>Attempts Today</div>
-                  <div style={{ fontSize: 18, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.attemptsToday ?? 0}</div>
-                </div>
-                <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}>Success Today</div>
-                  <div style={{ fontSize: 18, fontWeight: 600, color: "#4FAE91", marginTop: 4 }}>{enrichmentStats.successToday ?? 0}</div>
-                </div>
-                <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}>No Result Today</div>
-                  <div style={{ fontSize: 18, fontWeight: 600, color: "#F29B38", marginTop: 4 }}>{enrichmentStats.noResultToday ?? 0}</div>
-                </div>
-                <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}>Failed Today</div>
-                  <div style={{ fontSize: 18, fontWeight: 600, color: "#EC6262", marginTop: 4 }}>{enrichmentStats.failedToday ?? 0}</div>
-                </div>
-                <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}>Credits Used Today</div>
-                  <div style={{ fontSize: 18, fontWeight: 600, color: "#151927", marginTop: 4 }}>{enrichmentStats.creditsUsedToday ?? 0}</div>
-                  <div style={{ fontSize: 10, color: "#9299A8" }}>Cost units {enrichmentStats.costUnitsToday ?? 0}</div>
-                </div>
-              </div>
-
               {/* Jobs table */}
               <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, overflow: "hidden" }}>
                 <div style={{ padding: "12px 16px", borderBottom: "1px solid #E5E3DF", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1280,7 +1311,7 @@ export default function LeadCollectionClient({
                     <thead><tr style={{ background: "#FAF9F7", borderBottom: "1px solid #E5E3DF", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}><th style={{ padding: "10px 12px" }}>Job / Candidate</th><th style={{ padding: "10px 12px" }}>Status</th><th style={{ padding: "10px 12px" }}>Attempts</th><th style={{ padding: "10px 12px" }}>Next Attempt</th><th style={{ padding: "10px 12px" }}>Locked</th><th style={{ padding: "10px 12px" }}>Result</th><th style={{ padding: "10px 12px" }}>Created</th></tr></thead>
                     <tbody>
                       {!enrichmentJobs || enrichmentJobs.jobs.length === 0 ? (
-                        <tr><td colSpan={7} style={{ padding: 24, textAlign: "center", color: "#9299A8", fontSize: 12 }}>{enrichmentStats.totalJobs === 0 ? "No enrichment jobs — clean queue ready for future seeding (Phase 4C.3A foundation only, no auto-seeding)" : "No jobs match filter"}</td></tr>
+                        <tr><td colSpan={7} style={{ padding: 24, textAlign: "center", color: "#9299A8", fontSize: 12 }}>{enrichmentStats.totalJobs === 0 ? "No enrichment jobs — clean queue ready for future seeding (Phase 4C.3B.1 budget guardrails, no auto-seeding, no real provider)" : "No jobs match filter"}</td></tr>
                       ) : (
                         enrichmentJobs.jobs.map((j: any) => (
                           <tr key={j.id} style={{ borderBottom: "1px solid #F0EEEA" }}>
@@ -1309,7 +1340,7 @@ export default function LeadCollectionClient({
               </div>
 
               <div style={{ padding: "10px 12px", background: "#FAF9F7", border: "1px solid #E5E3DF", borderRadius: 8, fontSize: 11, color: "#60697A" }}>
-                <strong>Phase 4C.3A:</strong> Enrichment engine foundation only. No external provider calls, no credits spent, no auto-seeding, no auto-qualification. Jobs PENDING → PROCESSING (locked) → SUCCESS/NO_RESULT/FAILED → retry or EXHAUSTED → VERIFICATION_PENDING → [future TRUE_NO_SITE] → QUALIFIED → Lead. Default disabled, fail-closed worker. Mock provider available for tests only.
+                <strong>Phase 4C.3B.1:</strong> Provider abstraction, registry, selection priority DESC stable tie-breaker, usage accounting UTC day/month, unique candidate daily count (retries don't consume candidate slot), global budget gates ENRICHMENT_DISABLED DAILY_CANDIDATE_LIMIT_REACHED DAILY_CREDIT_LIMIT_REACHED MONTHLY_CREDIT_LIMIT_REACHED, provider budget gates PROVIDER_DAILY_LIMIT_REACHED MONTHLY, atomic reservation via SELECT FOR UPDATE on EnrichmentConfig and ProviderCredential + STARTED attempt as reservation (conservative, crash counts), fallback policy disabled by default, failure classification AUTH_ERROR RATE_LIMITED TIMEOUT PROVIDER_DOWN etc., worker fail-closed before claim, no real provider HTTP, no credits spent.
               </div>
             </>
           )}

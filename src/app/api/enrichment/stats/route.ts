@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireActiveUser } from '@/lib/session';
 import { getEnrichmentStats, getEnrichmentConfig } from '@/lib/enrichment';
+import { getBudgetStatus, getProvidersForUI } from '@/lib/enrichment-providers';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
@@ -10,8 +11,12 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     await requireActiveUser();
-    const stats = await getEnrichmentStats();
-    const config = await getEnrichmentConfig();
+    const [stats, config, budget, providers] = await Promise.all([
+      getEnrichmentStats(),
+      getEnrichmentConfig(),
+      getBudgetStatus(),
+      getProvidersForUI(),
+    ]);
     const providerCount = await prisma.providerCredential.count({ where: { provider: { in: ['hunter', 'dropcontact', 'apollo', 'snov', 'enrichment'] } } });
     
     return NextResponse.json({
@@ -27,6 +32,9 @@ export async function GET() {
         providerMonthlyCreditLimit: config.providerMonthlyCreditLimit,
       },
       providerCount,
+      budgetStatus: budget.status,
+      budgetUsage: budget.usage,
+      providers,
     });
   } catch (e: any) {
     if (e.message?.includes('Unauthorized') || e.message?.includes('not authenticated')) {

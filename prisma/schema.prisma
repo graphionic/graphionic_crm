@@ -307,6 +307,10 @@ model DataSource {
   runs       CollectorRun[]
   candidates LeadCandidate[]
 
+  // Phase 4C.4B — Google guardrails
+  googleUsages GoogleApiUsage[]
+  googleCaches GoogleApiCache[]
+
   @@index([enabled])
   @@index([type])
 }
@@ -429,6 +433,9 @@ model CollectorRun {
   // Phase 4C.2A — traceability
   leads      Lead[]
   candidates LeadCandidate[] @relation("CandidateDiscoveryRun")
+
+  // Phase 4C.4B — Google guardrails
+  googleUsages GoogleApiUsage[]
 
   @@index([status])
   @@index([startedAt])
@@ -601,4 +608,128 @@ model EnrichmentAttempt {
   @@index([status])
   @@index([startedAt])
   @@index([providerType])
+}
+
+// ---------------------------------------------------------------- PHASE 4C.4B — GOOGLE REQUEST GUARDRAILS
+
+model GoogleCollectionConfig {
+  id  String @id @default(cuid())
+  key String @unique @default("default")
+
+  enabled    Boolean @default(false) // fail-closed default
+  failClosed Boolean @default(true)
+
+  perRunRequestLimit Int @default(10)
+  dailyRequestLimit  Int @default(50)
+  monthlyRequestLimit Int @default(500)
+
+  dailyCostUnitLimit   Int? // optional architecture, internal cost units, NOT USD
+  monthlyCostUnitLimit Int?
+
+  cacheEnabled Boolean @default(true)
+  queryCacheTtlHours Int @default(24)
+  placeDetailsCacheTtlHours Int @default(168)
+
+  retryLimit Int @default(0) // no retries by default to avoid bypassing budget
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum GoogleOperation {
+  TEXT_SEARCH
+  NEARBY_SEARCH
+  PLACE_DETAILS
+  GEOCODING
+}
+
+enum GoogleRequestStatus {
+  RESERVED
+  SUCCESS
+  NO_RESULT
+  FAILED
+  CANCELLED
+}
+
+enum GoogleErrorClassification {
+  AUTH_ERROR
+  QUOTA_EXCEEDED
+  RATE_LIMITED
+  SERVER_ERROR
+  INVALID_REQUEST
+  NETWORK_ERROR
+  UNKNOWN
+}
+
+model GoogleApiUsage {
+  id String @id @default(cuid())
+
+  sourceId String
+  source   DataSource @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+
+  operation GoogleOperation
+  status    GoogleRequestStatus @default(RESERVED)
+
+  reservedAt  DateTime @default(now())
+  completedAt DateTime?
+  requestSentAt DateTime? // when request actually sent, for CANCELLED semantics
+
+  requestUnits Int @default(1)
+
+  estimatedCostUnits Int? // integer internal cost units, NOT Float, NOT USD
+  actualCostUnits    Int?
+
+  collectorRunId String
+  collectorRun   CollectorRun @relation(fields: [collectorRunId], references: [id], onDelete: Restrict)
+
+  workerId String?
+
+  queryFingerprint String
+  placeId          String?
+
+  errorClassification GoogleErrorClassification?
+  errorMessage        String?
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sourceId, reservedAt])
+  @@index([collectorRunId, reservedAt])
+  @@index([status, reservedAt])
+  @@index([operation, status, reservedAt])
+  @@index([sourceId, queryFingerprint, operation, status])
+  @@index([placeId])
+  @@index([workerId])
+  @@index([queryFingerprint])
+}
+
+model GoogleApiCache {
+  id String @id @default(cuid())
+
+  sourceId String
+  source   DataSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  queryFingerprint String
+  operation        GoogleOperation
+
+  responseMetadata Json?
+  expiresAt        DateTime
+  placeId          String?
+
+  hitCount  Int @default(0)
+  lastHitAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([sourceId, queryFingerprint, operation]) // source-aware cache uniqueness
+  @@index([expiresAt])
+  @@index([operation])
+  @@index([queryFingerprint])
+  @@index([sourceId])
+  @@index([placeId])
 }

@@ -596,15 +596,151 @@ export async function getCollectorOverview() {
   };
 }
 
-export async function getLeadCandidates(params?: { status?: string; limit?: number; city?: string; category?: string }) {
+// ---- Phase 4C.2B Candidate Queue Data Layer ----
+
+export async function getLeadCandidateStats() {
+  const [total, byStatus, byRejection, byCategory, recentCount] = await Promise.all([
+    prisma.leadCandidate.count(),
+    prisma.leadCandidate.groupBy({ by: ['status'], _count: { status: true } }),
+    prisma.leadCandidate.groupBy({ by: ['rejectionReason'], where: { status: 'REJECTED' }, _count: { rejectionReason: true } }),
+    prisma.leadCandidate.groupBy({ by: ['businessCategory'], _count: { businessCategory: true }, orderBy: { _count: { businessCategory: 'desc' } }, take: 20 }),
+    prisma.leadCandidate.count({ where: { createdAt: { gte: new Date(Date.now() - 24*60*60*1000) } } }),
+  ]);
+
+  const breakdown: Record<string, number> = {};
+  for (const g of byStatus) breakdown[g.status] = g._count.status;
+
+  const rejectionBreakdown: Record<string, number> = {};
+  for (const g of byRejection) {
+    if (g.rejectionReason) rejectionBreakdown[g.rejectionReason] = g._count.rejectionReason;
+  }
+
+  return {
+    total,
+    breakdown,
+    rejectionBreakdown,
+    byCategory,
+    recent24h: recentCount,
+    counts: {
+      DISCOVERED: breakdown.DISCOVERED || 0,
+      NEEDS_ENRICHMENT: breakdown.NEEDS_ENRICHMENT || 0,
+      VERIFICATION_PENDING: breakdown.VERIFICATION_PENDING || 0,
+      QUALIFIED: breakdown.QUALIFIED || 0,
+      REJECTED: breakdown.REJECTED || 0,
+    }
+  };
+}
+
+export async function getLeadCandidatesPaginated(params: {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  status?: string;
+  category?: string;
+  city?: string;
+  sourceId?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+}) {
+  const page = Math.max(1, params.page || 1);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize || 25));
+  const skip = (page - 1) * pageSize;
+
   const where: any = {};
-  if (params?.status) where.status = params.status;
-  if (params?.city) where.city = { contains: params.city, mode: 'insensitive' };
-  if (params?.category) where.businessCategory = params.category;
-  return prisma.leadCandidate.findMany({
-    where,
-    include: { discoveryRun: true, discoverySource: true, qualifiedLead: true },
-    orderBy: { createdAt: 'desc' },
-    take: params?.limit || 50,
+
+  if (params.status && params.status !== 'All') {
+    where.status = params.status;
+  }
+  if (params.category && params.category !== 'All') {
+    where.businessCategory = params.category;
+  }
+  if (params.city && params.city !== 'All') {
+    where.city = { contains: params.city, mode: 'insensitive' };
+  }
+  if (params.sourceId && params.sourceId !== 'All') {
+    where.discoverySourceId = params.sourceId;
+  }
+  if (params.search) {
+    const s = params.search.trim();
+    if (s) {
+      where.OR = [
+        { companyName: { contains: s, mode: 'insensitive' } },
+        { email: { contains: s, mode: 'insensitive' } },
+        { phone: { contains: s, mode: 'insensitive' } },
+        { city: { contains: s, mode: 'insensitive' } },
+        { country: { contains: s, mode: 'insensitive' } },
+        { externalId: { contains: s, mode: 'insensitive' } },
+      ];
+    }
+  }
+
+  const sortBy = params.sortBy || 'createdAt';
+  const sortOrder = params.sortOrder || 'desc';
+  const allowedSort = ['createdAt', 'companyName', 'status', 'city', 'businessCategory'];
+  const orderByField = allowedSort.includes(sortBy) ? sortBy : 'createdAt';
+
+  const [total, candidates] = await Promise.all([
+    prisma.leadCandidate.count({ where }),
+    prisma.leadCandidate.findMany({
+      where,
+      orderBy: { [orderByField]: sortOrder },
+      skip,
+      take: pageSize,
+      select: {
+        id: true,
+        companyName: true,
+        businessCategory: true,
+        city: true,
+        country: true,
+        email: true,
+        phone: true,
+        website: true,
+        externalId: true,
+        externalType: true,
+        status: true,
+        rejectionReason: true,
+        discoverySourceId: true,
+        discoveryRunId: true,
+        qualifiedLeadId: true,
+        createdAt: true,
+        updatedAt: true,
+        discoverySource: { select: { id: true, name: true, type: true } },
+        discoveryRun: { select: { id: true, startedAt: true, location: { select: { city: true, countryCode: true } }, category: { select: { slug: true } } } },
+      },
+    }),
+  ]);
+
+  const totalPages = Math.ceil(total / pageSize);
+
+  return {
+    candidates,
+    total,
+    page,
+    pageSize,
+    totalPages,
+  };
+}
+
+// Keep backward compat for any existing callers
+export async function getLeadCandidates(params?: { status?: string; limit?: number; city?: string; category?: string; search?: string }) {
+  const result = await getLeadCandidatesPaginated({
+    status: params?.status,
+    city: params?.city,
+    category: params?.category,
+    search: params?.search,
+    page: 1,
+    pageSize: params?.limit || 50,
+  });
+  return result.candidates;
+}
+
+export async function getLeadCandidateById(id: string) {
+  return prisma.leadCandidate.findUnique({
+    where: { id },
+    include: {
+      discoverySource: true,
+      discoveryRun: { include: { location: true, category: true, source: true } },
+      qualifiedLead: true,
+    },
   });
 }

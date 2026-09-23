@@ -100,7 +100,7 @@ export default function LeadCollectionClient({
   const [searchLocation, setSearchLocation] = useState("");
   const [searchCategory, setSearchCategory] = useState("");
 
-  // Candidate Queue State — Phase 4C.2B
+  // Candidate Queue State
   const [candidateSearch, setCandidateSearch] = useState("");
   const [candidateSearchDebounced, setCandidateSearchDebounced] = useState("");
   const [candidateStatus, setCandidateStatus] = useState("All");
@@ -408,7 +408,7 @@ export default function LeadCollectionClient({
       <div className="page-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
         <div>
           <h2 style={{ fontSize: 24, fontWeight: 600, color: "#151927", marginBottom: 4 }}>Collector Control Center</h2>
-          <p style={{ fontSize: 13, color: "#60697A" }}>Phase 4C.2B — Candidate Queue UI. LeadCandidate = discovery storage, Lead = qualified CRM only. All settings stored in Neon PostgreSQL.</p>
+          <p style={{ fontSize: 13, color: "#60697A" }}>Lead discovery, candidate queue, run history and collection settings.</p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 11, fontWeight: 600, padding: "6px 12px", borderRadius: 6, background: overview.config.enabled ? "#EEF8F4" : "#FDECEC", color: overview.config.enabled ? "#4FAE91" : "#EC6262", border: `1px solid ${overview.config.enabled ? "#D5F0E5" : "#FBD5D5"}` }}>
@@ -514,15 +514,15 @@ export default function LeadCollectionClient({
         ))}
       </div>
 
-      {/* Candidates Tab — Phase 4C.2B */}
+      {/* Candidates Tab — Phase 4C.2C cleaned */}
       {activeTab === "candidates" && (
         <div style={{ display: "grid", gap: 16 }}>
           <div>
-            <h3 style={{ fontSize: 14, fontWeight: 600, color: "#151927" }}>Candidate Queue — Phase 4C.2B</h3>
-            <p style={{ fontSize: 12, color: "#60697A", marginTop: 4 }}>Discovery storage: all parsed OSM businesses. Lead = qualified CRM only. NEEDS_ENRICHMENT = no email retained for future enrichment. Read-only, searchable, traceable.</p>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: "#151927" }}>Candidate Queue</h3>
+            <p style={{ fontSize: 12, color: "#60697A", marginTop: 4 }}>Discovery storage of parsed businesses. Candidates with known website are rejected before enrichment.</p>
           </div>
 
-          {/* Summary */}
+          {/* Summary — dynamic counts */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
             <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 12 }}>
               <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", color: "#9299A8", textTransform: "uppercase" }}>Total Candidates</div>
@@ -532,12 +532,12 @@ export default function LeadCollectionClient({
             <div style={{ background: "white", border: "1px solid #F4BE52", borderRadius: 10, padding: 12 }}>
               <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", color: "#B7791F", textTransform: "uppercase" }}>Needs Enrichment</div>
               <div style={{ fontSize: 20, fontWeight: 600, color: "#151927", marginTop: 4 }}>{candidateStats?.counts?.NEEDS_ENRICHMENT ?? candidateBreakdown.NEEDS_ENRICHMENT ?? 0}</div>
-              <div style={{ fontSize: 10, color: "#60697A", marginTop: 2 }}>No email — future enrichment</div>
+              <div style={{ fontSize: 10, color: "#60697A", marginTop: 2 }}>No email, no website</div>
             </div>
             <div style={{ background: "white", border: "1px solid #FBD5D5", borderRadius: 10, padding: 12 }}>
               <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", color: "#C53030", textTransform: "uppercase" }}>Rejected</div>
               <div style={{ fontSize: 20, fontWeight: 600, color: "#151927", marginTop: 4 }}>{candidateStats?.counts?.REJECTED ?? candidateBreakdown.REJECTED ?? 0}</div>
-              <div style={{ fontSize: 10, color: "#60697A", marginTop: 2 }}>Existing website / duplicate etc.</div>
+              <div style={{ fontSize: 10, color: "#60697A", marginTop: 2 }}>Website exists / duplicate</div>
             </div>
             <div style={{ background: "white", border: "1px solid #D5F0E5", borderRadius: 10, padding: 12 }}>
               <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", color: "#276749", textTransform: "uppercase" }}>Qualified</div>
@@ -552,20 +552,25 @@ export default function LeadCollectionClient({
             <div style={{ background: "white", border: "1px solid #C5E9F1", borderRadius: 10, padding: 12 }}>
               <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", color: "#2B6CB0", textTransform: "uppercase" }}>Verification Pending</div>
               <div style={{ fontSize: 20, fontWeight: 600, color: "#151927", marginTop: 4 }}>{candidateStats?.counts?.VERIFICATION_PENDING ?? candidateBreakdown.VERIFICATION_PENDING ?? 0}</div>
-              <div style={{ fontSize: 10, color: "#60697A", marginTop: 2 }}>Awaiting TRUE_NO_SITE</div>
+              <div style={{ fontSize: 10, color: "#60697A", marginTop: 2 }}>Awaiting verification</div>
             </div>
           </div>
 
-          {/* Search + Filters */}
-          <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 14, display: "grid", gap: 12 }}>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          {/* Search + Filters — Compressed to 2 rows */}
+          <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 14, display: "grid", gap: 10 }}>
+            {/* Row 1: Search + Clear */}
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
               <input
                 value={candidateSearch}
                 onChange={e => setCandidateSearch(e.target.value)}
-                placeholder="Search company, email, phone, city, country, externalId..."
-                style={{ flex: "1 1 280px", padding: "8px 12px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 13, minWidth: 200 }}
+                placeholder="Search company, email, phone, city, externalId..."
+                style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 13 }}
               />
-              <select value={candidateStatus} onChange={e => setCandidateStatus(e.target.value)} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 12, background: "white" }}>
+              <button onClick={() => { setCandidateSearch(""); setCandidateStatus("All"); setCandidateCategory("All"); setCandidateCity("All"); setCandidateSourceId("All"); setCandidatePage(1); }} style={{ padding: "9px 14px", borderRadius: 8, border: "1px solid #E5E3DF", background: "#FAF9F7", fontSize: 12, fontWeight: 500, cursor: "pointer", whiteSpace: "nowrap" }}>Clear filters</button>
+            </div>
+            {/* Row 2: Status / Category / Source / City / PageSize / Sort */}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <select value={candidateStatus} onChange={e => setCandidateStatus(e.target.value)} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 12, background: "white", minWidth: 140 }}>
                 <option value="All">All Status</option>
                 <option value="NEEDS_ENRICHMENT">Needs Enrichment</option>
                 <option value="REJECTED">Rejected</option>
@@ -573,19 +578,19 @@ export default function LeadCollectionClient({
                 <option value="DISCOVERED">Discovered</option>
                 <option value="VERIFICATION_PENDING">Verification Pending</option>
               </select>
-              <select value={candidateCategory} onChange={e => setCandidateCategory(e.target.value)} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 12, background: "white" }}>
+              <select value={candidateCategory} onChange={e => setCandidateCategory(e.target.value)} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 12, background: "white", minWidth: 140 }}>
                 <option value="All">All Categories</option>
-                {categories.map((c: any) => <option key={c.id} value={c.slug}>{c.name} ({c.slug})</option>)}
+                {categories.map((c: any) => <option key={c.id} value={c.slug}>{c.name}</option>)}
               </select>
-              <select value={candidateSourceId} onChange={e => setCandidateSourceId(e.target.value)} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 12, background: "white" }}>
+              <select value={candidateSourceId} onChange={e => setCandidateSourceId(e.target.value)} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 12, background: "white", minWidth: 130 }}>
                 <option value="All">All Sources</option>
                 {sources.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
               <input
                 value={candidateCity === "All" ? "" : candidateCity}
                 onChange={e => setCandidateCity(e.target.value || "All")}
-                placeholder="Filter city..."
-                style={{ width: 140, padding: "8px 10px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 12 }}
+                placeholder="City"
+                style={{ width: 120, padding: "8px 10px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 12 }}
               />
               <select value={candidatePageSize} onChange={e => setCandidatePageSize(parseInt(e.target.value))} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 12, background: "white" }}>
                 <option value="25">25 / page</option>
@@ -598,12 +603,10 @@ export default function LeadCollectionClient({
                 <option value="status">Status</option>
                 <option value="city">City</option>
               </select>
-              <button onClick={() => { setCandidateSearch(""); setCandidateStatus("All"); setCandidateCategory("All"); setCandidateCity("All"); setCandidateSourceId("All"); setCandidatePage(1); }} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #E5E3DF", background: "#FAF9F7", fontSize: 12, cursor: "pointer" }}>Clear</button>
-            </div>
-            <div style={{ fontSize: 11, color: "#9299A8", display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <span>Total: {candidateData?.total ?? 0} candidates</span>
-              {candidateData && <span>Page {candidateData.page} / {candidateData.totalPages} — {candidateData.candidates.length} rows</span>}
-              <span>Search: company, email, phone, city, country, externalId — server-backed, debounced</span>
+              <div style={{ marginLeft: "auto", fontSize: 11, color: "#9299A8", display: "flex", gap: 12 }}>
+                <span>Total: {candidateData?.total ?? 0}</span>
+                {candidateData && <span>Page {candidateData.page}/{candidateData.totalPages}</span>}
+              </div>
             </div>
           </div>
 
@@ -684,7 +687,7 @@ export default function LeadCollectionClient({
           </div>
 
           <div style={{ padding: "10px 12px", background: "#FAF9F7", border: "1px solid #E5E3DF", borderRadius: 8, fontSize: 11, color: "#60697A" }}>
-            <strong>Phase 4C.2B:</strong> Candidate Queue is READ-ONLY. Search supports company, email, phone, city, country, externalId (server-backed, debounced). Filters: status, category, city, source. Pagination server-side 25/50/100, total count preserved. Detail shows stored website vs rawTags.website independently for Phase 4C.2C quality audit. No enrichment, no qualification, no external APIs.
+            Candidate Queue is read-only. Server-side search, filters and pagination. Business / Category / Location / Contact / Discovery / Status / Reason / Created / Action columns preserved.
           </div>
         </div>
       )}
@@ -768,8 +771,7 @@ export default function LeadCollectionClient({
                     <div style={{ display: "grid", gap: 8, fontSize: 12 }}>
                       <div><span style={{ color: "#9299A8" }}>Email:</span> {selectedCandidate.email || <span style={{ color: "#9299A8" }}>— (needs enrichment)</span>}</div>
                       <div><span style={{ color: "#9299A8" }}>Phone:</span> {selectedCandidate.phone || "—"}</div>
-                      <div><span style={{ color: "#9299A8" }}>Website (stored):</span> {selectedCandidate.website ? <a href={selectedCandidate.website} target="_blank" rel="noopener noreferrer" style={{ color: "#49339A", textDecoration: "underline" }}>{selectedCandidate.website}</a> : <span style={{ color: "#9299A8" }}>—</span>}</div>
-                      <div style={{ fontSize: 10, color: "#9299A8", background: "#FAF9F7", padding: "6px 8px", borderRadius: 6 }}>Stored Website displayed exactly as stored. Compare with Raw Source Data below for quality audit (Phase 4C.2C).</div>
+                      <div><span style={{ color: "#9299A8" }}>Website:</span> {selectedCandidate.website ? <a href={selectedCandidate.website} target="_blank" rel="noopener noreferrer" style={{ color: "#49339A", textDecoration: "underline" }}>{selectedCandidate.website}</a> : <span style={{ color: "#9299A8" }}>—</span>}</div>
                     </div>
                   </div>
 
@@ -824,14 +826,14 @@ export default function LeadCollectionClient({
                     </div>
                   </div>
 
-                  {/* Raw Source Data */}
+                  {/* Raw Source Data — neutral */}
                   <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 10, padding: 14 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                       <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", color: "#9299A8", textTransform: "uppercase" }}>Raw Source Data</div>
                       <button onClick={() => setRawTagsOpen(!rawTagsOpen)} style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #E5E3DF", background: "#FAF9F7", fontSize: 11, cursor: "pointer" }}>{rawTagsOpen ? "Collapse" : "Expand"} JSON</button>
                     </div>
-                    <div style={{ fontSize: 10, color: "#9299A8", marginBottom: 8, background: "#FFF6E3", padding: "6px 8px", borderRadius: 6, border: "1px solid #F4BE52" }}>
-                      <strong>Important:</strong> Stored Website vs Raw website displayed independently for Phase 4C.2C quality audit. Example Core Dental: stored website — vs rawTags.website https://www.coredental.com.au/ — intentional visibility, do not fix in UI.
+                    <div style={{ fontSize: 10, color: "#9299A8", marginBottom: 8, background: "#FAF9F7", padding: "6px 8px", borderRadius: 6, border: "1px solid #E5E3DF" }}>
+                      Original tags as received from discovery source.
                     </div>
                     {rawTagsOpen ? (
                       <pre style={{ background: "#151927", color: "#E5E3DF", padding: 12, borderRadius: 8, fontSize: 11, overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 300, overflowY: "auto" }}>{JSON.stringify(selectedCandidate.rawTags, null, 2)}</pre>
@@ -846,7 +848,7 @@ export default function LeadCollectionClient({
                   </div>
 
                   <div style={{ fontSize: 10, color: "#9299A8", padding: "8px 12px", background: "#FAF9F7", border: "1px solid #F0EEEA", borderRadius: 8 }}>
-                    Candidate detail is READ-ONLY. No Edit, Delete, Enrich, Qualify actions in Phase 4C.2B. Traceability: LeadCandidate.discoveryRunId → CollectorRun, Lead.collectorRunId → CollectorRun, qualifiedLeadId → Lead. RawTags not modified.
+                    Read-only detail. No edit or enrichment actions. Traceable via discovery run and source.
                   </div>
                 </>
               )}
@@ -1025,7 +1027,7 @@ export default function LeadCollectionClient({
       {activeTab === "runs" && (
         <div style={{ display: "grid", gap: 16 }}>
           <div>
-            <h3 style={{ fontSize: 14, fontWeight: 600, color: "#151927" }}>Collector Run History — Phase 4C.2A</h3>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: "#151927" }}>Collector Run History</h3>
             <p style={{ fontSize: 12, color: "#60697A", marginTop: 4 }}>Every GitHub execution = 1 assignment. Candidate persistence: parsed → persisted as LeadCandidate, no-email → NEEDS_ENRICHMENT, traceability via candidateIds/leadIds.</p>
           </div>
           <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, overflow: "hidden" }}>

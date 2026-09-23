@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * ClientForge CRM — Phase 4C.2A Collector Worker
+ * ClientForge CRM — Phase 4C.2C Collector Worker
  * Node.js + Prisma, production GitHub Actions worker
  * 
  * Architecture:
@@ -10,7 +10,9 @@
  * 
  * Single assignment per execution: Location + Category + DataSource
  * Fair rotation, lazy state init, conservative Overpass handling
- * Phase 4C.2A: LeadCandidate persistence + Run traceability, no enrichment yet
+ * Phase 4C.2A: LeadCandidate persistence + Run traceability
+ * Phase 4C.2B: Candidate Queue UI (read-only)
+ * Phase 4C.2C: Pre-enrichment quality fix — website check before email, url/contact:url support
  */
 
 import { PrismaClient } from '@prisma/client';
@@ -338,13 +340,22 @@ async function fetchOverpass(baseUrl, query, options = {}) {
   };
 }
 
-// --- Lead parsing — Phase 4C.2A enhanced ---
+// --- Lead parsing — Phase 4C.2C enhanced with url/contact:url robustness ---
 function parseOsmElement(el, categorySlug, location) {
   const tags = el.tags || {};
   const name = (tags.name || '').trim();
   if (!name || name.length < 3 || name.length > 100) return null;
 
-  const website = (tags.website || tags['contact:website'] || '').trim();
+  // Phase 4C.2C: support website, contact:website, url, contact:url, website:en for future robustness
+  // Do NOT treat Facebook/Instagram as business websites
+  const website = (
+    tags.website ||
+    tags['contact:website'] ||
+    tags.url ||
+    tags['contact:url'] ||
+    tags['website:en'] ||
+    ''
+  ).trim();
   const email = (tags.email || tags['contact:email'] || '').trim();
   const phone = (tags.phone || tags['contact:phone'] || '').trim();
 
@@ -1350,7 +1361,7 @@ async function main() {
     const emailNorm = normalizeEmail(parsedLead.email);
     const key = `${(parsedLead.company_name || '').toLowerCase().trim()}|${emailNorm}|${(parsedLead.city || '').toLowerCase().trim()}`;
 
-    // In-run dedup
+    // In-run dedup — Phase 4C.2C: keep first occurrence
     if (inRunSet.has(key)) {
       duplicateRejected++;
       const cand = await upsertCandidate(parsedLead, 'REJECTED', 'duplicate_in_run');
@@ -1362,21 +1373,9 @@ async function main() {
       continue;
     }
 
-    // Phase 4C.2A — Persist candidate first as DISCOVERED, then update status
-    // For no-email case, we still persist as NEEDS_ENRICHMENT
-    if (requireEmail && !emailNorm) {
-      noEmailRejected++;
-      const cand = await upsertCandidate(parsedLead, 'NEEDS_ENRICHMENT', null);
-      if (cand) {
-        candidateIds.push(cand.id);
-        candidatesPersisted++;
-        candidatesNeedingEnrichment++;
-      }
-      inRunSet.add(key);
-      continue;
-    }
-
-    // Website present
+    // Phase 4C.2C FIX: existing source website check BEFORE missing email
+    // Previously no-email with website became NEEDS_ENRICHMENT (27 cases in prod)
+    // Now: website known → REJECTED existing_website → STOP, do NOT count as noEmailRejected
     if ((requireNoWebsite || rejectExistingWebsite) && parsedLead.website) {
       websiteRejected++;
       const cand = await upsertCandidate(parsedLead, 'REJECTED', 'existing_website');
@@ -1384,6 +1383,19 @@ async function main() {
         candidateIds.push(cand.id);
         candidatesPersisted++;
         candidatesRejected++;
+      }
+      inRunSet.add(key);
+      continue;
+    }
+
+    // Missing email → NEEDS_ENRICHMENT (only if no website)
+    if (requireEmail && !emailNorm) {
+      noEmailRejected++;
+      const cand = await upsertCandidate(parsedLead, 'NEEDS_ENRICHMENT', null);
+      if (cand) {
+        candidateIds.push(cand.id);
+        candidatesPersisted++;
+        candidatesNeedingEnrichment++;
       }
       inRunSet.add(key);
       continue;

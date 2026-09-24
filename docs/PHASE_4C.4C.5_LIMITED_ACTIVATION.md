@@ -344,3 +344,53 @@ Google Stage A records without email NEVER become `QUALIFIED` Leads.
 - `scripts/test-google-collector-5b.mjs` installs a hard network trap intercepting `fetch` to `places.googleapis.com` or `googleapis.com`. Any attempted network call throws immediately and fails the test.
 - All 34 tests A–BH pass with ZERO external network requests.
 
+---
+
+# Phase 4C.4C.5C.1 — Live Canary Activation Preparation
+
+## Architecture & Manual-Only Execution Model
+
+Phase 4C.4C.5C.1 prepares the infrastructure for the first live Google Places canary collection under strict manual authorization and fail-closed safety. No Google network requests are executed during this preparation phase.
+
+### Key Architectural Invariants
+
+1. **Dedicated Manual-Only Canary Workflow**:
+   - Workflow file: `.github/workflows/google-collector-canary.yml`
+   - Triggers: `workflow_dispatch` ONLY.
+   - Prohibited triggers: `schedule`, `push`, `pull_request`, `workflow_run`, `repository_dispatch`.
+   - Normal collector (`.github/workflows/collect.yml`) remains OSM-only and does NOT receive `GOOGLE_MAPS_API_KEY` or canary tokens.
+
+2. **Runtime Canary Execution Token**:
+   - Requires `GOOGLE_COLLECTOR_CANARY=true` in the environment.
+   - If missing, the runner fails closed immediately with `GOOGLE_CANARY_TOKEN_REQUIRED`.
+
+3. **Approved Canary Scope & Hard Caps**:
+   - Location: Country `GB`, City `Manchester`.
+   - Category: `dental` (mapping to query `dental clinic in Manchester UK`).
+   - PageSize: bounded $\le 3$.
+   - Hard Network Cap: `MAX_NETWORK_REQUESTS = 3` independently enforced via `CanaryNetworkGuard`.
+   - Pagination: `false` (even if `nextPageToken` is returned).
+   - Retries: `0`.
+
+4. **Canary Configuration Lifecycle Manager (`scripts/configure-google-canary.mjs`)**:
+   - `--prepare`: Persists `canaryScopes = [{"countryCode": "GB", "city": "Manchester", "categorySlug": "dental"}]` into `GoogleCollectionConfig`. Keeps `enabled = false`, `activationMode = "DISABLED"`, `source.enabled = false`.
+   - `--activate`: (Future 5C.2 only) Requires `GOOGLE_CANARY_ACTIVATE_CONFIRM=true`, validates baseline & scope, and atomically enables config and source in `CANARY` mode.
+   - `--deactivate`: Idempotent fail-safe cleanup, resets config and source to `DISABLED` / `false`.
+   - `--status`: Read-only inspection without credential leakage.
+
+5. **Fail-Safe Deactivation**:
+   - The canary workflow executes `scripts/configure-google-canary.mjs --deactivate` under `if: always()`, guaranteeing cleanup even if collection fails.
+
+6. **Cache Fingerprint Interaction**:
+   - Historical probe fingerprint: `4228774d7d1387ba138d898066dc96d2e8c3448ab162f2080c07fd095bf5d853` (generated via sorted JSON with `pageSize: 1`).
+   - Future collector fingerprint: `324a08318b27d361b961e0915c0f006fb7cd22b23b0f2c323cd1bcfd59d6c524` (generated via normalized string format with `pageSize: 3`).
+   - The fingerprints are **DIFFERENT** due to differing serialization formats and page sizes. The historical cache row remains intact.
+
+7. **CollectorRun & CollectorState Isolation**:
+   - `CollectorRun` is created with `canary: true`, `manual: true`, `mode: CANARY`, and comprehensive execution metadata.
+   - Explicit manual canary collection does NOT mutate or advance normal OSM `CollectorState` rotation.
+
+8. **Zero-Network Matrix Verification (`scripts/test-google-canary-5c1.mjs`)**:
+   - Comprehensive test suite A–BA covering workflow triggers, tokens, scope validation, limits, dry-run, cache inspection, budget guards, network counter, deactivation idempotency, and hard network traps.
+
+

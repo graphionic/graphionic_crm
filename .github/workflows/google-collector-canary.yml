@@ -1,0 +1,79 @@
+name: Google Collector Canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run mode (validate configuration, scope, and plan without network or mutations)'
+        required: false
+        default: 'false'
+        type: boolean
+
+concurrency:
+  group: google-collector-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+      GOOGLE_COLLECTOR_CANARY: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci --ignore-scripts
+          ./node_modules/.bin/prisma generate
+
+      - name: Run Google Collector Canary
+        run: |
+          echo "LIVE GOOGLE COLLECTOR CANARY — Phase 4C.4C.5C"
+          echo "Manual trigger, bounded canary limits"
+          echo "GOOGLE_COLLECTOR_CANARY=true enforced"
+          echo "Approved Scope: GB / Manchester / dental"
+          echo "Stage A ID-only: places.id,places.name,nextPageToken"
+          echo "Hard network cap: MAX_NETWORK_REQUESTS=3"
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            export GOOGLE_CANARY_DRY_RUN="true"
+          fi
+          npx tsx scripts/google-collector-canary.mjs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          GOOGLE_COLLECTOR_CANARY: "true"
+
+      - name: Fail-Safe Deactivation Cleanup
+        if: always()
+        run: |
+          echo "[cleanup] Enforcing post-canary deactivation..."
+          npx tsx scripts/configure-google-canary.mjs --deactivate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Google Collector Canary Run" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run ID**: $GITHUB_RUN_ID" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Scope**: GB / Manchester / dental" >> $GITHUB_STEP_SUMMARY
+          echo "- **Operation**: TEXT_SEARCH (Stage A ID-only)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Hard Network Cap**: 3" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cleaned Up (Deactivated)**: true" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "DO NOT log API key" >> $GITHUB_STEP_SUMMARY

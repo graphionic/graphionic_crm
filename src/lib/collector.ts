@@ -208,13 +208,12 @@ export async function getProviderCredentials() {
   const creds = await prisma.providerCredential.findMany({
     orderBy: [{ provider: "asc" }],
   });
-  // NEVER return encryptedValue to client, only masked
+  // Return safe projection for browser consumption — zero secret fragments
   return creds.map(c => ({
     id: c.id,
     provider: c.provider,
     label: c.label,
-    keyHint: c.keyHint,
-    maskedKey: c.keyHint ? `••••••••••••••••${c.keyHint}` : "••••••••••••••••",
+    configured: true,
     enabled: c.enabled,
     status: c.status,
     lastUsedAt: c.lastUsedAt,

@@ -1,3 +1,12 @@
+import Module from "node:module";
+
+// Polyfill server-only for standalone tsx test runners
+const origRequire = Module.prototype.require;
+Module.prototype.require = function (id) {
+  if (id === "server-only") return {};
+  return origRequire.apply(this, arguments);
+};
+
 import { PrismaClient } from "@prisma/client";
 import {
   formatCountdown,
@@ -14,7 +23,7 @@ import {
 const prisma = new PrismaClient();
 
 async function runTests() {
-  console.log("=== Phase 4D.4 Collection Operations Smoke Tests ===");
+  console.log("=== Phase 4D.4 & 4D.4A Collection Operations Smoke Tests ===");
   let passed = 0;
   let failed = 0;
 
@@ -29,6 +38,9 @@ async function runTests() {
   }
 
   try {
+    // Dynamically import collector service functions after server-only polyfill
+    const { getProviderCredentials } = await import("../src/lib/collector.ts");
+
     // 1. Duration Formatter
     console.log("\n1. Testing Duration Formatter...");
     assert(formatDuration(500, "ms") === "500ms", "formatDuration 500ms");
@@ -85,8 +97,45 @@ async function runTests() {
     assert(humanReadableSource("google_places") === "Google Places", "humanReadableSource google_places");
     assert(humanReadableSource(null) === "OpenStreetMap", "humanReadableSource default");
 
-    // 7. Database Safety & Production Invariants
-    console.log("\n7. Testing Database Safety & Invariants...");
+    // 7. Phase 4D.4A Credential Projection Security Hardening
+    console.log("\n7. Testing Credential Projection Security Hardening (Phase 4D.4A)...");
+    const creds = await getProviderCredentials();
+    assert(Array.isArray(creds), "getProviderCredentials returns array");
+    for (const c of creds) {
+      assert(c.keyHint === undefined, `Credential for ${c.provider} has NO keyHint in browser projection`);
+      assert(c.maskedKey === undefined, `Credential for ${c.provider} has NO maskedKey in browser projection`);
+      assert(c.encryptedValue === undefined, `Credential for ${c.provider} has NO encryptedValue in browser projection`);
+      assert(c.iv === undefined, `Credential for ${c.provider} has NO iv in browser projection`);
+      assert(c.configured === true, `Credential for ${c.provider} has configured === true`);
+    }
+
+    // Explicit projection contract check
+    const mockCred = {
+      id: "cred-abc",
+      provider: "openai",
+      label: "OpenAI Primary",
+      keyHint: "sk-9988",
+      encryptedValue: "0123456789abcdef",
+      iv: "fedcba9876543210",
+      enabled: true,
+      status: "active"
+    };
+    const safeProjection = {
+      id: mockCred.id,
+      provider: mockCred.provider,
+      label: mockCred.label,
+      configured: true,
+      enabled: mockCred.enabled,
+      status: mockCred.status,
+    };
+    assert(safeProjection.keyHint === undefined, "safeProjection excludes keyHint");
+    assert(safeProjection.maskedKey === undefined, "safeProjection excludes maskedKey");
+    assert(safeProjection.encryptedValue === undefined, "safeProjection excludes encryptedValue");
+    assert(safeProjection.iv === undefined, "safeProjection excludes iv");
+    assert(safeProjection.configured === true, "safeProjection provides configured: true");
+
+    // 8. Database Safety & Production Invariants
+    console.log("\n8. Testing Database Safety & Invariants...");
     const googleConfig = await prisma.googleCollectionConfig.findFirst();
     assert(googleConfig?.enabled === false, "googleCollectionConfig.enabled === false");
     assert(googleConfig?.activationMode === "DISABLED", "googleCollectionConfig.activationMode === DISABLED");

@@ -204,7 +204,7 @@ export default function CollectorSourcesClient({
               <input value={credForm.label} onChange={e => setCredForm({ ...credForm, label: e.target.value })} placeholder="e.g. Primary OpenAI Key" style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #E5E3DF", fontSize: 12 }} />
             </div>
             <div style={{ gridColumn: "span 2" }}>
-              <label style={{ fontSize: 11, fontWeight: 600, color: "#9299A8", display: "block", marginBottom: 4 }}>API Key (Encrypted via AES-256-GCM on server)</label>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "#9299A8", display: "block", marginBottom: 4 }}>API Key</label>
               <input type="password" value={credForm.apiKey} onChange={e => setCredForm({ ...credForm, apiKey: e.target.value })} placeholder="Enter key..." style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #E5E3DF", fontSize: 12 }} />
             </div>
           </div>
@@ -277,7 +277,7 @@ export default function CollectorSourcesClient({
               <div style={{ background: "#FAF9F7", border: "1px solid #E5E3DF", borderRadius: 8, padding: 10, display: "grid", gap: 6, fontSize: 11 }}>
                 <div><span style={{ color: "#9299A8" }}>Activation Mode:</span> <span style={{ color: "#C53030", fontWeight: 600 }}>DISABLED</span></div>
                 <div><span style={{ color: "#9299A8" }}>Guardrails Policy:</span> <span style={{ color: "#276749", fontWeight: 500 }}>Fail Closed (Zero live requests)</span></div>
-                <div><span style={{ color: "#9299A8" }}>Credential Status:</span> <span style={{ color: "#60697A" }}>Configured (Server-only, zero UI exposure)</span></div>
+                <div><span style={{ color: "#9299A8" }}>Credential Status:</span> <span style={{ color: "#276749", fontWeight: 500 }}>Configured</span></div>
                 <div><span style={{ color: "#9299A8" }}>Usage Recorded:</span> <span style={{ color: "#151927" }}>2 historical requests (0 pending)</span></div>
               </div>
             </div>
@@ -327,15 +327,15 @@ export default function CollectorSourcesClient({
         })}
       </div>
 
-      {/* 2. Provider Credentials Inventory */}
+      {/* 2. Provider Credentials */}
       <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <div>
             <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", color: "#9299A8", textTransform: "uppercase" }}>
-              Provider Credentials Inventory
+              Provider Credentials
             </div>
             <div style={{ fontSize: 12, color: "#60697A", marginTop: 2 }}>
-              API keys stored with server-side AES-256-GCM encryption. Zero raw secret exposure to browser.
+              External API credentials for enrichment and discovery integrations.
             </div>
           </div>
         </div>
@@ -351,8 +351,8 @@ export default function CollectorSourcesClient({
                 <tr style={{ background: "#FAF9F7", borderBottom: "1px solid #E5E3DF", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#9299A8", textTransform: "uppercase" }}>
                   <th style={{ padding: "8px 12px" }}>Provider</th>
                   <th style={{ padding: "8px 12px" }}>Label</th>
-                  <th style={{ padding: "8px 12px" }}>Key Hint</th>
-                  <th style={{ padding: "8px 12px" }}>Status</th>
+                  <th style={{ padding: "8px 12px" }}>Credential Status</th>
+                  <th style={{ padding: "8px 12px" }}>State</th>
                   <th style={{ padding: "8px 12px" }}>Last Used</th>
                   <th style={{ padding: "8px 12px", textAlign: "right" }}>Action</th>
                 </tr>
@@ -362,8 +362,10 @@ export default function CollectorSourcesClient({
                   <tr key={c.id} style={{ borderBottom: "1px solid #F0EEEA" }}>
                     <td style={{ padding: "8px 12px", fontWeight: 600, color: "#151927" }}>{c.provider}</td>
                     <td style={{ padding: "8px 12px", color: "#60697A" }}>{c.label || "—"}</td>
-                    <td style={{ padding: "8px 12px", fontFamily: "monospace", color: "#60697A" }}>
-                      {c.maskedKey || (c.keyHint ? `••••••••••••••••${c.keyHint}` : "••••••••••••••••")}
+                    <td style={{ padding: "8px 12px" }}>
+                      <span style={{ color: c.configured !== false ? "#276749" : "#9299A8", fontWeight: 500 }}>
+                        {c.configured !== false ? "Configured" : "Not configured"}
+                      </span>
                     </td>
                     <td style={{ padding: "8px 12px" }}>
                       <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: c.enabled ? "#EEF8F4" : "#FAF9F7", color: c.enabled ? "#276749" : "#9299A8", border: `1px solid ${c.enabled ? "#D5F0E5" : "#E5E3DF"}` }}>

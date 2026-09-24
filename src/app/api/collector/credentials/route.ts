@@ -24,13 +24,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "API Key must be at least 8 characters" }, { status: 400 });
     }
     const created = await createOrUpdateCredential(body);
-    // Return masked version only
+    // Return safe browser projection
     return NextResponse.json({
       id: created.id,
       provider: created.provider,
       label: created.label,
-      keyHint: created.keyHint,
-      maskedKey: `••••••••••••••••${created.keyHint}`,
+      configured: true,
       enabled: created.enabled,
       status: created.status,
       lastTestedAt: created.lastTestedAt,

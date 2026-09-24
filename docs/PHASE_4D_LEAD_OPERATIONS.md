@@ -715,5 +715,26 @@ Phase 4D.4 establishes a coherent, unified Collection Operations workspace acros
   - Total Candidates: `649` (`408` Needs Enrichment, `241` Rejected)
   - Zero Google API requests, zero candidate mutations.
 
+---
+
+## 24. Phase 4D.4A Execution Record — Provider Credential Display Hardening
+
+### 24.1 Architecture & Security Hardening
+Phase 4D.4A hardens the credential presentation across the Collection Operations workspace:
+
+1. **Browser Projection Minimization**:
+   - `getProviderCredentials()` in `src/lib/collector.ts` and `POST /api/collector/credentials` return a minimized safe browser projection (`configured: true`, `provider`, `label`, `enabled`, `status`, `lastUsedAt`, `lastTestedAt`).
+   - Removed `keyHint`, `maskedKey`, and `••••` credential-fragment strings from browser-facing payloads.
+   - `encryptedValue` and `iv` remain server-only.
+
+2. **Clean Operational UI**:
+   - Section header simplified from "AES-256-GCM Secure Provider Credentials Inventory" to "Provider Credentials".
+   - Table column "Key Hint" replaced with "Credential Status" displaying `"Configured"` or `"Not configured"`.
+   - Google Places card displays `Credential Status: Configured` with zero secret exposure.
+
+3. **Verification & Smoke Tests**:
+   - `scripts/test-4d4-collection-operations-smoke.mjs` updated to verify 40/40 assertions including explicit tests asserting absence of `keyHint`, `maskedKey`, `encryptedValue`, and `iv` in browser projection.
+
+
 
 

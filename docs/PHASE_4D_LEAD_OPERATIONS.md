@@ -655,4 +655,65 @@ Phase 4D.3 delivers an administrative forensic candidate investigation interface
 - Verified by `scripts/test-4d2-navigation-smoke.mjs` (hard network trap passed).
 - Next.js production build (`npm run build`) passed with all 91 pages compiled.
 
+---
+
+## 23. Phase 4D.4 Execution Record — Collection Operations Experience
+
+### 23.1 Architecture & Implementation Summary
+Phase 4D.4 establishes a coherent, unified Collection Operations workspace across four dedicated operational routes:
+
+1. **Shared Sub-Navigation Component (`src/components/collector/CollectionOperationsHeader.tsx`)**:
+   - Provides a restrained, consistent sub-navigation bar across `/collection` (Overview), `/collection/runs` (Runs), `/collection/states` (Rotation), and `/collection/sources` (Sources).
+   - Reusable across standalone promoted routes and omitted automatically when embedded in legacy hubs (`showHeader={false}`).
+
+2. **Collection Overview (`/collection` & `CollectorOverviewClient.tsx`)**:
+   - **Job**: Answers "What is happening overall?" in under 10 seconds.
+   - **Top Operational Strip**: Active Locations (8/8), Active Categories (7/7), Active Sources (1/4), Total Runs (10), Total Candidates (649).
+   - **Collection Health Signals**: Factual operational state for OpenStreetMap (Active, last run relative time), Google Places (Disabled, Fail-closed guardrails), Last Run status/yield, and Next Rotation assignment.
+   - **Last Run & Next Target Cards**: Two-column layout presenting last execution breakdown and next fair-rotation target with live countdown eligibility.
+   - **Candidate Pipeline Yield Flow**: Discovered (649) → Needs Enrichment (408) → Disqualified (241) → Verification Pending (0) → Qualified Leads (0).
+   - **Discovery Source Snapshot**: Compact cards for OpenStreetMap (ACTIVE) and Google Places (DISABLED).
+
+3. **Collector Run History (`/collection/runs` & `CollectorRunsClient.tsx`)**:
+   - **Job**: "What happened during each execution?"
+   - **Summary Strip**: Bounded dataset summary of Total Logged Runs, Successful, Failed, Running, and Average Duration.
+   - **Filter Toolbar**: Search by location, category, source, run ID, or GitHub run ID; filter by execution status.
+   - **Dense Runs Table**: Run ID, GitHub Actions traceability link (`GH#...`), target city and category, humanized source, soft-tinted status badge, start timestamp, execution duration, and candidate yield.
+   - **Run Inspection Slide-Over Drawer**: Run Summary callout, Failure details (if failed, safe from secret leaks), execution yield breakdown (raw found, parsed, needs enrichment, rejected), execution timestamps, and collapsible technical metadata JSON.
+
+4. **Fair Rotation States (`/collection/states` & `CollectorStatesClient.tsx`)**:
+   - **Job**: "What location/category combinations are next and how is rotation behaving?"
+   - **Explanatory Line**: "Collection rotates across enabled location and category combinations to avoid repeatedly targeting the same market."
+   - **Summary Strip**: Tracked Combinations (13), Eligible Now, Cooling Down, Next Assignment.
+   - **Rotation Queue Table**: Target Location, Category, Source, Last Run (relative time or "Never run"), Next Eligible (clean countdown: "Ready now", "42m", "2h 14m"), State badge, Yield rate (with safe `—` handling for zero denominators).
+   - **Next Target Highlight**: Distinct visual accent and `NEXT` pill on the earliest eligible combination.
+
+5. **Data Sources (`/collection/sources` & `CollectorSourcesClient.tsx`)**:
+   - **Job**: "Which discovery providers exist and are they healthy/safe?"
+   - **Source Cards**: OpenStreetMap / Overpass (ACTIVE, public API, healthy), Google Places (DISABLED, fail closed, zero secret exposure, link to Google Guardrails).
+   - **Secure Credential Inventory**: AES-256-GCM encrypted provider keys with masked key representation (`••••••••••••••••xxxx`), zero plain-secret or IV leakage to the client.
+   - **Safety Invariant**: Zero Google activation controls exposed in this view (activation strictly governed by Phase 4D.5 Guardrails).
+
+### 23.2 Shared Formatters & Utilities (`collector-utils.ts`)
+- `formatDuration`: Converts seconds or milliseconds into readable human units (`42s`, `3m 18s`, `1h 1m`).
+- `formatRelativeTime`: Converts timestamps into relative intervals (`10m ago`, `3h ago`, `2d ago`, `Never`).
+- `formatYieldRate`: Calculates percentage yield with zero-denominator safety (`25.0%` or `—`).
+- `runStatusBadgeStyle`: Maps execution status to ClientForge semantic palettes (`SUCCESS` green `#EEF8F4`, `FAILED` red `#FDECEC`, `RUNNING` amber `#FFF6E3`).
+- `rotationStateBadge`: Evaluates next eligibility against current time (`READY`, `COOLING`, `NEVER_RUN`).
+- `sourceHealthBadgeStyle`: Formats health signals (`healthy`, `degraded`, `down`).
+
+### 23.3 Invariant & Test Verification
+- Verified by `scripts/test-4d4-collection-operations-smoke.mjs` (34/34 tests passed).
+- Verified by `scripts/test-4d3-candidates-smoke.mjs` (24/24 tests passed).
+- Verified by `scripts/test-4d2-navigation-smoke.mjs` (14/14 tests passed).
+- Prisma validation and Next.js production build (`npm run build`) passed with 91/91 routes compiled cleanly.
+- Database Invariants:
+  - `GoogleCollectionConfig.enabled`: `false`, `activationMode`: `DISABLED`
+  - `DataSource (google_places).enabled`: `false`
+  - `GoogleApiUsage.count`: `2` (0 pending)
+  - `GoogleApiCache.count`: `2`
+  - Total Candidates: `649` (`408` Needs Enrichment, `241` Rejected)
+  - Zero Google API requests, zero candidate mutations.
+
+
 

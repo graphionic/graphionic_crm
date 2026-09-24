@@ -7,20 +7,59 @@ export const GENERIC_WEBMAIL_DOMAINS = new Set([
 ]);
 
 export function formatCountdown(nextEligible: string | null) {
-  if (!nextEligible) return "Now";
+  if (!nextEligible) return "Ready now";
   const now = Date.now();
   const next = new Date(nextEligible).getTime();
   const diff = next - now;
-  if (diff <= 0) return "Now";
+  if (diff <= 0) return "Ready now";
   const mins = Math.floor(diff / 60000);
   const secs = Math.floor((diff % 60000) / 1000);
-  if (mins > 60) {
+  if (mins >= 60) {
     const hrs = Math.floor(mins / 60);
     const remMins = mins % 60;
     return `${hrs}h ${remMins}m`;
   }
   if (mins > 0) return `${mins}m ${secs}s`;
   return `${secs}s`;
+}
+
+export function formatDuration(durationOrSeconds: number | null | undefined, unit: "ms" | "s" = "ms"): string {
+  if (durationOrSeconds == null || isNaN(durationOrSeconds) || durationOrSeconds < 0) return "—";
+  const ms = unit === "s" ? durationOrSeconds * 1000 : durationOrSeconds;
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const totalSecs = Math.round(ms / 1000);
+  if (totalSecs < 60) return `${totalSecs}s`;
+  const mins = Math.floor(totalSecs / 60);
+  const remSecs = totalSecs % 60;
+  if (mins >= 60) {
+    const hrs = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    return `${hrs}h ${remMins}m`;
+  }
+  return `${mins}m ${remSecs}s`;
+}
+
+export function formatRelativeTime(dateInput: string | Date | null | undefined): string {
+  if (!dateInput) return "Never";
+  const date = typeof dateInput === "string" ? new Date(dateInput) : dateInput;
+  const now = Date.now();
+  const diff = now - date.getTime();
+  if (isNaN(diff)) return "—";
+  if (diff < 0) return "Just now";
+  const secs = Math.floor(diff / 1000);
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+export function formatYieldRate(qualified: number | null | undefined, total: number | null | undefined): string {
+  if (!total || total <= 0 || !qualified || qualified <= 0) return "—";
+  const pct = (qualified / total) * 100;
+  return `${pct.toFixed(1)}%`;
 }
 
 export function githubRunUrl(runId: string | number | null | undefined) {
@@ -98,6 +137,53 @@ export function statusBadgeStyle(status: string) {
       return { bg: "#F0ECFA", color: "#553C9A", border: "#E0D6F5", label: "Discovered" };
     case "VERIFICATION_PENDING":
       return { bg: "#EAF7FA", color: "#2B6CB0", border: "#C5E9F1", label: "Verification Pending" };
+    default:
+      return { bg: "#FAF9F7", color: "#60697A", border: "#E5E3DF", label: status || "Unknown" };
+  }
+}
+
+export function runStatusBadgeStyle(status: string | null | undefined) {
+  const norm = (status || "").toUpperCase();
+  switch (norm) {
+    case "SUCCESS":
+    case "COMPLETED":
+      return { bg: "#EEF8F4", color: "#276749", border: "#D5F0E5", label: "Success" };
+    case "FAILED":
+    case "ERROR":
+      return { bg: "#FDECEC", color: "#EC6262", border: "#FBD5D5", label: "Failed" };
+    case "RUNNING":
+    case "IN_PROGRESS":
+      return { bg: "#FFF6E3", color: "#F29B38", border: "#F4BE52", label: "Running" };
+    default:
+      return { bg: "#FAF9F7", color: "#60697A", border: "#E5E3DF", label: status || "Unknown" };
+  }
+}
+
+export function rotationStateBadge(nextEligible: string | null | undefined, lastRun: string | null | undefined) {
+  if (!lastRun) {
+    return { state: "NEVER_RUN" as const, label: "Never run", bg: "#FAF9F7", color: "#9299A8", border: "#E5E3DF" };
+  }
+  if (!nextEligible) {
+    return { state: "READY" as const, label: "Ready now", bg: "#EEF8F4", color: "#276749", border: "#D5F0E5" };
+  }
+  const diff = new Date(nextEligible).getTime() - Date.now();
+  if (diff <= 0) {
+    return { state: "READY" as const, label: "Ready now", bg: "#EEF8F4", color: "#276749", border: "#D5F0E5" };
+  }
+  return { state: "COOLING" as const, label: "Cooling down", bg: "#FFF6E3", color: "#B7791F", border: "#F4BE52" };
+}
+
+export function sourceHealthBadgeStyle(status: string | null | undefined) {
+  const norm = (status || "").toLowerCase();
+  switch (norm) {
+    case "healthy":
+    case "operational":
+      return { bg: "#EEF8F4", color: "#276749", border: "#D5F0E5", label: "Healthy" };
+    case "degraded":
+      return { bg: "#FFF6E3", color: "#F29B38", border: "#F4BE52", label: "Degraded" };
+    case "down":
+    case "error":
+      return { bg: "#FDECEC", color: "#EC6262", border: "#FBD5D5", label: "Down" };
     default:
       return { bg: "#FAF9F7", color: "#60697A", border: "#E5E3DF", label: status || "Unknown" };
   }

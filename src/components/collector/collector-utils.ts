@@ -253,7 +253,7 @@ export function humanReadableDecision(candidate: any): {
         statusTitle: "Rejected — Generic Email Domain",
         summary: `Candidate email uses a generic consumer webmail provider (${emailClass.domain || "generic"}).`,
         emailEvidence: `Generic email: ${candidate.email}`,
-        websiteEvidence: website ? `Website: ${website}` : "No website supplied",
+        websiteEvidence: website ? `Website supplied by discovery source: ${website}` : "No website supplied by discovery source",
         result: "Excluded because business identity cannot be verified against consumer webmail",
         tone: "bad",
       };
@@ -263,7 +263,7 @@ export function humanReadableDecision(candidate: any): {
         statusTitle: "Rejected — Duplicate Business",
         summary: "This business was previously collected in the current run or existing database.",
         emailEvidence: candidate.email ? `Email: ${candidate.email}` : "No email discovered",
-        websiteEvidence: website ? `Website: ${website}` : "No website supplied",
+        websiteEvidence: website ? `Website supplied by discovery source: ${website}` : "No website supplied by discovery source",
         result: "Excluded to prevent duplicate CRM records",
         tone: "bad",
       };
@@ -272,7 +272,7 @@ export function humanReadableDecision(candidate: any): {
       statusTitle: `Rejected — ${humanReadableRejection(reason)}`,
       summary: `Candidate did not meet qualification rules (${reason || "unspecified reason"}).`,
       emailEvidence: candidate.email ? `Email: ${candidate.email}` : "No email discovered",
-      websiteEvidence: website ? `Website: ${website}` : "No website supplied",
+      websiteEvidence: website ? `Website supplied by discovery source: ${website}` : "No website supplied by discovery source",
       result: "Not eligible for CRM Lead promotion",
       tone: "bad",
     };
@@ -304,7 +304,7 @@ export function humanReadableDecision(candidate: any): {
     statusTitle: "Discovered",
     summary: "Initial discovery state.",
     emailEvidence: candidate.email || "No email discovered",
-    websiteEvidence: website || "No website supplied",
+    websiteEvidence: website ? `Website supplied by discovery source: ${website}` : "No website supplied by discovery source",
     result: "Pending qualification evaluation",
     tone: "neutral",
   };

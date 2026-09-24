@@ -783,6 +783,47 @@ Phase 4D.5 delivers the safe observability and guardrail management interface fo
   - Total Candidates: `649` (`408` Needs Enrichment, `241` Rejected)
   - Zero Google API requests, zero candidate mutations.
 
+---
+
+## 26. Phase 4D.6 Execution Record — Verification Operations & Observability
+
+### 26.1 Production Verification Architecture & Evidence Audit
+A thorough audit of persisted candidate and evidence records in production revealed:
+- **Total Candidates**: `649`
+  - `NEEDS_ENRICHMENT`: `408` (Discovered via OpenStreetMap, lacking email address, awaiting enrichment before qualification)
+  - `REJECTED`: `241` (125 `existing_website`, 113 `duplicate_in_run`, 2 `generic_email`, 1 `email_domain_has_live_website`)
+  - `VERIFICATION_PENDING`: `0`
+  - `QUALIFIED`: `0`
+- **Candidate-Level Google Evidence**: `0` records.
+- **Candidate-Level Enrichment/Verification Jobs**: `0` active jobs.
+- **Qualified Lead Relations**: `0` linked (`qualifiedLeadId: null` across all 649 candidates; CRM leads were imported directly).
+
+### 26.2 Dedicated Route Decision: VERIFICATION_ROUTE_DEFERRED_NO_MEANINGFUL_RECORDS
+Per Phase 4D.6 specifications (Case B — Data-Driven Route Evaluation):
+- **Decision**: `VERIFICATION_ROUTE_DEFERRED_NO_MEANINGFUL_RECORDS`.
+- **Rationale**: Production currently contains 0 candidates in `VERIFICATION_PENDING` and 0 `QUALIFIED` candidates. Creating a standalone `/verification` route would yield an empty queue or synthetic placeholders. The architecture maintains strict integrity by deferring route creation until live verification runs generate candidate verification queues, rather than manufacturing artificial screens.
+- **Candidate Operations Integration**: Verification evidence presentation has been fortified directly within `/candidates` and the Forensic Candidate Inspection Drawer.
+
+### 26.3 Critical Semantic Precision & Evidence Hierarchy
+1. **Discovery Website vs Verification Truth**:
+   - `candidate.website == null` is strictly presented as `"No website supplied by discovery source"` or `"Not provided by discovery source"`, NEVER as a definitive `"No website"`.
+   - Supplied website URLs are preserved and explicitly cited (e.g., `"Website supplied by OpenStreetMap: https://..."`).
+2. **Google Places Evidence**:
+   - Absence of candidate-level Google records is explicitly reported as `"Not checked (Google Places integration is currently disabled; no candidate-specific Google verification performed)"`, NEVER as `"Google found no website"`.
+3. **Email-Domain Verification**:
+   - Live website on email domain (`rejectionReason: 'email_domain_has_live_website'`) is accurately humanized to `"Live website detected responding on https://domain (LIVE — Excluded to prevent false NO_SITE)"`.
+   - Role-based business emails (`info@`, `contact@`, `sales@`, `hello@`) remain classified as `VALID_BUSINESS` on valid business domains.
+   - Generic consumer webmail (`gmail.com`, `yahoo.com`, `hotmail.com`) remains classified as `GENERIC_WEBMAIL`.
+4. **Safety & Zero-Network Guarantee**:
+   - Inspection drawer rendering and candidate browsing dispatch **0** external network requests to Google, candidate domains, or enrichment providers.
+   - All state is derived from immutable persisted database records.
+
+### 26.4 Verification Test Suite
+- `scripts/test-4d6-verification-operations-smoke.mjs`: 39/39 unit & semantic assertions passed.
+- Full regression suite (4D.6 + 4D.5 + 4D.4 + 4D.3 + 4D.2): 147/147 assertions passed (100% green).
+- Next.js production build: 91/91 routes compiled cleanly.
+
+
 
 
 

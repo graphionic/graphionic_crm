@@ -680,13 +680,13 @@ export default function CandidateQueueClient({
                       </div>
 
                       <div>
-                        <span style={{ color: "#9299A8" }}>Discovery Website Tag:</span>{" "}
+                        <span style={{ color: "#9299A8" }}>Discovery Website:</span>{" "}
                         {selectedCandidate.website ? (
                           <a href={selectedCandidate.website} target="_blank" rel="noopener noreferrer" style={{ color: "#49339A", textDecoration: "underline" }}>
                             {selectedCandidate.website}
                           </a>
                         ) : (
-                          <span style={{ color: "#9299A8", fontStyle: "italic" }}>No website tag supplied by discovery source</span>
+                          <span style={{ color: "#9299A8", fontStyle: "italic" }}>Not provided by discovery source</span>
                         )}
                       </div>
                     </div>
@@ -702,9 +702,9 @@ export default function CandidateQueueClient({
                       <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: "#FAF9F7", padding: "8px 10px", borderRadius: 6 }}>
                         <span style={{ fontSize: 14 }}>{selectedCandidate.website ? "🌐" : "○"}</span>
                         <div>
-                          <div style={{ fontWeight: 600, color: "#151927" }}>OpenStreetMap Tag Evaluation</div>
+                          <div style={{ fontWeight: 600, color: "#151927" }}>Discovery Source Evidence ({humanReadableSource(selectedCandidate.discoverySource?.name || "OpenStreetMap")})</div>
                           <div style={{ color: "#60697A", marginTop: 2 }}>
-                            {selectedCandidate.website ? `Website tag present: ${selectedCandidate.website} (Disqualified as NO_SITE)` : "No website tag found in OSM entity tags"}
+                            {selectedCandidate.website ? `Website URL supplied: ${selectedCandidate.website} (Disqualified from NO_SITE qualification)` : `Not provided by discovery source (${humanReadableSource(selectedCandidate.discoverySource?.name || "OpenStreetMap")} tags contain no website URL)`}
                           </div>
                         </div>
                       </div>
@@ -717,7 +717,7 @@ export default function CandidateQueueClient({
                             Email Domain Website Verification
                           </div>
                           <div style={{ color: selectedCandidate.rejectionReason === "email_domain_has_live_website" ? "#C53030" : "#60697A", marginTop: 2 }}>
-                            {selectedCandidate.rejectionReason === "email_domain_has_live_website" ? `Live website detected responding on https://${drawerEmailInfo?.domain || "domain"} (Excluded to prevent false NO_SITE)` : selectedCandidate.email ? `Email domain (${drawerEmailInfo?.domain || "domain"}) evaluated during qualification` : "Not evaluated (candidate lacks email)"}
+                            {selectedCandidate.rejectionReason === "email_domain_has_live_website" ? `Live website detected responding on https://${drawerEmailInfo?.domain || "domain"} (LIVE — Excluded to prevent false NO_SITE)` : selectedCandidate.email ? `Email domain (${drawerEmailInfo?.domain || "domain"}) evaluated during qualification — no independent live website confirmed` : "Not evaluated (candidate lacks email)"}
                           </div>
                         </div>
                       </div>
@@ -728,7 +728,7 @@ export default function CandidateQueueClient({
                         <div>
                           <div style={{ fontWeight: 600, color: "#151927" }}>Google Places Cross-Source Verification</div>
                           <div style={{ color: "#60697A", marginTop: 2 }}>
-                            Not checked (Google Places discovery is disabled in global guardrails config)
+                            {selectedCandidate.metadata?.googlePlaceId ? `Google Place match: ${selectedCandidate.metadata.googlePlaceId} (${selectedCandidate.metadata.googleEvidence || "Verified"})` : "Not checked (Google Places integration is currently disabled; no candidate-specific Google verification performed)"}
                           </div>
                         </div>
                       </div>

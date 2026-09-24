@@ -1,0 +1,563 @@
+# PHASE 4D — LEAD OPERATIONS UI/UX ARCHITECTURE & AUDIT SPECIFICATION
+
+## 1. Executive Summary & Baseline
+
+- **Phase Baseline**: Sealed at `bffce96022344e132a7610b9c3fe62ad4de6631f` (on `main` and `origin/main`).
+- **Phase Objective**: Define the comprehensive Information Architecture, Screen Maps, Data Models, Action Contracts, and Component Inventories for transitioning ClientForge from collector engineering into a high-density, professional Admin CRM experience without visual redesign churn.
+- **Safety Invariants**:
+  - `GoogleCollectionConfig.enabled`: `false`, `activationMode`: `DISABLED`
+  - `DataSource (google_places).enabled`: `false`
+  - `GoogleApiUsage`: `count = 2` (0 pending/reserved)
+  - `GoogleApiCache`: `count = 2`
+  - `LeadCandidate (google_places)`: `0`, `Lead (google_places)`: `0`
+  - `EnrichmentConfig.enabled`: `false`
+  - Scheduled OSM collection active and untouched.
+
+---
+
+## 2. Existing Application Route Audit
+
+| Route | File Path | Purpose | Current Functionality | Backend Dependency | Production Readiness | Status / Category |
+|---|---|---|---|---|---|---|
+| `/` | `src/app/page.tsx` | Root redirect | Redirects to `/dashboard` or `/login` | Next.js Server | Production Ready | Core |
+| `/login` | `src/app/login/page.tsx` | Admin authentication | Email/password login with JWT session creation | `AdminUser`, `POST /api/auth/login` | Production Ready | Core Auth |
+| `/dashboard` | `src/app/(app)/dashboard/page.tsx` | Executive CRM overview | High-level metrics: lead counts, status breakdown, segment, country, activity, follow-ups | `Lead`, `Activity`, `prisma` | Production Ready | Core App |
+| `/leads` | `src/app/(app)/leads/page.tsx` | Qualified leads list | Server-rendered table with filters (search, status, segment, country, sort), pagination | `Lead`, `Activity` | Production Ready | Core App |
+| `/leads/new` | `src/app/(app)/leads/new/page.tsx` | Manual lead entry | Single lead creation form | `Lead`, `createLead` action | Production Ready | Core App |
+| `/leads/[id]` | `src/app/(app)/leads/[id]/page.tsx` | Lead detail & outreach | Lead profile, website status, email composer, WhatsApp sender, quick status transitions, timeline | `Lead`, `Activity`, `Setting`, `Suppression` | Production Ready | Core App |
+| `/leads/[id]/edit` | `src/app/(app)/leads/[id]/edit/page.tsx` | Edit/Delete lead | Form to edit all lead attributes + delete button | `Lead`, `updateLead`, `deleteLead` | Production Ready | Core App |
+| `/follow-ups` | `src/app/(app)/follow-ups/page.tsx` | Follow-up queue | Groups leads due today, overdue, upcoming, unscheduled | `Lead` | Production Ready | Core App |
+| `/outbox` | `src/app/(app)/outbox/page.tsx` | Outreach log | Activity feed for outgoing emails and WhatsApp messages | `Activity`, `Lead` | Production Ready | Core App |
+| `/import` | `src/app/(app)/import/page.tsx` | CSV lead import | Bulk CSV paste/upload with column mapping and deduplication | `Lead`, `prisma` | Production Ready | Core App |
+| `/live` | `src/app/live/page.tsx` | Live collector monitor | Client polling `/api/live` for local process status and recent leads | `Lead`, `/api/live`, `/api/restart` | Legacy / Debug | Legacy / Debug |
+| `/settings` | `src/app/(app)/settings/page.tsx` | Settings hub | Overview cards linking to sub-settings pages | `Setting`, `prisma` counts | Production Ready | Admin Config |
+| `/settings/lead-collection` | `src/app/(app)/settings/lead-collection/page.tsx` | Monolithic collector dashboard | Tabbed client interface (overview, general, locations, categories, sources, rules, runs, states, candidates, enrichment) | `Collector*`, `DataSource`, `LeadCandidate`, `Enrichment*` | High Functionality / Monolithic | Lead Ops / Config |
+| `/settings/email` | `src/app/(app)/settings/email/page.tsx` | Email & DNS setup | SMTP / Resend credentials, SPF/DKIM/DMARC status guide | `Setting` | Production Ready | Admin Config |
+| `/settings/whatsapp` | `src/app/(app)/settings/whatsapp/page.tsx` | WhatsApp API config | Meta Cloud API credentials, phone number ID, templates | `Setting`, Meta Graph API | Production Ready | Admin Config |
+| `/settings/compliance` | `src/app/(app)/settings/compliance/page.tsx` | Compliance & suppression | Suppression list management (email/phone), opt-in stats, webhook secrets | `Suppression`, `Setting`, `Lead` | Production Ready | Admin Config |
+| `/settings/templates` | `src/app/(app)/settings/templates/page.tsx` | Message templates | CRUD for outreach email/WhatsApp templates | `Template` | Production Ready | Admin Config |
+| `/brand-guidelines` | `src/app/(app)/brand-guidelines/page.tsx` | Internal brand guide | Brand positioning and guidelines reference | Static React | Production Ready | Internal Reference |
+| `/design-system/*` | `src/app/design-system/**` | Locked design system | Complete component library & token reference (50+ routes) | Static UI Specs & Controls | Production Ready | Internal Reference |
+
+---
+
+## 3. Current Sidebar & Navigation Audit
+
+### Current Structure (`src/app/(app)/layout.tsx`)
+1. **Workspace**:
+   - `Dashboard` (`/dashboard`, icon: `▦`)
+   - `Live Collection` (`/live`, icon: `●`)
+   - `Leads` (`/leads`, icon: `◉`, dynamic badge: total leads)
+   - `Follow-ups` (`/follow-ups`, icon: `◷`, dynamic badge: due follow-ups, tone: amber)
+   - `Outbox` (`/outbox`, icon: `✉`)
+2. **Add leads**:
+   - `Import CSV` (`/import`, icon: `⇪`)
+   - `New lead` (`/leads/new`, icon: `＋`)
+3. **Brand**:
+   - `Design System` (`/design-system`, icon: `🎨`)
+   - `Tokens` (`/design-system/foundations/colors`, icon: `◍`)
+4. **Setup**:
+   - `Settings` (`/settings`, icon: `⚙`)
+   - `Collector Config` (`/settings/lead-collection`, icon: `◎`)
+   - `Email & DNS` (`/settings/email`, icon: `✉`)
+   - `WhatsApp API` (`/settings/whatsapp`, icon: `◍`)
+   - `Compliance` (`/settings/compliance`, icon: `⚖`)
+5. **Footer**:
+   - Active user display (`user.name` / `user.email`)
+   - `Sign out` button (invokes `/api/auth/logout`)
+
+### Deficiencies Identified
+- **Hidden Operations**: Candidates queue, Collector runs, Rotation states, and Source health are buried inside a sub-tab of `/settings/lead-collection` instead of being first-class operational views.
+- **Ambiguous Distinction**: Qualified `Leads` (actionable pipeline) vs raw `Candidates` (discovery stage) are separated across disparate areas of the app.
+- **Legacy Artifacts**: `/live` links to an unauthenticated local process watchdog screen (`/api/live` / `/api/restart`) rather than the transactional `CollectorRun` database records.
+
+---
+
+## 4. Leads Module Audit
+
+- **List View (`/leads`)**:
+  - Columns: Company (with category & city), Contact (name, email, phone), Country badge, Site (segment badge & URL), Score, Status badge, Sent counts (✉ email, ◍ WhatsApp), Follow-up date badge, Action link.
+  - Search: Full text query `q` matching `companyName`, `contactName`, `email`, `city`, `businessCategory`, `phone` (case-insensitive).
+  - Filters: Status (`LEAD_STATUSES`), Website segment (`SEGMENTS`), Country (`COUNTRIES`), Sort (`score`, `recent`, `name`, `followup`).
+  - Pagination: Server-side (40 leads per page).
+  - Row Actions: Single "Open" button linking to `/leads/[id]`.
+  - Bulk Actions: None present.
+- **Detail View (`/leads/[id]`)**:
+  - Header: Status badges, Segment, Country, Score, External site link, LinkedIn link.
+  - Personalisation Hook: Displays AI-generated or parsed hook line, detected issues list, copy button.
+  - Email Composer: Pre-drafted email, custom text edit, saved template selector, direct send via SMTP/Resend.
+  - WhatsApp Sender: 24h conversation window tracker, free-form vs approved template switcher, Meta template sender.
+  - Quick Actions: Status transition pills (`REPLIED`, `CALL_BOOKED`, `PROPOSAL_SENT`, `WON`, `LOST`, `NURTURE`), inbound reply logging, follow-up scheduling, note creation.
+  - Timeline / Activity Feed: Displays chronological outreach and inbound history.
+- **Traceability Support in Schema**:
+  - `collectorRunId` (relation to `CollectorRun`)
+  - `qualifiedFromCandidate` (relation to `LeadCandidate`)
+
+---
+
+## 5. Candidates Module Audit
+
+- **Current Implementation**: Implemented as a tab within `/settings/lead-collection` (`src/app/(app)/settings/lead-collection/client.tsx`).
+- **List / Table Features**:
+  - Columns: Business (name, OSM/Google external type & ID), Category, Location (city, country), Contact (email, phone), Discovery (source name, Run ID, Run location), Status badge, Reason (human-readable rejection reason), Created timestamp, "View" action button.
+  - Filters: Text search (`candidateSearch`), Status select, Category select, Source select, City text filter, Page size (25/50/100), Sort field (`createdAt`, `companyName`, `status`, `city`).
+  - Summary KPI cards: Total Candidates, Needs Enrichment, Rejected, Qualified, Discovered, Verification Pending.
+- **Detail Experience (Flyout Drawer)**:
+  - Sections: Business Identity, Pipeline Lifecycle Timeline (Discovered → Quality Filter → Enrichment → CRM Lead), Contact info, Location details, Discovery Source traceability (Source name, Type, Run ID, Started timestamp), Raw OSM/Google Tags (formatted code block), Metadata.
+- **Invisible 4C Data / Gaps in Current View**:
+  - Cross-source Google website evidence decisions (`MATCH_DECISION`, `RESOLVED_IDENTITY`, `WEBSITE_EVIDENCE`).
+  - Domain-level verification audit (`email_domain_has_live_website` check outcomes).
+  - Specific Google request IDs or cache hits associated with candidate verification.
+  - Qualification evidence links connecting candidate directly to created `Lead` record.
+
+---
+
+## 6. Collector Module Audit
+
+- **Current Screen**: `/settings/lead-collection` contains 10 sub-tabs:
+  1. `overview`: Global counts (locations, categories, source health, yield metrics, fair rotation next assignment, last run summary).
+  2. `general`: `CollectorConfig` view (mode, batch sizes, timeouts, concurrency).
+  3. `locations`: `CollectorLocation` table + create form + enable/disable/delete actions.
+  4. `categories`: `LeadCategory` table + create form + enable/disable/delete actions.
+  5. `sources`: `DataSource` table + health status + `ProviderCredential` list.
+  6. `rules`: `CollectionRule` list + enable/disable actions.
+  7. `runs`: `CollectorRun` historical table (Started/Finished, status, location/category, raw/parsed/persisted, rejected breakdown, accepted/inserted, duration, GitHub Actions run link).
+  8. `states`: `CollectorState` table (Location/Category/Source combo, last run, next eligible countdown, cycle/failures, totals).
+  9. `candidates`: `LeadCandidate` queue and detail drawer.
+  10. `enrichment`: `EnrichmentConfig` budget status, limits, provider count, global usage breakdown.
+- **Prisma Model Mapping**:
+  - `CollectorConfig` → `getCollectorConfig()`, `PUT /api/collector/config`
+  - `CollectorLocation` → `getLocations()`, `POST /api/collector/locations`, `[id]` route
+  - `LeadCategory` → `getCategories()`, `POST /api/collector/categories`, `[id]` route
+  - `DataSource` → `getDataSources()`, `POST /api/collector/sources`, `[id]` route
+  - `CollectorRule` → `getCollectionRules()`, `POST /api/collector/rules`, `[id]` route
+  - `CollectorRun` → `getCollectorRuns()`, `GET /api/collector/runs`
+  - `CollectorState` → `getCollectorStates()`, `GET /api/collector/states`
+
+---
+
+## 7. Google Observability Audit
+
+- **Current Status**: Backend guardrails, activation modes, canary scopes, rate limits, usage tracking, and caching models are 100% implemented in `src/lib/google-activation.ts`, `src/lib/google-website-verification.ts`, `prisma/schema.prisma`, but **NOT YET EXPOSED** in dedicated UI views.
+- **Required Observability Elements**:
+  - Configuration status: Mode (`DISABLED` / `CANARY` / `PRODUCTION`), Enabled flag (`false`), Fail-closed indicator.
+  - Canary allowlist scopes (e.g. Manchester + dental).
+  - Rate limits & quotas: Per-run limit (3 canary / 10 prod), Daily limit (5 canary / 50 prod), Monthly limit (500 hard cap).
+  - Usage metrics (from `GoogleApiUsage`): Total requests, Status breakdown (`RESERVED`, `SUCCESS`, `NO_RESULT`, `FAILED`, `CANCELLED`), Operation breakdown (`TEXT_SEARCH`, `PLACE_DETAILS`, `NEARBY_SEARCH`, `GEOCODING`), Error classifications (`AUTH_ERROR`, `QUOTA_EXCEEDED`, `RATE_LIMITED`, etc.).
+  - Cache metrics (from `GoogleApiCache`): Total cached entries, hit counts, TTL configuration, expiration distribution.
+  - Zero-Secret Policy: API key (`GOOGLE_MAPS_API_KEY`) is NEVER rendered or editable in the UI; status is purely boolean `Configured (••••XXXX)` or `Missing`.
+
+---
+
+## 8. Enrichment UI Audit
+
+- **Current Status**: Implemented under `/settings/lead-collection` -> `enrichment` tab.
+- **Displayed Metrics**:
+  - Status: Default `● Disabled` (Fail-closed, no external HTTP calls).
+  - Budget Status: `ENRICHMENT_DISABLED` / `WITHIN_BUDGET` / `DAILY_CANDIDATE_LIMIT_REACHED`, etc.
+  - Limits: Daily candidate limit (100), Batch size (25), Max attempts (3), Cooldown (60m), Lock (10m).
+  - Providers: Number of configured credentials vs available adapters.
+  - Usage UTC Accounting: Daily candidates processed, daily credits, monthly credits.
+- **Operational Rule**: Real providers remain deferred/disabled in Phase 4D.1.
+
+---
+
+## 9. Backend Data Model Map
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                              AdminUser                                 │
+│  id, email, name, passwordHash, isActive, lastLoginAt                  │
+└────────────────────────────────────────────────────────────────────────┘
+                                    │ (operates)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                              Lead                                      │
+│  id, companyName, businessCategory, country, city, website, score,     │
+│  segment, hookLine, contactName, email, phone, status, priority,       │
+│  optedInEmail, optedInWhatsapp, doNotContact, activities               │
+└────────────────────────────────────▲───────────────────────────────────┘
+                                     │ (1:1 qualification)
+┌────────────────────────────────────┴───────────────────────────────────┐
+│                          LeadCandidate                                 │
+│  id, externalId, externalType, companyName, businessCategory, city,   │
+│  country, email, phone, website, status, rejectionReason, rawTags,     │
+│  metadata, discoverySourceId, discoveryRunId, qualifiedLeadId          │
+└──────────────┬─────────────────────────────────────────────┬───────────┘
+               │ (belongs to)                                │ (tracked in)
+               ▼                                             ▼
+┌──────────────────────────────┐              ┌──────────────────────────┐
+│          DataSource          │              │       CollectorRun       │
+│  id, name, type, enabled,    │              │  id, startedAt, status,  │
+│  baseUrl, healthStatus,      │◀─────────────│  candidatesFound,        │
+│  timeoutMs, retryCount       │ (executes)   │  leadsAccepted,          │
+└──────────────┬───────────────┘              │  durationMs, metadata    │
+               │                              └──────────────┬───────────┘
+               ├──────────────────────┐                      │
+               ▼                      ▼                      ▼
+┌──────────────────────────────┐┌──────────────────────────────┐
+│        GoogleApiCache        ││        GoogleApiUsage        │
+│  id, sourceId, operation,    ││  id, sourceId, operation,    │
+│  queryFingerprint, hitCount, ││  status, requestUnits,       │
+│  expiresAt, responseMetadata ││  collectorRunId, placeId     │
+└──────────────────────────────┘└──────────────────────────────┘
+```
+
+### Operational Model Matrix
+
+| Model | Purpose | Primary UI Consumer | Key Fields | Read-Only vs Mutable in UI | Sensitive Fields |
+|---|---|---|---|---|---|
+| `Lead` | Actionable sales prospects | Leads View, Lead Detail, Dashboard | `companyName`, `email`, `phone`, `status`, `score`, `segment`, `nextFollowUpAt` | Mutable (status, follow-up, notes, outreach) | None |
+| `LeadCandidate` | Discovered raw businesses in qualification pipeline | Candidates View, Candidate Detail | `companyName`, `externalId`, `status`, `rejectionReason`, `discoveryRunId`, `rawTags` | Read-Only (except manual re-check / qualification) | None |
+| `CollectorConfig` | Global collection engine parameters | Collection Settings | `enabled`, `collectionMode`, `defaultBatchSize`, `concurrentRequests`, `frequency` | Mutable | None |
+| `CollectorLocation` | Geographical search targets | Locations View / Config | `city`, `state`, `country`, `countryCode`, `radiusKm`, `enabled`, `priorityLabel` | Mutable (Create, Edit, Toggle, Delete) | None |
+| `LeadCategory` | Business type discovery configurations | Categories View / Config | `name`, `slug`, `osmTags`, `enabled`, `priorityLabel`, `runLimit` | Mutable (Create, Edit, Toggle, Delete) | None |
+| `DataSource` | Provider endpoints & protocols | Sources View / Config | `name`, `type`, `baseUrl`, `enabled`, `healthStatus`, `lastCheckedAt` | Mutable (Toggle, Edit parameters) | None |
+| `CollectionRule` | Extensible filtering rules | Rules View / Config | `key`, `name`, `description`, `enabled`, `category`, `config` | Mutable (Toggle, Edit) | None |
+| `CollectorState` | Fair rotation cursor & eligibility tracking | Rotation / States View | `locationId`, `categoryId`, `sourceId`, `lastRunAt`, `nextEligibleRunAt`, `cycle` | Read-Only (system managed) | None |
+| `CollectorRun` | Execution log for each collection job | Runs View, Run Detail | `startedAt`, `finishedAt`, `status`, `candidatesFound`, `leadsAccepted`, `metadata` | Read-Only (system logged) | None |
+| `GoogleCollectionConfig` | Google activation guardrails & limits | Google Guardrails Config | `enabled`, `activationMode`, `canaryScopes`, `perRunRequestLimit`, `dailyRequestLimit` | Mutable (strict guardrails) | None |
+| `GoogleApiUsage` | Individual Google API request audit trail | Google Observability | `operation`, `status`, `requestUnits`, `collectorRunId`, `queryFingerprint`, `placeId` | Read-Only (system logged) | None |
+| `GoogleApiCache` | Cached Google API responses | Google Observability / Cache | `queryFingerprint`, `operation`, `expiresAt`, `hitCount`, `lastHitAt` | Read-Only (system managed) | None |
+| `EnrichmentConfig` | Global enrichment limits & guardrails | Enrichment Config | `enabled`, `dailyCandidateLimit`, `batchSize`, `maxAttemptsPerCandidate` | Mutable (remains disabled) | None |
+| `EnrichmentJob` | Queued candidate enrichment tasks | Enrichment Monitoring | `candidateId`, `status`, `priority`, `attemptCount`, `nextAttemptAt` | Read-Only | None |
+| `EnrichmentAttempt` | Historical provider enrichment calls | Enrichment Monitoring | `jobId`, `providerType`, `status`, `startedAt`, `costUnits`, `failureReason` | Read-Only | None |
+| `ProviderCredential` | Third-party API credentials storage | Settings -> Sources / Credentials | `provider`, `label`, `encryptedValue`, `keyHint`, `enabled`, `status` | Mutable (Add, Toggle, Delete) | `encryptedValue` (AES-256-GCM) |
+
+---
+
+## 10. API Audit Matrix
+
+| Route | Methods | Auth | Data Returned | Mutation Behavior | UI Consumer | Production Readiness |
+|---|---|---|---|---|---|---|
+| `/api/auth/login` | POST | Public (Rate-limited) | `{ ok: true, user }` | Sets HTTP-only JWT session cookie | Login Screen | Production Ready |
+| `/api/auth/logout` | POST | Session | `{ ok: true }` | Clears session cookie | Shell Navigation | Production Ready |
+| `/api/collector/overview` | GET | Active User | Counts, health breakdown, yield metrics, next assignment, recent runs | None (Read-only) | Lead Ops / Collection Overview | Production Ready |
+| `/api/collector/candidates` | GET | Active User | Paginated candidates list + metadata (`total`, `page`, `pageSize`, `totalPages`) | None (Read-only) | Candidates Table | Production Ready |
+| `/api/collector/candidates/[id]` | GET | Active User | Candidate record with relations (`discoverySource`, `discoveryRun`, `qualifiedLead`) | None (Read-only) | Candidate Detail Drawer | Production Ready |
+| `/api/collector/candidates/stats` | GET | Active User | `{ total, recent24h, counts: { NEEDS_ENRICHMENT, REJECTED, QUALIFIED, ... } }` | None (Read-only) | Candidate Filter Bar / KPIs | Production Ready |
+| `/api/collector/runs` | GET | Active User | List of `CollectorRun` records with relations (`location`, `category`, `source`) | None (Read-only) | Collector Runs Table | Production Ready |
+| `/api/collector/states` | GET | Active User | List of `CollectorState` records with relations (`location`, `category`, `source`) | None (Read-only) | Fair Rotation / States Table | Production Ready |
+| `/api/collector/sources` | GET, POST | Active User | List of `DataSource` records / Created `DataSource` | POST creates new endpoint | Sources Table | Production Ready |
+| `/api/collector/sources/[id]` | GET, PUT, DELETE | Active User | Source record / Updated / Deleted | PUT updates, DELETE removes | Sources Config | Production Ready |
+| `/api/collector/locations` | GET, POST | Active User | List of `CollectorLocation` / Created location | POST creates location | Locations Config | Production Ready |
+| `/api/collector/locations/[id]` | GET, PUT, DELETE | Active User | Location record / Updated / Deleted | PUT updates, DELETE removes | Locations Config | Production Ready |
+| `/api/collector/categories` | GET, POST | Active User | List of `LeadCategory` / Created category | POST creates category | Categories Config | Production Ready |
+| `/api/collector/categories/[id]` | GET, PUT, DELETE | Active User | Category record / Updated / Deleted | PUT updates, DELETE removes | Categories Config | Production Ready |
+| `/api/collector/rules` | GET, POST | Active User | List of `CollectionRule` / Created rule | POST creates rule | Rules Config | Production Ready |
+| `/api/collector/rules/[id]` | GET, PUT, DELETE | Active User | Rule record / Updated / Deleted | PUT updates, DELETE removes | Rules Config | Production Ready |
+| `/api/collector/config` | GET, PUT | Active User | `CollectorConfig` record | PUT updates parameters | Collection Settings | Production Ready |
+| `/api/collector/credentials` | GET, POST | Active User | Masked credentials list / Created credential | POST encrypts & stores | Credentials Settings | Production Ready |
+| `/api/collector/credentials/[id]` | DELETE | Active User | `{ ok: true }` | Deletes credential | Credentials Settings | Production Ready |
+| `/api/enrichment/config` | GET | Active User | Sanitized `EnrichmentConfig` | None (Read-only) | Enrichment Settings | Production Ready |
+| `/api/enrichment/stats` | GET | Active User | Enrichment counts, budget status, UTC accounting | None (Read-only) | Enrichment Settings | Production Ready |
+| `/api/enrichment/jobs` | GET | Active User | Paginated `EnrichmentJob` list | None (Read-only) | Enrichment Monitoring | Production Ready |
+
+---
+
+## 11. Canonical Information Architecture for Lead Operations
+
+To provide operational clarity, low cognitive load, and zero clutter, the admin navigation is organized into functional pillars:
+
+```
+├── LEAD OPERATIONS
+│   ├── Overview          (/dashboard)            — Operational pulse & pipeline health (<10s scan)
+│   ├── Leads             (/leads)                — Qualified, actionable sales opportunities
+│   ├── Candidates        (/candidates)           — Discovery queue & forensic qualification records
+│   ├── Collection                                — Collector engine operations & observability
+│   │   ├── Overview      (/collection)           — Yield, health, rotation, active runs
+│   │   ├── Runs          (/collection/runs)      — Execution history & GitHub Actions traceability
+│   │   ├── Rotation      (/collection/states)    — Location-category combo states & next eligibility
+│   │   └── Sources       (/collection/sources)   — Endpoint health, adapter status, credentials
+│   └── Verification      (/verification)         — Filtered view on candidate verification decisions
+│
+├── ENGAGEMENT
+│   ├── Follow-ups        (/follow-ups)           — Scheduled outreach & due tasks
+│   ├── Outbox            (/outbox)               — Sent emails & WhatsApp log
+│   └── Import            (/import)               — Bulk CSV ingestion
+│
+└── SETTINGS & CONFIGURATION
+    ├── Locations         (/settings/locations)   — Geographic target management
+    ├── Categories        (/settings/categories)  — Business type taxonomy & OSM tags
+    ├── Collection Rules  (/settings/rules)       — Qualification & filtering rules
+    ├── Google Guardrails (/settings/google)      — Activation mode, canary scopes, hard budget caps
+    ├── Email & DNS       (/settings/email)       — Outbound mail & domain authentication
+    ├── WhatsApp API      (/settings/whatsapp)    — Meta Cloud API integration
+    └── Compliance        (/settings/compliance)  — Suppression lists & opt-in records
+```
+
+---
+
+## 12. Screen Responsibility Contracts
+
+### 12.1 Overview Screen (`/dashboard`)
+- **Objective**: Answer operational health in <10 seconds.
+- **Key Metrics**:
+  - Qualified Leads count (Total, New this week, Active follow-ups).
+  - Candidates Pipeline breakdown (`NEEDS_ENRICHMENT`, `REJECTED`, `QUALIFIED`).
+  - Active Collector Status (Is collector executing? Last run status & timestamp).
+  - Today's Yield (Parsed candidates → Qualified leads).
+  - Active Discovery Source (OpenStreetMap active / Google disabled / Enrichment disabled).
+  - System Alerts (Any failed runs, degraded sources, or suppression violations).
+
+### 12.2 Leads Screen (`/leads`)
+- **Objective**: Dense, actionable management of qualified prospects.
+- **Table Information Hierarchy**:
+  1. Company Name & Category (with location subtitle).
+  2. Primary Contact (Name, Email, Phone).
+  3. Country badge.
+  4. Website Segment (`NO_SITE`, `BROKEN`, `OUTDATED`).
+  5. Opportunity Score (`0-100`).
+  6. Pipeline Status (`NEW`, `QUALIFIED`, `CONTACTED`, `REPLIED`, etc.).
+  7. Outreach Sent count (✉, ◍).
+  8. Follow-up Due date badge.
+  9. Action: Single "Open" button.
+
+### 12.3 Candidates Screen (`/candidates`)
+- **Objective**: Discovery queue inspection & qualification forensics.
+- **Table Information Hierarchy**:
+  1. Business Name & External ID (e.g. `node/12345678`).
+  2. Category & City/Country.
+  3. Extracted Contact (Email, Phone).
+  4. Discovery Provenance (Source name, Run ID).
+  5. Candidate Status badge (`NEEDS_ENRICHMENT`, `REJECTED`, `QUALIFIED`, `DISCOVERED`).
+  6. Rejection Reason (`Existing Website`, `Email Domain Has Live Website`, `Generic Email`).
+  7. Discovery Timestamp.
+  8. Action: Single "Inspect" button opening Detail Drawer.
+
+### 12.4 Candidate Detail Architecture (Drawer)
+- **Section 1: Business Identity**: Name, Category, External Provider ID, Coordinates, Address.
+- **Section 2: Contact Information**: Extracted email, phone, role mailbox detection.
+- **Section 3: Qualification & Evidence**:
+  - Qualification Status & Rejection Reason.
+  - Website Evidence (Extracted tag vs Google Places Place Details match vs Email Domain HTTP check).
+  - Identity Resolution Match strength (`EMAIL_PHONE_COORDINATES_ADDRESS`, etc.).
+- **Section 4: Provenance & Traceability**:
+  - Discovery Source & Collector Run ID.
+  - Link to created CRM `Lead` if qualified.
+- **Section 5: Raw Data (Collapsed)**: Expandable JSON preview for raw OSM tags or Google Places payload.
+
+### 12.5 Verification Screen Architecture
+- **Decision**: Implemented as a **Dedicated View** with pre-configured filters over candidates with website verification evidence (e.g. `status = REJECTED` with `reason in [existing_website, email_domain_has_live_website]` or `status = VERIFICATION_PENDING`).
+- **Rationale**: Avoids creating a duplicate backend pipeline while giving operators instant visibility into cross-source website verification outcomes without cluttering the main candidate queue.
+
+### 12.6 Collection Overview (`/collection`)
+- **Metrics Calculated from Stored Data**:
+  - Active Collector Status (`CollectorConfig.enabled`, `collectionMode`).
+  - Source Health Summary (Counts of healthy, degraded, down sources).
+  - Yield Metrics across recent runs (Total Parsed, Total Accepted, Total Persisted).
+  - Exclusion Breakdown (No-email rate, Existing-website rejection rate, Duplicate rate).
+  - Next Fair Rotation Assignment (Location, Category, Source, countdown).
+
+### 12.7 Runs Screen (`/collection/runs`)
+- **Fields Displayed**:
+  - Started / Finished timestamps & Duration (seconds).
+  - Execution Status badge (`SUCCESS`, `PARTIAL`, `FAILED`, `RUNNING`).
+  - Target: Location (City, Country) / Category (Slug) / Source (Name).
+  - Discovery Yield: Raw Found → Parsed → Candidates Persisted (`needEnrich` count).
+  - Rejection Metrics: `noEmail` / `websiteRejected` / `duplicateRejected`.
+  - Accepted & Inserted Leads count.
+  - Traceability: GitHub Actions Run ID link (`GH#12345`).
+
+### 12.8 Rotation / States Screen (`/collection/states`)
+- **Human-Centric Display**:
+  - Location / Category / Source combination.
+  - Last Run Timestamp & Execution Status.
+  - Next Eligibility Countdown (e.g. "Now", "14m 20s", "2h 15m").
+  - Fair Rotation Cycle count & Consecutive Failures.
+  - Cumulative Yield (Total Candidates discovered / Total Leads accepted).
+
+### 12.9 Sources Screen (`/collection/sources`)
+- **Display Specifications**:
+  - Source Name & Provider Type (`overpass`, `google_places`, `custom`).
+  - Operational Role (`Free Discovery`, `Paid Evidence / Selective Discovery`, `Contact Enrichment`).
+  - Enabled State toggle & Priority indicator.
+  - Health Status badge (`healthy`, `degraded`, `down`, `unknown`).
+  - Last Checked timestamp & Base URL.
+  - Associated Provider Credentials (Masked key hints: `••••9K2A`).
+
+### 12.10 Google Guardrails UI (`/settings/google`)
+- **Configuration & Observability Controls**:
+  - Activation Mode Indicator & Selector (`DISABLED` [default], `CANARY`, `PRODUCTION`) with confirmation lock.
+  - Master Enabled switch (`false`).
+  - Canary Allowlist Scopes view (e.g. `[ { "countryCode": "GB", "city": "Manchester", "categorySlug": "dental" } ]`).
+  - Budget & Request Limits: Per-run limit (Canary: 3, Prod: 10), Daily limit (Canary: 5, Prod: 50), Monthly limit (500 hard cap).
+  - Caching Policy: Cache Enabled (`true`), Query Cache TTL (24h), Place Details TTL (168h).
+  - Usage & Cache Observability: Total requests logged, status breakdown, error classification table, cache hit rates.
+  - **Zero-Secret Guarantee**: API Key value is NEVER displayed or edited here; status is indicated purely as `Configured` or `Missing`.
+
+### 12.11 Locations UI (`/settings/locations`)
+- **Management Capabilities**:
+  - Filterable list of `CollectorLocation` records.
+  - Columns: City, State, Country, Country Code badge, Search Radius (km), Priority Label (`LOW`, `MEDIUM`, `HIGH`), Last Collected timestamp, Enabled toggle, Actions (Edit, Delete).
+  - Modal/Inline Create & Edit form with latitude/longitude and radius validation.
+
+### 12.12 Categories UI (`/settings/categories`)
+- **Management Capabilities**:
+  - List of `LeadCategory` records.
+  - Columns: Category Name, Slug, Priority Label, Last Run timestamp, OSM Query Tags preview, Enabled toggle, Actions (Edit, Delete).
+  - Create & Edit form supporting name, slug, priority, and JSON OSM tag configuration.
+
+### 12.13 Collection Rules UI (`/settings/rules`)
+- **Management Capabilities**:
+  - List of `CollectionRule` records grouped by category (`lead_requirements`, `filtering`, `validation`).
+  - Displays: Rule Name, System Key, Description, Category, Enabled toggle.
+
+---
+
+## 13. Action Safety & Interaction Model
+
+### 13.1 Action Classification
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│ SAFE ACTIONS (Direct execution, instant feedback)                       │
+│ • View Lead / Candidate / Run / Source details                         │
+│ • Apply search, filters, sorting, and pagination                       │
+│ • Copy email / phone / personalisation hook / text                     │
+│ • Schedule next follow-up date                                         │
+│ • Add lead note                                                        │
+│ • Edit lead CRM fields (contact name, role, notes)                     │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────┐
+│ SENSITIVE ACTIONS (Low-friction confirmation or reversible)            │
+│ • Change Lead pipeline status (e.g. QUALIFIED → CONTACTED)             │
+│ • Toggle Location / Category enabled state                             │
+│ • Toggle Collection Rule enabled state                                 │
+│ • Create new Location / Category / Rule                                │
+│ • Log inbound customer reply                                           │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────┐
+│ DANGEROUS ACTIONS (Mandatory modal confirmation + explicit typed lock)  │
+│ • Activating Google collection or changing mode (CANARY / PRODUCTION)  │
+│ • Modifying Google request quotas or monthly hard caps                 │
+│ • Enabling Enrichment engine                                           │
+│ • Deleting a Location, Category, or Data Source                        │
+│ • Deleting or adding Provider API credentials                          │
+│ • Deleting a Lead record                                               │
+│ • Bulk candidate qualification or rejection overrides                  │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### 13.2 Button & Action UX Policy
+- **Primary vs Secondary Restraint**: Exactly **ONE** primary CTA per view context (e.g. `+ New Lead` on Leads list, `Save Changes` on forms).
+- **Zero Table Clutter**: Table rows must **NEVER** contain 4–8 raw action buttons. Each row has at most:
+  - 1 Primary row action (e.g. `Open` for Leads, `Inspect` for Candidates).
+  - Optional compact overflow menu (`⋯`) for secondary actions (e.g. `Copy ID`, `Archive`, `Delete`).
+- **Icon Integrity**: All icons must have accessible labels or tooltips; no mysterious bare icon buttons.
+
+---
+
+## 14. Data-Table & Filtering Standards
+
+### 14.1 Canonical Data-Table Specification
+- **Visual Foundation**: White panel card (`#FFFFFF`), subtle border (`#E5E3DF`), 10px rounded corners, zero heavy shadows.
+- **Typography**: Header text 11px uppercase bold (`#9299A8`), body text 13px regular (`#151927`), secondary metadata 11px muted (`#60697A`).
+- **Row Styling**: Subtle row hover highlight (`#FAF9F7`), crisp 1px divider lines (`#F0EEEA`), compact vertical padding (10–12px).
+- **Responsive Handling**: Horizontal overflow wrapper (`overflow-x: auto`) on desktop/tablet to prevent column crunch; never stack rows into tall vertical cards on admin tables.
+- **Server Pagination**: Sticky bottom pagination bar with page range (`Showing 1–25 of 649`), page selector, and `Prev`/`Next` controls.
+
+### 14.2 Filter Bar Architecture
+- **Compact Two-Tier Layout**:
+  - **Tier 1 (Instant Scan)**: Search input with debounced server query + "Clear filters" button.
+  - **Tier 2 (Facet Selectors)**: Status dropdown, Category dropdown, Country/City selector, Sort Order dropdown, Page Size selector.
+- **Applied Filter Badges**: Active filters displayed as compact dismissible chips.
+
+---
+
+## 15. Semantic Status & Visual Language
+
+| Status Category | Semantic Meaning | Background | Text Color | Border | Example Usages |
+|---|---|---|---|---|---|
+| **Success** | Qualified / Healthy / Complete | `#EEF8F4` | `#276749` | `#D5F0E5` | `QUALIFIED`, `healthy`, `SUCCESS`, `WITHIN_BUDGET` |
+| **Warning** | Pending / Enrichment / Degraded | `#FFF6E3` | `#B7791F` | `#F4BE52` | `NEEDS_ENRICHMENT`, `degraded`, `PARTIAL`, `HIGH` priority |
+| **Danger** | Rejected / Down / Failed | `#FDECEC` | `#C53030` | `#FBD5D5` | `REJECTED`, `down`, `FAILED`, `DO NOT CONTACT` |
+| **Info / Discovery** | Discovered / Running / In Progress | `#F0ECFA` | `#553C9A` | `#E0D6F5` | `DISCOVERED`, `RUNNING`, `QUEUED`, `overpass` |
+| **Verification** | Pending Verification / Check | `#EAF7FA` | `#2B6CB0` | `#C5E9F1` | `VERIFICATION_PENDING`, `CHECK` |
+| **Neutral** | Disabled / Unset / Dormant | `#FAF9F7` | `#60697A` | `#E5E3DF` | `DISABLED`, `unknown`, `MEDIUM` priority |
+
+---
+
+## 16. State Handling Standards
+
+### 16.1 Empty States
+- Custom, contextual empty illustrations with informative messaging:
+  - *No leads found*: "No qualified leads match the selected filters. Try clearing filters or importing leads."
+  - *No candidates found*: "Candidate discovery queue is empty. Collection worker will populate candidates on next run."
+  - *Google disabled*: "Google Places collection is currently disabled in guardrails config."
+  - *Enrichment disabled*: "Enrichment providers are inactive. Candidates remain safely in pre-enrichment queue."
+
+### 16.2 Loading & Error States
+- **Loading**: High-density skeleton row placeholders matching exact table column geometry; zero jarring full-page spinners.
+- **Error**: Inline card-level alert banners (`#FDECEC`) with explicit error message and an "Inline Retry" trigger.
+
+---
+
+## 17. Security, Authorization & Performance
+
+### 17.1 Authentication & Session
+- Managed via `src/lib/session.ts` using signed JWT (`jose` HS256) stored in HTTP-only, secure, same-site `cf_session` cookie.
+- All App Router pages and API routes enforce `await requireActiveUser()`.
+- Single-admin internal operational model; multi-role RBAC documented for future scale.
+
+### 17.2 Performance & Scalability Guardrails
+- **Strict Server Pagination**: All candidate queries bounded to `pageSize` (25/50/100); never load unbounded tables into browser memory.
+- **Indexed Database Filtering**: Prisma queries leverage compound indexes on `[status]`, `[discoveryRunId]`, `[city]`, `[businessCategory]`, `[nextFollowUpAt]`.
+- **Debounced Search**: Text search inputs debounced by 300ms to eliminate server query thrashing.
+
+---
+
+## 18. UI Design Component Inventory
+
+| Component Category | Component Name | Workspace Path | Status | Notes / Plan |
+|---|---|---|---|---|
+| **Buttons** | `Button` | `src/components/ui/Button.tsx` | **READY** | Full variant support (`primary`, `secondary`, `outline`, `ghost`, `danger`) |
+| **Buttons** | `ButtonGroup` | `src/components/ui/ButtonGroup.tsx` | **READY** | Segmented and standard group controls |
+| **Buttons** | `IconButton` | `src/components/ui/IconButton.tsx` | **READY** | Icon buttons with tooltips |
+| **Form Controls** | `Input` | `src/components/ui/Input.tsx` | **READY** | Size variants (`sm`, `md`, `lg`), states, icons |
+| **Form Controls** | `Select` | `src/components/ui/Select.tsx` | **READY** | Custom select with status dots and groups |
+| **Form Controls** | `Textarea` | `src/components/ui/Textarea.tsx` | **READY** | Auto-grow support |
+| **Form Controls** | `Checkbox` | `src/components/ui/Checkbox.tsx` | **READY** | Custom checkbox with indeterminate state |
+| **Form Controls** | `Radio` | `src/components/ui/Radio.tsx` | **READY** | Custom radio buttons |
+| **Form Controls** | `Switch` | `src/components/ui/Switch.tsx` | **READY** | Toggle switch component |
+| **Navigation** | `Dropdown` | `src/components/ui/Dropdown.tsx` | **READY** | Action and overflow menus |
+| **Navigation** | `Sidebar` | `src/app/(app)/layout.tsx` | **NEEDS EXTENSION** | Reorganize into Phase 4D canonical groupings |
+| **Data Display** | `DataTable` | `src/components/ui/DataTable.tsx` | **NEEDS EXTENSION** | Standardize reusable table wrapper across Leads/Candidates/Runs |
+| **Data Display** | `Badge` | `src/components/ui/Badge.tsx` | **READY** | Semantic status badge system |
+| **Data Display** | `KpiCard` | `src/components/ui/KpiCard.tsx` | **READY** | Summary metric cards |
+| **Feedback** | `Drawer` | `src/components/ui/Drawer.tsx` | **NEEDS EXTENSION** | Candidate forensic inspection flyout |
+| **Feedback** | `Modal` | `src/components/ui/Modal.tsx` | **NEEDS EXTENSION** | Dangerous action confirmation dialog |
+| **Feedback** | `Skeleton` | `src/components/ui/Skeleton.tsx` | **READY** | Table and card loading skeletons |
+
+---
+
+## 19. Prioritized Gap Analysis
+
+### P0 — Critical Operational Requirements (Phase 4D Baseline)
+1. **Promote Candidates Queue to First-Class View**: Create dedicated `/candidates` page with full server-side filtering, sorting, pagination, and detail drawer.
+2. **Promote Collection Operations to First-Class Views**: Create `/collection` hub with dedicated sub-views for `/collection/runs`, `/collection/states`, and `/collection/sources`.
+3. **Standardize Action Restraint & Confirmation Modals**: Replace dangerous instant buttons (Google activation, credential deletion) with structured confirmation modals.
+4. **Expose Forensic Verification Evidence**: Render cross-source Google website decisions and email domain checks inside the Candidate Detail drawer.
+
+### P1 — Important Observability & Usability Enhancements
+1. **Google Guardrails Dedicated Screen (`/settings/google`)**: Visual activation mode switch, canary scope viewer, rate limit counters, and cache hit metrics.
+2. **Unified Navigation & Layout Shell**: Update sidebar navigation to reflect canonical Lead Operations architecture.
+3. **Dedicated Verification Filtered View (`/verification`)**: Specialized view for inspecting website-rejected candidates and cross-source matches.
+
+### P2 — Future Scale & Automation
+1. **Batch Candidate Actions**: Multi-select candidate re-verification trigger.
+2. **Advanced Traceability Graph**: Interactive visualization linking OSM Entity → CollectorRun → Verification Decision → Lead Record.
+
+---
+
+## 20. Finite Phase 4D Implementation Roadmap
+
+- **Phase 4D.1**: Information Architecture, Screen Maps, Data Models & Action Contracts Audit (Complete).
+- **Phase 4D.2**: Lead Operations Shell & Navigation Reorganization (Sidebar, routes, shared layout).
+- **Phase 4D.3**: Candidates View & Forensic Detail Experience (`/candidates`, evidence drawer).
+- **Phase 4D.4**: Collection Operations Hub (`/collection`, `/collection/runs`, `/collection/states`, `/collection/sources`).
+- **Phase 4D.5**: Google Guardrails & Observability UI (`/settings/google`, usage counters, cache stats).
+- **Phase 4D.6**: Lead Pipeline Integration & Verification View (`/verification`, table standardizations).
+- **Phase 4D.7**: End-to-End Operational Verification & Review.

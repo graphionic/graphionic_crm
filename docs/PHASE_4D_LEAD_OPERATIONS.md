@@ -621,3 +621,38 @@ The application navigation layout (`src/app/(app)/layout.tsx`) implements the ca
 - Verified by `scripts/test-4d2-navigation-smoke.mjs` (Hard network trap, all tests passed).
 - Next.js production build (`npm run build`) compiled 91/91 pages cleanly.
 
+---
+
+## 22. Phase 4D.3 Execution Record — Candidates Operations Experience
+
+### 22.1 Architecture & Implementation Summary
+Phase 4D.3 delivers an administrative forensic candidate investigation interface in `src/components/collector/CandidateQueueClient.tsx` and `src/components/collector/collector-utils.ts`:
+
+1. **High-Density Operational Table**:
+   - Column layout: Business (company name, category, external type/ID), Contact (email, generic webmail badges, phone), Location (city, country code, street), Source (humanized source name, entity type), Status (tinted status badge), Decision/Reason (human-readable rejection reason, missing email status), Discovered (date, run ID), Action (`Inspect`).
+   - Server-side debounced search (350ms) across company name, email, phone, city, and external ID.
+   - Facet filters: Status, Category, Source, City, Sort Order, and Page Size (25/50/100).
+   - Dismissible Active Filter Chips with a single "Clear filters" action.
+   - Responsive KPI metric strip showing Total Candidates, Needs Enrichment, Rejected, Verification Pending, and Qualified.
+
+2. **Forensic Slide-Over Drawer**:
+   - Width: `min(580px, 94vw)`, keyboard `Escape` dismissal, backdrop click dismissal, `aria-modal="true"`.
+   - **Section 1: Decision Summary Callout**: Most prominent top callout with semantic tone (`good`, `warn`, `bad`, `neutral`), status title, plain-English summary, and exact email/website/pipeline outcome facts.
+   - **Section 2: Business Identity**: Company name, business category, address, city, country, postcode, exact coordinates, external provider ID.
+   - **Section 3: Contact Intelligence**: Email with business vs generic domain classification pill, phone number, and discovery website tag.
+   - **Section 4: Website & Verification Evidence**: OpenStreetMap tag evaluation, email domain live website detection (Emma Clinic protection), and Google Places cross-source verification status.
+   - **Section 5: Source Evidence**: Parsed records from `metadata.sourceEvidence` with raw collected names, emails, websites, phones, and match timestamps.
+   - **Section 6: Discovery Traceability**: Discovery source name/type, Collector Run ID, execution timestamps, target city/category, and GitHub Actions run links (`GH#...`).
+   - **Section 7: CRM Lead Relationship**: Links to `/leads/[id]` if candidate was qualified into a CRM lead, or explicit explanation if no lead was created.
+   - **Section 8: Technical Data (Collapsed)**: Safe JSON formatting for `rawTags` and `metadata` with clipboard copy buttons.
+
+3. **Truth-Based Distinctions**:
+   - Strict separation between **FACT** (e.g. "Website tag present in OSM tags"), **INFERENCE** (e.g. "Email domain uses generic webmail"), and **NOT CHECKED** (e.g. "Google Places cross-source check disabled").
+   - Pure read-only operation: Zero Google API requests, zero candidate mutations, zero database schema changes.
+
+### 22.2 Invariant & Test Verification
+- Verified by `scripts/test-4d3-candidates-smoke.mjs` (24/24 unit & DB integrity checks passed).
+- Verified by `scripts/test-4d2-navigation-smoke.mjs` (hard network trap passed).
+- Next.js production build (`npm run build`) passed with all 91 pages compiled.
+
+

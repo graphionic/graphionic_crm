@@ -162,17 +162,43 @@ async function runTests() {
   assert.strictEqual(eligB.reason, 'MISSING_OR_INVALID_EMAIL');
   console.log('[PASS B] missing email not eligible');
 
-  // Test C: generic email not eligible
+  // Test C: generic email provider domain not eligible (e.g. gmail, yahoo)
   const genericDomainCand = { ...eligibleCand, email: 'clinic@gmail.com' };
   const eligC1 = evaluateGoogleWebsiteVerificationEligibility(genericDomainCand);
   assert.strictEqual(eligC1.eligible, false);
   assert.strictEqual(eligC1.reason, 'GENERIC_EMAIL_DOMAIN_NOT_ELIGIBLE');
 
-  const genericRoleCand = { ...eligibleCand, email: 'info@manchesterdentalcare.co.uk' };
-  const eligC2 = evaluateGoogleWebsiteVerificationEligibility(genericRoleCand);
+  const yahooDomainCand = { ...eligibleCand, email: 'dr.smith@yahoo.com' };
+  const eligC2 = evaluateGoogleWebsiteVerificationEligibility(yahooDomainCand);
   assert.strictEqual(eligC2.eligible, false);
-  assert.strictEqual(eligC2.reason, 'GENERIC_ROLE_EMAIL_PREFIX_NOT_ELIGIBLE');
-  console.log('[PASS C] generic email not eligible');
+  assert.strictEqual(eligC2.reason, 'GENERIC_EMAIL_DOMAIN_NOT_ELIGIBLE');
+  console.log('[PASS C] generic provider domain not eligible');
+
+  // Test C.1: role-based local parts on business domain MUST be eligible
+  const infoCand = { ...eligibleCand, email: 'info@manchesterdentalcare.co.uk' };
+  assert.strictEqual(evaluateGoogleWebsiteVerificationEligibility(infoCand).eligible, true, 'info@ on business domain must be eligible');
+
+  const contactCand = { ...eligibleCand, email: 'contact@manchesterdentalcare.co.uk' };
+  assert.strictEqual(evaluateGoogleWebsiteVerificationEligibility(contactCand).eligible, true, 'contact@ on business domain must be eligible');
+
+  const salesCand = { ...eligibleCand, email: 'sales@manchesterdentalcare.co.uk' };
+  assert.strictEqual(evaluateGoogleWebsiteVerificationEligibility(salesCand).eligible, true, 'sales@ on business domain must be eligible');
+
+  const helloCand = { ...eligibleCand, email: 'hello@manchesterdentalcare.co.uk' };
+  assert.strictEqual(evaluateGoogleWebsiteVerificationEligibility(helloCand).eligible, true, 'hello@ on business domain must be eligible');
+
+  const adminCand = { ...eligibleCand, email: 'admin@manchesterdentalcare.co.uk' };
+  assert.strictEqual(evaluateGoogleWebsiteVerificationEligibility(adminCand).eligible, true, 'admin@ on business domain must be eligible');
+
+  const supportCand = { ...eligibleCand, email: 'support@manchesterdentalcare.co.uk' };
+  assert.strictEqual(evaluateGoogleWebsiteVerificationEligibility(supportCand).eligible, true, 'support@ on business domain must be eligible');
+
+  const officeCand = { ...eligibleCand, email: 'office@manchesterdentalcare.co.uk' };
+  assert.strictEqual(evaluateGoogleWebsiteVerificationEligibility(officeCand).eligible, true, 'office@ on business domain must be eligible');
+
+  const enquiriesCand = { ...eligibleCand, email: 'enquiries@manchesterdentalcare.co.uk' };
+  assert.strictEqual(evaluateGoogleWebsiteVerificationEligibility(enquiriesCand).eligible, true, 'enquiries@ on business domain must be eligible');
+  console.log('[PASS C.1] role-based mailboxes on business domain eligible');
 
   // Test D: invalid email not eligible
   const invalidEmailCand = { ...eligibleCand, email: 'notanemail' };

@@ -49,27 +49,6 @@ import {
 
 // ---------------------------------------------------------------- Constants & Rules
 
-export const GENERIC_EMAIL_ROLE_PREFIXES = new Set([
-  'info',
-  'contact',
-  'support',
-  'admin',
-  'office',
-  'help',
-  'sales',
-  'hello',
-  'enquiries',
-  'enquiry',
-  'mail',
-  'team',
-  'service',
-  'billing',
-  'reception',
-  'appointments',
-  'booking',
-  'bookings',
-]);
-
 export const ALLOWED_VERIFICATION_STATUSES = new Set([
   'NEEDS_ENRICHMENT',
   'DISCOVERED',
@@ -230,7 +209,7 @@ export function evaluateGoogleWebsiteVerificationEligibility(
     };
   }
 
-  // Rule 3: Must have valid, useful, non-generic email
+  // Rule 3: Must have valid, useful, non-generic business email
   const rawEmail = (candidate.email || '').trim().toLowerCase();
   if (!rawEmail || !rawEmail.includes('@')) {
     return {
@@ -246,16 +225,6 @@ export function evaluateGoogleWebsiteVerificationEligibility(
     return {
       eligible: false,
       reason: 'GENERIC_EMAIL_DOMAIN_NOT_ELIGIBLE',
-      candidateId,
-      safeSummary,
-    };
-  }
-
-  const prefix = rawEmail.split('@')[0].trim();
-  if (GENERIC_EMAIL_ROLE_PREFIXES.has(prefix)) {
-    return {
-      eligible: false,
-      reason: 'GENERIC_ROLE_EMAIL_PREFIX_NOT_ELIGIBLE',
       candidateId,
       safeSummary,
     };

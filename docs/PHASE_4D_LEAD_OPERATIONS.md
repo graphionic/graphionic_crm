@@ -735,6 +735,55 @@ Phase 4D.4A hardens the credential presentation across the Collection Operations
 3. **Verification & Smoke Tests**:
    - `scripts/test-4d4-collection-operations-smoke.mjs` updated to verify 40/40 assertions including explicit tests asserting absence of `keyHint`, `maskedKey`, `encryptedValue`, and `iv` in browser projection.
 
+---
+
+## 25. Phase 4D.5 Execution Record — Google Places Guardrails Operations
+
+### 25.1 Architecture & Implementation Summary
+Phase 4D.5 delivers the safe observability and guardrail management interface for Google Places at `/settings/google` via `src/components/collector/GoogleGuardrailsClient.tsx`:
+
+1. **Authoritative Operational Status**:
+   - **Master State**: Master Disabled (`GoogleCollectionConfig.enabled: false`).
+   - **Activation Mode**: Read-only `DISABLED` (Fail Closed).
+   - **Data Source**: Disabled in fair rotation (`DataSource(google_places).enabled: false`).
+   - **Credential Status**: `Configured` (Server-only `GOOGLE_MAPS_API_KEY`, zero secret exposure to client).
+   - **Reservations & Usage**: `0` pending/dangling reservations, `2` historical requests recorded.
+   - **Query Cache**: `2` cached query entries (TTL: 24h search, 168h details).
+
+2. **Safety Controls & Rate Limit Observability**:
+   - Canary limits: 3 requests/run, 5 requests/day.
+   - Production limits: 10 requests/run, 50 requests/day, 500 requests/month hard cap.
+   - Strict retry limit: 0 retries (prevents budget bypass).
+   - Query Cache TTL: 24 hours for Text Search, 7 days (168 hours) for Place Details.
+
+3. **Canary Allowlist Scope**:
+   - Configured allowlist: `Manchester, GB · Dental`.
+   - Explains that all out-of-scope targets are rejected at the reservation stage before any network request can occur.
+
+4. **Controlled Activity & Usage Audit Log**:
+   - Displays genuine historical Google API usage records (Controlled Probe in New York, Canary Execution in Manchester).
+   - Shows latency, HTTP status, operation type, result counts, and timestamps.
+
+5. **Query Cache Inventory**:
+   - Displays query fingerprints, operations, result counts, expiration timestamps, and hit counters.
+
+6. **Activation Operational Requirements**:
+   - Clear 5-point safety checklist detailing the exact prerequisites required before live Google collection can run.
+
+### 25.2 Safety Invariant Verification
+- Verified by `scripts/test-4d5-google-guardrails-smoke.mjs` with hard network trap (30/30 checks passed).
+- Verified by `scripts/test-4d4-collection-operations-smoke.mjs` (40/40 checks passed).
+- Verified by `scripts/test-4d3-candidates-smoke.mjs` (24/24 checks passed).
+- Verified by `scripts/test-4d2-navigation-smoke.mjs` (14/14 checks passed).
+- Database Safety Invariants:
+  - `GoogleCollectionConfig.enabled`: `false`, `activationMode`: `DISABLED`
+  - `DataSource (google_places).enabled`: `false`
+  - `GoogleApiUsage.count`: `2` (0 pending/reserved)
+  - `GoogleApiCache.count`: `2`
+  - Total Candidates: `649` (`408` Needs Enrichment, `241` Rejected)
+  - Zero Google API requests, zero candidate mutations.
+
+
 
 
 

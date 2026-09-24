@@ -18,16 +18,16 @@ export function NavLink({
   tone?: string;
 }) {
   const pathname = usePathname();
-  const active =
-    pathname === href ||
-    (href !== "/dashboard" && href !== "/settings" && pathname.startsWith(href + "/")) ||
-    (href === "/settings" && pathname.startsWith("/settings"));
+  const exactOnly = href === "/dashboard" || href === "/collection" || href === "/settings";
+  const active = exactOnly
+    ? pathname === href
+    : pathname === href || pathname.startsWith(href + "/");
 
   return (
     <Link href={href} className={active ? "active" : ""}>
       <span className="ico">{icon}</span>
       <span>{label}</span>
-      {badge && badge > 0 ? (
+      {badge !== undefined && badge > 0 ? (
         <span
           className="badge"
           style={{

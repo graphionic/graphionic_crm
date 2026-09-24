@@ -555,9 +555,69 @@ To provide operational clarity, low cognitive load, and zero clutter, the admin 
 ## 20. Finite Phase 4D Implementation Roadmap
 
 - **Phase 4D.1**: Information Architecture, Screen Maps, Data Models & Action Contracts Audit (Complete).
-- **Phase 4D.2**: Lead Operations Shell & Navigation Reorganization (Sidebar, routes, shared layout).
+- **Phase 4D.2**: Lead Operations Shell & Navigation Reorganization (Complete).
 - **Phase 4D.3**: Candidates View & Forensic Detail Experience (`/candidates`, evidence drawer).
 - **Phase 4D.4**: Collection Operations Hub (`/collection`, `/collection/runs`, `/collection/states`, `/collection/sources`).
 - **Phase 4D.5**: Google Guardrails & Observability UI (`/settings/google`, usage counters, cache stats).
 - **Phase 4D.6**: Lead Pipeline Integration & Verification View (`/verification`, table standardizations).
 - **Phase 4D.7**: End-to-End Operational Verification & Review.
+
+---
+
+## 21. Phase 4D.2 Execution & Route Promotion Record
+
+### 21.1 Route Promotion & Extraction Map
+All operational screens have been promoted into canonical first-class routes by extracting reusable presentation and data components into `src/components/collector/`:
+
+| Promoted Route | Server Page File | Extracted Reusable Client Component | Source Tab / Functionality Reused |
+|---|---|---|---|
+| `/candidates` | `src/app/(app)/candidates/page.tsx` | `src/components/collector/CandidateQueueClient.tsx` | Candidate queue, server search/filters, pagination, detail drawer |
+| `/collection` | `src/app/(app)/collection/page.tsx` | `src/components/collector/CollectorOverviewClient.tsx` | Overview KPI cards, fair rotation next assignment, last run |
+| `/collection/runs` | `src/app/(app)/collection/runs/page.tsx` | `src/components/collector/CollectorRunsClient.tsx` | Collector run execution log, rejection breakdown, GitHub links |
+| `/collection/states` | `src/app/(app)/collection/states/page.tsx` | `src/components/collector/CollectorStatesClient.tsx` | Fair rotation states, live countdowns, yield tracking |
+| `/collection/sources` | `src/app/(app)/collection/sources/page.tsx` | `src/components/collector/CollectorSourcesClient.tsx` | Data sources, health status, AES-256 masked credentials |
+| `/settings/locations` | `src/app/(app)/settings/locations/page.tsx` | `src/components/collector/CollectorLocationsClient.tsx` | Geographic target CRUD, radius, priority weights |
+| `/settings/categories` | `src/app/(app)/settings/categories/page.tsx` | `src/components/collector/CollectorCategoriesClient.tsx` | Business taxonomy CRUD, OSM tag JSON configurations |
+| `/settings/rules` | `src/app/(app)/settings/rules/page.tsx` | `src/components/collector/CollectionRulesClient.tsx` | Modular collection rules, category groupings |
+| `/settings/google` | `src/app/(app)/settings/google/page.tsx` | `src/components/collector/GoogleGuardrailsPlaceholderClient.tsx` | Safe read-only status, mode `DISABLED`, zero secrets |
+
+### 21.2 Final Sidebar Hierarchy
+The application navigation layout (`src/app/(app)/layout.tsx`) implements the canonical five-group structure with active route precision in `shell-client.tsx`:
+
+1. **WORKSPACE**:
+   - `Overview` (`/dashboard`, icon: `▦`)
+   - `Leads` (`/leads`, icon: `◉`, dynamic badge: `leadCount`)
+   - `Candidates` (`/candidates`, icon: `◎`, dynamic badge: `candidateCount`)
+2. **COLLECTION**:
+   - `Overview` (`/collection`, icon: `⊞`)
+   - `Runs` (`/collection/runs`, icon: `▷`)
+   - `Rotation` (`/collection/states`, icon: `↻`)
+   - `Sources` (`/collection/sources`, icon: `⚲`)
+3. **ENGAGEMENT**:
+   - `Follow-ups` (`/follow-ups`, icon: `◷`, dynamic badge: `dueCount`, tone: `amber`)
+   - `Outbox` (`/outbox`, icon: `✉`)
+   - `Import` (`/import`, icon: `⇪`)
+4. **CONFIGURATION**:
+   - `Locations` (`/settings/locations`, icon: `⌖`)
+   - `Categories` (`/settings/categories`, icon: `◇`)
+   - `Collection Rules` (`/settings/rules`, icon: `✓`)
+   - `Google Guardrails` (`/settings/google`, icon: `◈`)
+5. **SYSTEM**:
+   - `Email & DNS` (`/settings/email`, icon: `✉`)
+   - `WhatsApp API` (`/settings/whatsapp`, icon: `◍`)
+   - `Compliance` (`/settings/compliance`, icon: `⚖`)
+   - `Settings` (`/settings`, icon: `⚙`)
+
+### 21.3 Legacy Route Handling
+- `/live`: Removed from production sidebar navigation; direct URL remains operational for legacy/debug purposes.
+- `/settings/lead-collection`: Preserved as a functional monolithic administrative hub, consuming the extracted components and keeping the `enrichment` tab operational.
+
+### 21.4 Google Guardrails Placeholder Safety
+- Route `/settings/google` exposes database configuration and usage counters strictly read-only.
+- `activationMode` remains `DISABLED`, master `enabled` remains `false`.
+- Zero API key exposure. Zero mutations. Zero Google network requests.
+
+### 21.5 Smoke Test & Production Invariant Verification
+- Verified by `scripts/test-4d2-navigation-smoke.mjs` (Hard network trap, all tests passed).
+- Next.js production build (`npm run build`) compiled 91/91 pages cleanly.
+

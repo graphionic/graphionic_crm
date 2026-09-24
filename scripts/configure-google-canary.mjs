@@ -11,7 +11,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { getGoogleCredentialStatus } from '../src/lib/google-credential-reader';
+import { getGoogleCredentialStatus } from '../src/lib/google-credential-reader.ts';
 
 export const APPROVED_CANARY_SCOPES = [
   {

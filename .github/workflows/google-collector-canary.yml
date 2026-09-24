@@ -22,6 +22,7 @@ jobs:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
       GOOGLE_COLLECTOR_CANARY: "true"
+      GOOGLE_CANARY_ACTIVATE_CONFIRM: "true"
 
     steps:
       - name: Checkout
@@ -49,12 +50,16 @@ jobs:
           echo "Hard network cap: MAX_NETWORK_REQUESTS=3"
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             export GOOGLE_CANARY_DRY_RUN="true"
+          else
+            export GOOGLE_CANARY_ACTIVATE_CONFIRM="true"
+            npx tsx scripts/configure-google-canary.mjs --activate
           fi
           npx tsx scripts/google-collector-canary.mjs
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           GOOGLE_COLLECTOR_CANARY: "true"
+          GOOGLE_CANARY_ACTIVATE_CONFIRM: "true"
 
       - name: Fail-Safe Deactivation Cleanup
         if: always()

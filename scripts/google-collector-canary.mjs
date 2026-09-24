@@ -18,27 +18,27 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { getGoogleCredentialStatus } from '../src/lib/google-credential-reader';
+import { getGoogleCredentialStatus } from '../src/lib/google-credential-reader.ts';
 import {
   planGoogleStageARequest,
   generateGoogleRequestFingerprint,
   canExecuteGoogleCollector,
   collectFromGoogleSource,
-} from '../src/lib/google-collector-adapter';
+} from '../src/lib/google-collector-adapter.ts';
 import {
   checkGoogleCache,
   reserveGoogleRequestBudgetAtomically,
   completeGoogleReservation,
-} from '../src/lib/google-request-guardrails';
+} from '../src/lib/google-request-guardrails.ts';
 import {
   buildTextSearchRequest,
   SEARCH_ID_ONLY_MASK,
-} from '../src/lib/google-places-adapter';
+} from '../src/lib/google-places-adapter.ts';
 import {
   normalizedFromGooglePlace,
   matchNormalizedRecords,
   mergeBusinessEvidence,
-} from '../src/lib/collection-normalization';
+} from '../src/lib/collection-normalization.ts';
 
 export const APPROVED_CANARY_LOCATION = {
   city: 'Manchester',
@@ -176,10 +176,20 @@ export async function runCanaryCollector(prisma, options = {}) {
   // Network Guard initialization
   const networkGuard = new CanaryNetworkGuard(MAX_NETWORK_REQUESTS_CAP);
 
+  // Look up matching location and category from DB for relationship linkage
+  const dbLocation = await prisma.collectorLocation.findFirst({
+    where: { city: { equals: location.city, mode: 'insensitive' }, countryCode: location.countryCode },
+  });
+  const dbCategory = await prisma.leadCategory.findFirst({
+    where: { slug: category.slug },
+  });
+
   // CollectorRun creation
   const collectorRun = await prisma.collectorRun.create({
     data: {
       sourceId: source.id,
+      locationId: dbLocation?.id || null,
+      categoryId: dbCategory?.id || null,
       status: 'IN_PROGRESS',
       candidatesFound: 0,
       leadsCreated: 0,

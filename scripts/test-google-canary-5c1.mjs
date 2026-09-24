@@ -89,9 +89,9 @@ import {
 import {
   planGoogleStageARequest,
   generateGoogleRequestFingerprint,
-} from '../src/lib/google-collector-adapter';
+} from '../src/lib/google-collector-adapter.ts';
 
-import { getGoogleCredentialStatus } from '../src/lib/google-credential-reader';
+import { getGoogleCredentialStatus } from '../src/lib/google-credential-reader.ts';
 
 console.log('[5C1] Starting Phase 4C.4C.5C.1 Live Canary Activation Prep Tests — ZERO NETWORK');
 

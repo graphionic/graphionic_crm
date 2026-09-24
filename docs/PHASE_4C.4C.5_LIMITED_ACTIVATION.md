@@ -440,5 +440,93 @@ The first live Google Places canary collection ran on GitHub Actions via manual 
    - Google `CollectorState` count = 0 (zero OSM rotation impact).
    - Zero credentials or API keys logged or persisted in DB/logs/artifacts.
 
+---
+
+# Phase 4C.4C.5D.1 — Cross-Source Website Evidence Architecture (ZERO GOOGLE NETWORK)
+
+## Overview & Business Invariant
+
+Phase 4C.4C.5D.1 establishes the candidate-first architecture for selective Google Places website verification of existing OpenStreetMap (OSM) candidates.
+
+**Core Invariant**:
+- A ClientForge Lead requires: **USEFUL EMAIL + CONFIRMED NO LIVE WEBSITE**.
+- Google Places does **NOT** provide email.
+- Therefore, Google alone can **NEVER** create a qualified Lead.
+- Google website absence (`websiteUri = null`) does **NOT** prove `TRUE_NO_SITE`.
+- Google website presence **DISQUALIFIES** an existing candidate if the website is verified live via canonical `hasLiveWebsite()`.
+
+**ZERO LIVE GOOGLE REQUESTS IN THIS PHASE.**
+- `GoogleCollectionConfig.enabled` = `false`
+- `GoogleCollectionConfig.activationMode` = `DISABLED`
+- `Google Places DataSource.enabled` = `false`
+
+## Target Architecture
+
+```text
+Existing OSM Candidate
+        ↓
+Eligibility Gate (useful non-generic email, no known website, valid status, sufficient identity)
+        ↓ YES
+Google Identity Resolution (Stage A Text Search ID-only query: "<companyName> <city> <country>")
+        ↓
+Match Confidence Evaluation (EXACT / STRONG / PROBABLE)
+        ↓ CONFIRMED (single winner; ambiguous or weak stops)
+Place Details Website Request Plan (Stage B bare ID: "places/{canonicalPlaceId}", mask: "id,name,websiteUri")
+        ↓
+Normalize websiteUri
+        ↓
+Canonical hasLiveWebsite() Verification
+       /        \
+     LIVE       NOT LIVE / NONE
+      ↓                ↓
+REJECTED          preserve candidate
+existing_website       ↓
+      ↓           NOT automatically
+sourceEvidence[]   TRUE_NO_SITE
+OSM + Google
+```
+
+## Architectural Components
+
+1. **Eligibility Evaluation (`evaluateGoogleWebsiteVerificationEligibility`)**:
+   - Requires valid non-generic email (rejects `gmail.com`, `yahoo.com`, etc. and generic prefixes `info@`, `contact@`, etc.).
+   - Rejects candidates that already have a known website or confirmed live website evidence.
+   - Rejects `QUALIFIED` leads from direct mutation.
+   - Enforces geographic anchors (city, address, postcode, or coordinates).
+
+2. **Stage A Identity Planning (`planGoogleIdentityResolutionSearch`)**:
+   - Deterministic query: `${companyName} ${city} ${country}`.
+   - Field mask: `places.id,places.name,nextPageToken` (bounded pageSize $\le 3$).
+   - Computes deterministic query fingerprint for cache lookup before any budget reservation.
+
+3. **Identity Resolution (`resolveCandidateGoogleIdentity`)**:
+   - Rejects `NAME_ONLY` and `COORDINATES_ONLY`.
+   - Confirms matches with `PHONE_EXACT`, `NAME_ADDRESS`, `NAME_POSTAL`, `NAME_GEO` ($\le 75m$), or unique exact `NAME_CITY`.
+   - Outcomes: `MATCH_CONFIRMED`, `MATCH_AMBIGUOUS`, `NO_MATCH`, `INSUFFICIENT_IDENTITY`.
+
+4. **Stage B Place Details Planning (`planGooglePlaceDetailsWebsiteRequest`)**:
+   - Canonical bare ID (e.g., `ChIJ...`).
+   - Minimal mask: `id,name,websiteUri`. Excludes photos, reviews, ratings, hours.
+   - Separate query fingerprint for Details cache.
+
+5. **Pure Decision Function (`decideWebsiteEvidenceOutcome`)**:
+   - `REJECT_EXISTING_WEBSITE`: `websiteUri` present and `hasLiveWebsite()` returns `live: true` (rejection reason: `existing_website`).
+   - `NO_GOOGLE_WEBSITE_EVIDENCE`: `websiteUri` is null. `shouldQualify = false`, `shouldReject = false`.
+   - `GOOGLE_WEBSITE_NOT_LIVE`: `websiteUri` present but verified 404/non-HTML. `shouldQualify = false`.
+   - `WEBSITE_VERIFICATION_INCONCLUSIVE`: network timeout / DNS / TLS error. `shouldQualify = false`.
+
+6. **Persistence Orchestrator (`persistWebsiteEvidenceOutcome`)**:
+   - Atomic `$transaction` with idempotency guards preventing duplicate `sourceEvidence` or duplicate rejection mutations.
+   - Updates `metadata.sourceEvidence` preserving full OSM and Google provenance.
+   - Never creates a Lead.
+
+7. **Dry-Run Engine (`executeCandidateVerificationDryRun`)**:
+   - Reads candidate by `candidateId`, inspects cache & budget, simulates Stage A & Stage B planning with 0 DB mutations and 0 network requests.
+
+8. **Future 5D.2 Bound**:
+   - Bounded to a single explicitly specified candidate (`candidateId`).
+   - Maximum $\le 2$ Google requests (1 identity search + 1 place details).
+
+
 
 

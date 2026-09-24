@@ -190,9 +190,10 @@ export async function runCanaryCollector(prisma, options = {}) {
       sourceId: source.id,
       locationId: dbLocation?.id || null,
       categoryId: dbCategory?.id || null,
-      status: 'IN_PROGRESS',
+      status: 'RUNNING',
       candidatesFound: 0,
-      leadsCreated: 0,
+      leadsAccepted: 0,
+      leadsInserted: 0,
       metadata: {
         canary: true,
         manual: true,
@@ -386,8 +387,10 @@ export async function runCanaryCollector(prisma, options = {}) {
     where: { id: collectorRun.id },
     data: {
       status: 'SUCCESS',
+      finishedAt: new Date(),
       candidatesFound: normalizedRecords.length,
-      leadsCreated: 0, // Stage A ID discovery never creates leads
+      leadsAccepted: 0,
+      leadsInserted: 0, // Stage A ID discovery never creates leads
       metadata: {
         canary: true,
         cacheHit,

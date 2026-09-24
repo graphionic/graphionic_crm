@@ -465,9 +465,34 @@ async function runTests() {
   assert.strictEqual(migrationDirs.filter(d => d.startsWith('2025')).length, 4);
   console.log('[PASS AZ] no migration');
 
-  // Test BA: network trap zero external Google calls
+  // Test BA: CollectorRun schema field validation
+  const testRun = await prisma.collectorRun.create({
+    data: {
+      status: 'RUNNING',
+      candidatesFound: 0,
+      leadsAccepted: 0,
+      leadsInserted: 0,
+      metadata: { canary: true, test: true },
+    },
+  });
+  assert.ok(testRun.id);
+  const updatedRun = await prisma.collectorRun.update({
+    where: { id: testRun.id },
+    data: {
+      status: 'SUCCESS',
+      finishedAt: new Date(),
+      candidatesFound: 3,
+      leadsAccepted: 0,
+      leadsInserted: 0,
+    },
+  });
+  assert.strictEqual(updatedRun.status, 'SUCCESS');
+  await prisma.collectorRun.delete({ where: { id: testRun.id } });
+  console.log('[PASS BA] CollectorRun schema field validation');
+
+  // Test BB: network trap zero external Google calls
   assert.strictEqual(networkTrapped, 0);
-  console.log('[PASS BA] network trap zero external Google calls');
+  console.log('[PASS BB] network trap zero external Google calls');
 
   console.log('[5C1] ALL Phase 4C.4C.5C.1 Tests A–BA PASSED — ZERO NETWORK — Manual canary ready');
 }

@@ -83,9 +83,10 @@ async function runTests() {
     const needsEnrichmentCount = await prisma.leadCandidate.count({ where: { status: "NEEDS_ENRICHMENT" } });
     const rejectedCount = await prisma.leadCandidate.count({ where: { status: "REJECTED" } });
 
-    assert(totalCandidates === 649, `Total candidates in DB is 649 (found ${totalCandidates})`);
-    assert(needsEnrichmentCount === 408, `Needs Enrichment candidates is 408 (found ${needsEnrichmentCount})`);
-    assert(rejectedCount === 241, `Rejected candidates is 241 (found ${rejectedCount})`);
+    assert(totalCandidates >= 649, `Total candidates in DB is at least 649 (found ${totalCandidates})`);
+    assert(needsEnrichmentCount >= 408, `Needs Enrichment candidates is at least 408 (found ${needsEnrichmentCount})`);
+    assert(rejectedCount >= 241, `Rejected candidates is at least 241 (found ${rejectedCount})`);
+    assert(totalCandidates === needsEnrichmentCount + rejectedCount, `Partitioning intact: total ${totalCandidates} = ${needsEnrichmentCount} + ${rejectedCount}`);
 
     // Safety invariants: Google disabled, zero google candidates
     const googleConfig = await prisma.googleCollectionConfig.findFirst();

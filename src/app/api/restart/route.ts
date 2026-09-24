@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { execSync } from "child_process";
 import { prisma } from "@/lib/prisma";
+import { requireActiveUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export async function POST() {
   try {
+    await requireActiveUser();
     let output = "";
     const isVercel = !!process.env.VERCEL;
 

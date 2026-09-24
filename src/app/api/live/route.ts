@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireActiveUser } from "@/lib/session";
 import fs from "fs";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
+    await requireActiveUser();
     // CRM counts
     const crmTotal = await prisma.lead.count();
     const crmWithEmail = await prisma.lead.count({ where: { email: { not: "" } } });

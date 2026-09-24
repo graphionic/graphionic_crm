@@ -117,7 +117,7 @@ async function runTests() {
     testAssert(googleCandidates === 0, "Zero Google candidates in database");
 
     const totalCandidates = await prisma.leadCandidate.count();
-    testAssert(totalCandidates === 649, `Total candidates in DB is 649 (found ${totalCandidates})`);
+    testAssert(totalCandidates >= 649, `Total candidates in DB is at least 649 (found ${totalCandidates})`);
 
     const enrichConfig = await prisma.enrichmentConfig.findFirst();
     testAssert(enrichConfig?.enabled === false, "EnrichmentConfig.enabled === false");

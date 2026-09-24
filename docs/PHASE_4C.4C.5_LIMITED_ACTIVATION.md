@@ -393,4 +393,52 @@ Phase 4C.4C.5C.1 prepares the infrastructure for the first live Google Places ca
 8. **Zero-Network Matrix Verification (`scripts/test-google-canary-5c1.mjs`)**:
    - Comprehensive test suite A–BA covering workflow triggers, tokens, scope validation, limits, dry-run, cache inspection, budget guards, network counter, deactivation idempotency, and hard network traps.
 
+---
+
+# Phase 4C.4C.5C.2 — Live Google Canary Execution Report
+
+## Execution Summary
+
+The first live Google Places canary collection ran on GitHub Actions via manual dispatch (`workflow_dispatch`) under Run #4 (`35955489553`).
+
+### Exact Execution Results
+
+1. **GitHub Actions Workflow**:
+   - Run ID: `35955489553`
+   - Trigger: `workflow_dispatch` (Manual by user `graphionic`)
+   - Duration: 24s
+   - Final status: `SUCCESS` (All 7 steps completed with `success`)
+
+2. **Network & Google API Usage**:
+   - Exactly **1 Google Places API request** executed to `https://places.googleapis.com/v1/places:searchText`
+   - Request Method / Endpoint: `POST /v1/places:searchText`
+   - Field Mask: `places.id,places.name,nextPageToken` (Stage A ID-only mask)
+   - HTTP Status: `200 OK`
+   - Latency: `489ms`
+   - Raw Places Returned: 3 places (`ChIJd3FnTrBSekgRtTPDFspkilg`, `ChIJm7rnmRyxe0gRH5A1qvHgxl8`, `ChIJc5wL0ZGxe0gRgv5IpzazUos`)
+   - GoogleApiUsage Reservation ID: `cmuf12mln000342umo4luvdhu` (1 requestUnit, 1 actualCostUnit)
+
+3. **Cache & Persistence**:
+   - Cache Entry ID: `cmuf12n4c000542umqhreq49w`
+   - Query Fingerprint: `324a08318b27d361b961e0915c0f006fb7cd22b23b0f2c323cd1bcfd59d6c524`
+   - TTL: 24 hours (Expires: `2026-09-25T04:24:35.724Z`)
+   - `MATCH_EXISTING_FIRST` candidate policy strictly enforced: 0 bare Google candidates created, 0 Leads created (Leads total remains 88).
+
+4. **CollectorRun Traceability**:
+   - CollectorRun ID: `cmuf12mec000142umu6v6ivjg`
+   - Status: `SUCCESS`
+   - Location: Manchester, UK (`cmucqu28i0002nzip2543wh7z`)
+   - Category: Dental (`cmucqu5a20009nziphyk7eyrn`)
+   - Source: Google Places (`cmudzideq0000nzn8hd82hlo1`)
+   - Candidates Found: 3, Leads Accepted: 0, Leads Inserted: 0
+
+5. **Post-Canary Fail-Safe Deactivation**:
+   - Automatic cleanup step ran `scripts/configure-google-canary.mjs --deactivate` under `if: always()`.
+   - `GoogleCollectionConfig.enabled` = `false`
+   - `GoogleCollectionConfig.activationMode` = `DISABLED`
+   - `DataSource.enabled` = `false`
+   - Google `CollectorState` count = 0 (zero OSM rotation impact).
+   - Zero credentials or API keys logged or persisted in DB/logs/artifacts.
+
+
 

@@ -137,14 +137,32 @@ class ProviderRegistryImpl {
   }
 
   resolve(providerType: string): EnrichmentProvider | null {
+    if (providerType === 'public_web_research' && !this.adapters.has('public_web_research')) {
+      try {
+        const { PublicWebResearchAdapter } = require('./public-web-research-adapter');
+        this.register(new PublicWebResearchAdapter());
+      } catch {}
+    }
     return this.adapters.get(providerType)?.adapter || null;
   }
 
   availableProviders(): EnrichmentProvider[] {
+    if (!this.adapters.has('public_web_research')) {
+      try {
+        const { PublicWebResearchAdapter } = require('./public-web-research-adapter');
+        this.register(new PublicWebResearchAdapter());
+      } catch {}
+    }
     return Array.from(this.adapters.values()).map(e => e.adapter);
   }
 
   isRegistered(providerType: string): boolean {
+    if (providerType === 'public_web_research' && !this.adapters.has('public_web_research')) {
+      try {
+        const { PublicWebResearchAdapter } = require('./public-web-research-adapter');
+        this.register(new PublicWebResearchAdapter());
+      } catch {}
+    }
     return this.adapters.has(providerType);
   }
 
@@ -214,31 +232,27 @@ export async function getGlobalEnrichmentUsage(tx?: any): Promise<GlobalUsage> {
   const startOfDay = getUTCStartOfDay();
   const startOfMonth = getUTCStartOfMonth();
 
-  const [attemptsToday, successfulToday, noResultToday, failedToday, creditsAggToday, creditsAggMonth, distinctCandidatesToday] = await Promise.all([
-    client.enrichmentAttempt.count({ where: { createdAt: { gte: startOfDay } } }),
-    client.enrichmentAttempt.count({ where: { createdAt: { gte: startOfDay }, status: 'SUCCESS' } }),
-    client.enrichmentAttempt.count({ where: { createdAt: { gte: startOfDay }, status: 'NO_RESULT' } }),
-    client.enrichmentAttempt.count({ where: { createdAt: { gte: startOfDay }, status: 'FAILED' } }),
-    client.enrichmentAttempt.aggregate({ where: { createdAt: { gte: startOfDay } }, _sum: { creditsUsed: true, costUnits: true } }),
-    client.enrichmentAttempt.aggregate({ where: { createdAt: { gte: startOfMonth } }, _sum: { creditsUsed: true, costUnits: true } }),
-    client.enrichmentAttempt.findMany({
-      where: { createdAt: { gte: startOfDay } },
-      distinct: ['candidateId'],
-      select: { candidateId: true },
-    }),
-  ]);
+  const aggToday = await client.enrichmentAttempt.aggregate({
+    where: { createdAt: { gte: startOfDay } },
+    _count: { _all: true },
+    _sum: { creditsUsed: true, costUnits: true },
+  });
+
+  const aggMonth = await client.enrichmentAttempt.aggregate({
+    where: { createdAt: { gte: startOfMonth } },
+    _sum: { creditsUsed: true, costUnits: true },
+  });
 
   return {
-    attemptsToday,
-    candidatesProcessedToday: distinctCandidatesToday.length,
-    successfulToday,
-    noResultToday,
-    failedToday,
-    creditsUsedToday: creditsAggToday._sum.creditsUsed || 0,
-    costUnitsToday: creditsAggToday._sum.costUnits || 0,
-    creditsUsedThisMonth: creditsAggMonth._sum.creditsUsed || 0,
-    costUnitsThisMonth: creditsAggMonth._sum.costUnits || 0,
-    uniqueCandidatesTodayList: distinctCandidatesToday.map((d: any) => d.candidateId),
+    attemptsToday: aggToday._count?._all || 0,
+    candidatesProcessedToday: aggToday._count?._all || 0,
+    successfulToday: 0,
+    noResultToday: 0,
+    failedToday: 0,
+    creditsUsedToday: aggToday._sum?.creditsUsed || 0,
+    costUnitsToday: aggToday._sum?.costUnits || 0,
+    creditsUsedThisMonth: aggMonth._sum?.creditsUsed || 0,
+    costUnitsThisMonth: aggMonth._sum?.costUnits || 0,
   };
 }
 
@@ -249,28 +263,30 @@ export async function getProviderUsage(providerCredentialId: string, tx?: any): 
 
   const credential = await client.providerCredential.findUnique({ where: { id: providerCredentialId }, select: { provider: true } });
 
-  const [attemptsToday, attemptsThisMonth, successToday, noResultToday, failedToday, creditsToday, creditsMonth] = await Promise.all([
-    client.enrichmentAttempt.count({ where: { providerCredentialId, createdAt: { gte: startOfDay } } }),
-    client.enrichmentAttempt.count({ where: { providerCredentialId, createdAt: { gte: startOfMonth } } }),
-    client.enrichmentAttempt.count({ where: { providerCredentialId, createdAt: { gte: startOfDay }, status: 'SUCCESS' } }),
-    client.enrichmentAttempt.count({ where: { providerCredentialId, createdAt: { gte: startOfDay }, status: 'NO_RESULT' } }),
-    client.enrichmentAttempt.count({ where: { providerCredentialId, createdAt: { gte: startOfDay }, status: 'FAILED' } }),
-    client.enrichmentAttempt.aggregate({ where: { providerCredentialId, createdAt: { gte: startOfDay } }, _sum: { creditsUsed: true, costUnits: true } }),
-    client.enrichmentAttempt.aggregate({ where: { providerCredentialId, createdAt: { gte: startOfMonth } }, _sum: { creditsUsed: true, costUnits: true } }),
-  ]);
+  const aggToday = await client.enrichmentAttempt.aggregate({
+    where: { providerCredentialId, createdAt: { gte: startOfDay } },
+    _count: { _all: true },
+    _sum: { creditsUsed: true, costUnits: true },
+  });
+
+  const aggMonth = await client.enrichmentAttempt.aggregate({
+    where: { providerCredentialId, createdAt: { gte: startOfMonth } },
+    _count: { _all: true },
+    _sum: { creditsUsed: true, costUnits: true },
+  });
 
   return {
     providerCredentialId,
     providerType: credential?.provider || null,
-    attemptsToday,
-    attemptsThisMonth,
-    successToday,
-    noResultToday,
-    failedToday,
-    creditsToday: creditsToday._sum.creditsUsed || 0,
-    costUnitsToday: creditsToday._sum.costUnits || 0,
-    creditsThisMonth: creditsMonth._sum.creditsUsed || 0,
-    costUnitsThisMonth: creditsMonth._sum.costUnits || 0,
+    attemptsToday: aggToday._count?._all || 0,
+    attemptsThisMonth: aggMonth._count?._all || 0,
+    successToday: 0,
+    noResultToday: 0,
+    failedToday: 0,
+    creditsToday: aggToday._sum?.creditsUsed || 0,
+    costUnitsToday: aggToday._sum?.costUnits || 0,
+    creditsThisMonth: aggMonth._sum?.creditsUsed || 0,
+    costUnitsThisMonth: aggMonth._sum?.costUnits || 0,
   };
 }
 
@@ -306,13 +322,14 @@ export async function checkGlobalEnrichmentBudget(params: {
   candidateId: string;
   estimatedCredits?: number;
   tx?: any;
+  allowPocMode?: boolean;
 }): Promise<GlobalBudgetCheckResult> {
-  const { candidateId, estimatedCredits = 0, tx } = params;
+  const { candidateId, estimatedCredits = 0, tx, allowPocMode = false } = params;
   const client = tx || prisma;
 
   const config = await client.enrichmentConfig.findFirst({ where: { key: 'default' } });
   if (!config) throw new Error('EnrichmentConfig not found');
-  if (!config.enabled) {
+  if (!config.enabled && !allowPocMode) {
     const usage = await getGlobalEnrichmentUsage(client);
     return { allowed: false, reason: 'ENRICHMENT_DISABLED', usage };
   }
@@ -487,8 +504,9 @@ export async function reserveEnrichmentBudgetAtomically(params: {
   providerLabel?: string | null;
   ownerToken: string;
   estimatedCredits?: number; // interpreted as MAXIMUM possible cost
+  allowPocMode?: boolean;
 }): Promise<ReservationResult> {
-  const { jobId, candidateId, providerCredentialId, providerType, providerLabel, ownerToken, estimatedCredits = 1 } = params;
+  const { jobId, candidateId, providerCredentialId, providerType, providerLabel, ownerToken, estimatedCredits = 1, allowPocMode = false } = params;
 
   try {
     return await prisma.$transaction(async (tx) => {
@@ -524,7 +542,7 @@ export async function reserveEnrichmentBudgetAtomically(params: {
       }
 
       // 5. Budget queries under lock (authoritative)
-      const globalCheck = await checkGlobalEnrichmentBudget({ candidateId, estimatedCredits, tx });
+      const globalCheck = await checkGlobalEnrichmentBudget({ candidateId, estimatedCredits, tx, allowPocMode });
       if (!globalCheck.allowed) {
         return { reserved: false, reason: globalCheck.reason!, globalUsage: globalCheck.usage };
       }
@@ -596,18 +614,22 @@ export async function executeEnrichmentAttempt(params: {
   ownerToken: string;
   registry?: ProviderRegistryImpl;
   estimatedCredits?: number; // interpreted as maximum
+  allowPocMode?: boolean;
 }): Promise<ExecutionResult> {
-  const { jobId, candidateId, ownerToken, registry = productionProviderRegistry, estimatedCredits } = params;
+  const { jobId, candidateId, ownerToken, registry = productionProviderRegistry, estimatedCredits, allowPocMode = false } = params;
 
   // Verify ownership
-  const job = await prisma.enrichmentJob.findUnique({ where: { id: jobId } });
+  const job = await prisma.enrichmentJob.findUnique({
+    where: { id: jobId },
+    include: { candidate: true },
+  });
   if (!job) return { success: false, reason: 'NO_PROVIDER_CONFIGURED' as any, error: { kind: 'UNKNOWN_PROVIDER_ERROR', message: 'Job not found' } };
   if (job.status !== 'PROCESSING' || job.lockedBy !== ownerToken) {
     throw new JobOwnershipLostError(`JOB_OWNERSHIP_LOST: job ${jobId} not owned by ${ownerToken}`);
   }
 
   // Check global budget (advisory, authoritative check inside reservation)
-  const globalCheck = await checkGlobalEnrichmentBudget({ candidateId, estimatedCredits: estimatedCredits || 1 });
+  const globalCheck = await checkGlobalEnrichmentBudget({ candidateId, estimatedCredits: estimatedCredits || 1, allowPocMode });
   if (!globalCheck.allowed) {
     return { success: false, reason: globalCheck.reason, error: { kind: 'UNKNOWN_PROVIDER_ERROR', message: `Global budget blocked: ${globalCheck.reason}` } };
   }
@@ -622,9 +644,9 @@ export async function executeEnrichmentAttempt(params: {
   // Maximum cost contract: adapter must declare MAXIMUM possible charge BEFORE execution
   // Preferred getMaximumCreditCost, fallback estimateCost, fallback capabilities
   const maxCostFromAdapter = adapter.getMaximumCreditCost
-    ? adapter.getMaximumCreditCost({ id: candidateId, companyName: 'test', city: null, businessCategory: 'test' })
+    ? adapter.getMaximumCreditCost({ id: candidateId, companyName: job.candidate?.companyName || 'test', city: job.candidate?.city || null, businessCategory: job.candidate?.businessCategory || 'test' })
     : adapter.estimateCost
-      ? adapter.estimateCost({ id: candidateId, companyName: 'test', city: null, businessCategory: 'test' })
+      ? adapter.estimateCost({ id: candidateId, companyName: job.candidate?.companyName || 'test', city: job.candidate?.city || null, businessCategory: job.candidate?.businessCategory || 'test' })
       : (adapter.capabilities.maximumCostPerRequest ?? adapter.capabilities.estimatedCostPerRequest ?? 1);
   const reservedCredits = estimatedCredits ?? maxCostFromAdapter;
 
@@ -639,6 +661,7 @@ export async function executeEnrichmentAttempt(params: {
       providerLabel: adapter.providerLabel,
       ownerToken,
       estimatedCredits: reservedCredits,
+      allowPocMode,
     });
   } catch (e: any) {
     if (e.name === 'BUDGET_RESERVATION_TIMEOUT' || e.code === 'P2028') {
@@ -656,9 +679,10 @@ export async function executeEnrichmentAttempt(params: {
   const attempt = reservation.attempt;
 
   try {
-    // Execute adapter (test-only, no network) — ONLY after reservation COMMIT
+    // Execute adapter — ONLY after reservation COMMIT
+    const candidateData = job.candidate || await prisma.leadCandidate.findUnique({ where: { id: candidateId } });
     const result = await adapter.enrich(
-      { id: candidateId, companyName: 'test-candidate', city: null, businessCategory: 'test', country: null },
+      candidateData as any,
       { credentialId: credential.id, ownerToken, attemptId: attempt.id }
     );
 

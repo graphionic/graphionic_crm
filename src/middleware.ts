@@ -15,6 +15,7 @@ export function middleware(req: NextRequest) {
 
   const isPublic =
     pathname.startsWith("/login") ||
+    pathname.startsWith("/design-system") ||
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/webhooks") ||
     pathname.startsWith("/api/live") ||

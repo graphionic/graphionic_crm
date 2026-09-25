@@ -629,13 +629,13 @@ export async function executeEnrichmentAttempt(params: {
   }
 
   // Check global budget (advisory, authoritative check inside reservation)
-  const globalCheck = await checkGlobalEnrichmentBudget({ candidateId, estimatedCredits: estimatedCredits || 1, allowPocMode });
+  const globalCheck = await checkGlobalEnrichmentBudget({ candidateId, estimatedCredits: estimatedCredits ?? 0, allowPocMode });
   if (!globalCheck.allowed) {
     return { success: false, reason: globalCheck.reason, error: { kind: 'UNKNOWN_PROVIDER_ERROR', message: `Global budget blocked: ${globalCheck.reason}` } };
   }
 
   // Select provider (advisory)
-  const selection = await selectEnrichmentProvider({ candidateId, estimatedCredits: estimatedCredits || 1, registry });
+  const selection = await selectEnrichmentProvider({ candidateId, estimatedCredits: estimatedCredits ?? 0, registry });
   if (!selection.selected) {
     return { success: false, reason: selection.reason, error: { kind: 'UNKNOWN_PROVIDER_ERROR', message: `No provider: ${selection.reason}` } };
   }

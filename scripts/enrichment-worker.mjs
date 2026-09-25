@@ -1,217 +1,533 @@
 #!/usr/bin/env node
+
 /**
- * ClientForge CRM — Phase 4C.3A.1 Enrichment Worker Skeleton Hardened
- * Provider-agnostic, fail-closed, no external calls
- * Single canonical claim implementation, ownership token via lockedBy
- *
- * Architecture:
- * GitHub Actions (future) -> Node 20 -> enrichment-worker.mjs -> Prisma -> Neon
- *
- * Default: enrichmentEnabled = false → exit 0 safely, no provider calls
- * Even if enabled without real provider → fail closed BEFORE claiming, no mock auto-use
- *
- * Worker ID uniqueness: enrichment-${GITHUB_RUN_ID || 'local'}-${GITHUB_RUN_ATTEMPT || '0'}-${pid}-${timestamp}-${randomUUID}
- * Ensures lockedBy serves as unique execution-scoped ownership token
+ * CLIENTFORGE CRM — PRODUCTION AUTOMATED ENRICHMENT WORKER
+ * 
+ * Pipeline:
+ * LeadCandidate (NEEDS_ENRICHMENT) → scheduled worker → public_web_research
+ * → website & email verification → QUALIFIED when warranted → automatic Lead creation
+ * 
+ * Invariants & Guarantees:
+ * 1. Strictly bounded batch size (default 10 candidates per run, configurable in EnrichmentConfig).
+ * 2. Fair candidate selection: unattempted candidates prioritized before cooldown retries.
+ * 3. Zero paid APIs, zero Google Places API calls, zero browser automation.
+ * 4. Qualification invariant: useful business email + confirmed absence of live website = QUALIFIED.
+ * 5. Live website discovered → Candidate marked REJECTED (existing_website), never promoted to Lead.
+ * 6. Emma Clinic protection: email domain actively verified for absence of live website.
+ * 7. Deduplication: prevents duplicate CRM Lead creation for re-encountered businesses.
+ * 8. Fail-closed: refuses to execute if global enrichment is disabled in EnrichmentConfig.
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, EnrichmentJobStatus } from '@prisma/client';
 import crypto from 'node:crypto';
+import { 
+  productionProviderRegistry, 
+  executeEnrichmentAttempt 
+} from '../src/lib/enrichment-providers.ts';
+import { 
+  PublicWebResearchAdapter,
+  registerPublicWebResearchAdapter 
+} from '../src/lib/public-web-research-adapter.ts';
+import { 
+  getEnrichmentConfig, 
+  releaseExpiredEnrichmentLocks, 
+  claimNextEnrichmentJobsSafe, 
+  handleJobRetryOrExhaustion 
+} from '../src/lib/enrichment.ts';
 
 const prisma = new PrismaClient();
+
+// Ensure public_web_research adapter is registered
+registerPublicWebResearchAdapter(productionProviderRegistry);
 
 function generateWorkerId() {
   const runId = process.env.GITHUB_RUN_ID || 'local';
   const attempt = process.env.GITHUB_RUN_ATTEMPT || '0';
   const pid = process.pid;
   const ts = Date.now();
-  const uuid = crypto.randomUUID();
+  const uuid = crypto.randomUUID().slice(0, 8);
   return `enrichment-${runId}-${attempt}-${pid}-${ts}-${uuid}`;
 }
 
 const WORKER_ID = generateWorkerId();
 
-async function getEnrichmentConfig() {
-  let cfg = await prisma.enrichmentConfig.findFirst({ where: { key: 'default' } });
-  if (!cfg) {
-    cfg = await prisma.enrichmentConfig.create({
-      data: {
-        key: 'default',
-        enabled: false,
-        dailyCandidateLimit: 100,
-        batchSize: 25,
-        maxAttemptsPerCandidate: 3,
-        retryCooldownMinutes: 60,
-        jobLockDurationMinutes: 10,
-      },
-    });
-  }
-  return cfg;
-}
-
-async function hasRealProvider() {
-  // Phase 4C.3A.1: No real provider exists yet
-  // In future, check ProviderCredential count for enrichment providers with enabled=true
-  // For now, always return false to enforce fail-closed
-  // This check happens BEFORE claiming to avoid PROCESSING->PENDING churn
-  const count = await prisma.providerCredential.count({
-    where: {
-      enabled: true,
-      provider: { in: ['hunter', 'dropcontact', 'apollo', 'snov', 'enrichment'] },
-    },
-  });
-  // Even if count >0, in 4C.3A.1 we still have no real implementation, so fail closed
-  // The count check is for future 4C.3B, but we log it
-  return false; // No real provider in 4C.3A.1
-}
-
-async function releaseExpiredLocks() {
+/**
+ * Select and queue candidates with fair scheduling:
+ * 1. Candidates with enrichmentAttempts === 0 (never attempted) ordered by createdAt ASC.
+ * 2. If needed, retried candidates with enrichmentAttempts < maxAttempts AND cooldown elapsed.
+ */
+async function selectAndQueueEligibleCandidates(limit, config) {
   const now = new Date();
-  const expired = await prisma.enrichmentJob.findMany({
+  const cooldownMinutes = config.retryCooldownMinutes || 60;
+  const cooldownThreshold = new Date(now.getTime() - cooldownMinutes * 60 * 1000);
+  const maxAttempts = config.maxAttemptsPerCandidate || 3;
+
+  // 1. First priority: Fresh unattempted candidates with no existing job
+  const freshCandidates = await prisma.leadCandidate.findMany({
     where: {
-      status: 'PROCESSING',
-      lockExpiresAt: { lt: now },
+      status: 'NEEDS_ENRICHMENT',
+      qualifiedLeadId: null,
+      enrichmentJob: null,
+      enrichmentAttempts: 0,
+      OR: [{ email: null }, { email: '' }],
+      AND: [{ OR: [{ website: null }, { website: '' }] }],
     },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    take: limit,
   });
 
-  let released = 0;
-  for (const job of expired) {
-    const existingMeta = job.metadata || {};
-    await prisma.enrichmentJob.update({
-      where: { id: job.id },
-      data: {
-        status: 'PENDING',
-        lockedAt: null,
-        lockedBy: null,
-        lockExpiresAt: null,
-        metadata: {
-          ...existingMeta,
-          lastLockRecoveryAt: now.toISOString(),
-          lastLockedBy: job.lockedBy,
-          recoveryReason: 'lock_expired',
+  const queuedCandidateIds = [];
+
+  for (const cand of freshCandidates) {
+    try {
+      await prisma.enrichmentJob.create({
+        data: {
+          candidateId: cand.id,
+          status: EnrichmentJobStatus.PENDING,
+          priority: 50,
+          attemptCount: 0,
+          maxAttempts,
+          nextAttemptAt: now,
         },
-      },
-    });
-    released++;
+      });
+      queuedCandidateIds.push(cand.id);
+    } catch (e) {
+      if (e.code === 'P2002') continue; // race condition handled
+      throw e;
+    }
   }
-  console.log(`[enrichment] Released ${released} expired locks`);
-  return released;
+
+  // 2. Second priority: If more jobs needed to reach limit, check for cooled-down retries
+  const remainingNeeded = limit - queuedCandidateIds.length;
+  if (remainingNeeded > 0) {
+    const retryableCandidates = await prisma.leadCandidate.findMany({
+      where: {
+        status: 'NEEDS_ENRICHMENT',
+        qualifiedLeadId: null,
+        enrichmentJob: null,
+        enrichmentAttempts: { gt: 0, lt: maxAttempts },
+        lastEnrichmentAt: { lte: cooldownThreshold },
+        OR: [{ email: null }, { email: '' }],
+        AND: [{ OR: [{ website: null }, { website: '' }] }],
+      },
+      orderBy: [{ enrichmentAttempts: 'asc' }, { lastEnrichmentAt: 'asc' }, { createdAt: 'asc' }],
+      take: remainingNeeded,
+    });
+
+    for (const cand of retryableCandidates) {
+      try {
+        await prisma.enrichmentJob.create({
+          data: {
+            candidateId: cand.id,
+            status: EnrichmentJobStatus.PENDING,
+            priority: 40,
+            attemptCount: cand.enrichmentAttempts,
+            maxAttempts,
+            nextAttemptAt: now,
+          },
+        });
+        queuedCandidateIds.push(cand.id);
+      } catch (e) {
+        if (e.code === 'P2002') continue;
+        throw e;
+      }
+    }
+  }
+
+  return queuedCandidateIds.length;
 }
 
-// Canonical claim implementation — single source of truth, matches src/lib/enrichment.ts claimNextEnrichmentJobsSafe
-async function claimNextJobs(workerId, limit) {
-  const config = await prisma.enrichmentConfig.findFirst({ where: { key: 'default' } });
-  const lockDurationMs = (config?.jobLockDurationMinutes || 10) * 60 * 1000;
-  const now = new Date();
-  const lockExpiresAt = new Date(now.getTime() + lockDurationMs);
-
-  return await prisma.$transaction(async (tx) => {
-    const pendingJobs = await tx.enrichmentJob.findMany({
-      where: {
-        status: 'PENDING',
-        OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
-        AND: [{ OR: [{ lockedAt: null }, { lockExpiresAt: { lt: now } }] }],
-      },
-      orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
-      take: limit,
-    });
-
-    if (pendingJobs.length === 0) return [];
-
-    const ids = pendingJobs.map(j => j.id);
-
-    const updated = await tx.enrichmentJob.updateMany({
-      where: {
-        id: { in: ids },
-        status: 'PENDING',
-        OR: [{ lockedAt: null }, { lockExpiresAt: { lt: now } }],
-      },
-      data: {
-        status: 'PROCESSING',
-        lockedAt: now,
-        lockedBy: workerId,
-        lockExpiresAt,
-      },
-    });
-
-    if (updated.count === 0) return [];
-
-    const claimed = await tx.enrichmentJob.findMany({
-      where: { id: { in: ids }, lockedBy: workerId, status: 'PROCESSING' },
-    });
-    return claimed;
-  });
-}
-
-async function main() {
-  console.log(`[enrichment] Starting Phase 4C.3A.1 worker — ID ${WORKER_ID}`);
-  console.log(`[enrichment] Time: ${new Date().toISOString()}`);
-  console.log(`[enrichment] Worker ID format: enrichment-\${GITHUB_RUN_ID}-\${GITHUB_RUN_ATTEMPT}-\${pid}-\${timestamp}-\${uuid} — unique per execution, serves as ownership token via lockedBy`);
+async function runEnrichmentWorker(options = {}) {
+  const startTime = Date.now();
+  console.log('================================================================');
+  console.log('CLIENTFORGE PRODUCTION AUTOMATED ENRICHMENT WORKER');
+  console.log('================================================================');
+  console.log(`Worker ID: ${WORKER_ID}`);
+  console.log(`Timestamp: ${new Date().toISOString()}`);
 
   const config = await getEnrichmentConfig();
-  console.log(`[enrichment] Config: enabled=${config.enabled} batchSize=${config.batchSize} dailyLimit=${config.dailyCandidateLimit} maxAttempts=${config.maxAttemptsPerCandidate} retryCooldown=${config.retryCooldownMinutes}m lockDuration=${config.jobLockDurationMinutes}m`);
+  const batchSize = options.batchSize || config.batchSize || 10;
 
-  // Critical: default enrichment MUST be disabled → fail closed BEFORE any claim
-  if (!config.enabled) {
-    console.log('[enrichment] Enrichment disabled — exiting safely.');
-    console.log('[enrichment] No jobs claimed, no attempts created, no candidates modified.');
-    await prisma.$disconnect();
-    process.exit(0);
+  console.log(`Configuration:`);
+  console.log(` - Global Enabled: ${config.enabled}`);
+  console.log(` - Batch Size: ${batchSize} candidates/run`);
+  console.log(` - Max Attempts: ${config.maxAttemptsPerCandidate}`);
+  console.log(` - Retry Cooldown: ${config.retryCooldownMinutes} minutes`);
+  console.log(` - Daily Limit: ${config.dailyCandidateLimit}`);
+
+  // Safety gate: refuse to execute if globally disabled
+  if (!config.enabled && !options.allowPocOverride) {
+    console.log('\n[SAFETY GATE] Global enrichment is DISABLED in EnrichmentConfig (enabled=false).');
+    console.log('[SAFETY GATE] Worker exiting safely with code 0 — 0 candidates modified.');
+    return {
+      status: 'DISABLED',
+      executed: false,
+      reason: 'ENRICHMENT_DISABLED',
+      selected: 0,
+      attempted: 0,
+      durationMs: Date.now() - startTime,
+    };
   }
 
-  // Fail-closed BEFORE claiming: check real provider availability
-  const realProviderAvailable = await hasRealProvider();
-  if (!realProviderAvailable) {
-    console.log('[enrichment] No real enrichment provider configured in Phase 4C.3A.1 — failing closed BEFORE claiming');
-    console.log('[enrichment] No jobs claimed, no external calls, no credits spent, exiting safely');
-    await prisma.$disconnect();
-    process.exit(0);
+  // Safety check: ensure only public_web_research is active
+  const googleConfig = await prisma.googleCollectionConfig.findFirst({ where: { key: 'default' } });
+  if (googleConfig?.enabled) {
+    console.error('\n[SAFETY VIOLATION] Google Places is unexpectedly enabled — failing closed.');
+    process.exit(1);
   }
 
-  console.log('[enrichment] Enrichment enabled and provider available — checking for jobs');
-
-  // Release expired locks only after confirming provider available (or before, but after enabled check)
-  await releaseExpiredLocks();
-
-  // Claim jobs using canonical implementation
-  const claimed = await claimNextJobs(WORKER_ID, config.batchSize);
-
-  console.log(`[enrichment] Claimed ${claimed.length} jobs with ownership token ${WORKER_ID}`);
-
-  if (claimed.length === 0) {
-    console.log('[enrichment] No pending jobs — exiting');
-    await prisma.$disconnect();
-    process.exit(0);
-  }
-
-  // In Phase 4C.3A.1, no real provider implementation exists even after hasRealProvider check (returns false above, so we never reach here)
-  // This code path is for future 4C.3B when real provider exists
-  console.log('[enrichment] Processing claimed jobs (future 4C.3B logic)');
-
-  // For now, release back to PENDING (should not happen because hasRealProvider returns false)
-  for (const job of claimed) {
-    await prisma.enrichmentJob.updateMany({
-      where: { id: job.id, lockedBy: WORKER_ID, status: 'PROCESSING' },
+  // Ensure public_web_research provider credential is ready
+  let publicCred = await prisma.providerCredential.findFirst({
+    where: { provider: 'public_web_research' },
+  });
+  if (!publicCred) {
+    publicCred = await prisma.providerCredential.create({
       data: {
-        status: 'PENDING',
-        lockedAt: null,
-        lockedBy: null,
-        lockExpiresAt: null,
-        metadata: {
-          ...(job.metadata || {}),
-          lastFailClosedAt: new Date().toISOString(),
-          failClosedReason: 'no_real_provider_in_4c3a_1',
-        },
+        provider: 'public_web_research',
+        label: 'Public Web Research (Zero-Cost)',
+        encryptedValue: 'PUBLIC_RESEARCH_NO_SECRET',
+        keyHint: 'PUBLIC',
+        enabled: true,
+        status: 'connected',
+        priority: 100,
       },
     });
   }
 
-  console.log(`[enrichment] Released ${claimed.length} jobs back to PENDING — exiting safely`);
-  await prisma.$disconnect();
-  process.exit(0);
+  // 1. Release expired locks from past crashed runs
+  const recoveredLocks = await releaseExpiredEnrichmentLocks();
+  if (recoveredLocks.released > 0) {
+    console.log(`\nRecovered ${recoveredLocks.released} expired job locks.`);
+  }
+
+  // 2. Queue fresh candidates to fill batch
+  const queuedCount = await selectAndQueueEligibleCandidates(batchSize, config);
+  console.log(`\nCandidate Queueing: seeded ${queuedCount} ready candidate jobs.`);
+
+  // 3. Atomically claim batch of jobs
+  const claimedJobs = await claimNextEnrichmentJobsSafe(WORKER_ID, batchSize);
+  console.log(`Claimed ${claimedJobs.length} jobs with worker token ${WORKER_ID}`);
+
+  if (claimedJobs.length === 0) {
+    console.log('\nNo pending eligible enrichment jobs found — exiting safely.');
+    return {
+      status: 'IDLE',
+      executed: true,
+      selected: 0,
+      attempted: 0,
+      durationMs: Date.now() - startTime,
+    };
+  }
+
+  const adapter = productionProviderRegistry.resolve('public_web_research') || new PublicWebResearchAdapter();
+
+  const stats = {
+    selected: claimedJobs.length,
+    attempted: 0,
+    identityMatched: 0,
+    emailsDiscovered: 0,
+    acceptedBusinessEmails: 0,
+    liveWebsitesDiscovered: 0,
+    confirmedNoSiteCount: 0,
+    qualified: 0,
+    leadsCreated: 0,
+    duplicatePrevented: 0,
+    unresolved: 0,
+    rejected: 0,
+    errors: 0,
+    failureReasons: {},
+    processed: [],
+  };
+
+  // 4. Process each claimed candidate sequentially to respect database connection limits
+  for (let i = 0; i < claimedJobs.length; i++) {
+    const job = claimedJobs[i];
+    const candidate = await prisma.leadCandidate.findUnique({
+      where: { id: job.candidateId },
+      include: { discoverySource: true },
+    });
+
+    if (!candidate) {
+      console.log(`[${i + 1}/${claimedJobs.length}] Candidate ${job.candidateId} not found, skipping.`);
+      continue;
+    }
+
+    console.log(`\n--- [${i + 1}/${claimedJobs.length}] Processing "${candidate.companyName}" (${candidate.city || 'Unknown'}, ${candidate.country || 'Unknown'}) ---`);
+    stats.attempted++;
+
+    try {
+      const execResult = await executeEnrichmentAttempt({
+        jobId: job.id,
+        candidateId: candidate.id,
+        ownerToken: WORKER_ID,
+        estimatedCredits: 0,
+        allowPocMode: options.allowPocOverride || config.enabled,
+      });
+
+      if (!execResult.result) {
+        console.log(`  ! Execution blocked: ${execResult.reason || execResult.error?.message}`);
+        stats.unresolved++;
+        continue;
+      }
+
+      const result = execResult.result;
+      const outcomeReason = result.metadata?.reason || result.failureReason || 'UNKNOWN';
+      stats.failureReasons[outcomeReason] = (stats.failureReasons[outcomeReason] || 0) + 1;
+
+      if (result.metadata?.source) {
+        stats.identityMatched++;
+      }
+
+      if (result.email) {
+        stats.emailsDiscovered++;
+      }
+
+      // -----------------------------------------------------------
+      // Branch 1: Live website discovered -> Disqualify candidate
+      // -----------------------------------------------------------
+      if (result.metadata?.isLiveWebsite || result.metadata?.reason === 'LIVE_WEBSITE_FOUND' || result.metadata?.reason === 'EMAIL_DOMAIN_HAS_LIVE_SITE' || result.website) {
+        stats.liveWebsitesDiscovered++;
+        stats.rejected++;
+        const discoveredSite = result.website || `https://${result.domain}`;
+        console.log(`  ✗ DISQUALIFIED (Live Site Found): ${candidate.companyName} → ${discoveredSite}`);
+
+        await prisma.leadCandidate.update({
+          where: { id: candidate.id },
+          data: {
+            status: 'REJECTED',
+            rejectionReason: 'existing_website',
+            lastEnrichmentAt: new Date(),
+            enrichmentAttempts: { increment: 1 },
+            metadata: {
+              ...(candidate.metadata || {}),
+              enrichmentOutcome: 'REJECTED_EXISTING_WEBSITE',
+              discoveredWebsite: discoveredSite,
+              enrichmentAttemptId: execResult.attempt?.id,
+              enrichedAt: new Date().toISOString(),
+              evidence: result.metadata,
+            },
+          },
+        });
+
+        await prisma.enrichmentJob.update({
+          where: { id: job.id },
+          data: {
+            status: EnrichmentJobStatus.COMPLETED,
+            completedAt: new Date(),
+            lockedAt: null,
+            lockedBy: null,
+            lockExpiresAt: null,
+          },
+        });
+
+        stats.processed.push({
+          candidateId: candidate.id,
+          companyName: candidate.companyName,
+          outcome: 'REJECTED_EXISTING_WEBSITE',
+          website: discoveredSite,
+        });
+
+      // -----------------------------------------------------------
+      // Branch 2: Confirmed NO_SITE + Verified Business Email -> Qualify & Create Lead
+      // -----------------------------------------------------------
+      } else if (result.metadata?.confirmedNoSite === true && result.email) {
+        stats.confirmedNoSiteCount++;
+        stats.acceptedBusinessEmails++;
+        console.log(`  ✓ QUALIFIED (True NO_SITE + Email): ${candidate.companyName} → ${result.email}`);
+
+        // Deduplication check: Lead with same email OR same companyName+city
+        const existingLead = await prisma.lead.findFirst({
+          where: {
+            OR: [
+              { email: { equals: result.email, mode: 'insensitive' } },
+              {
+                AND: [
+                  { companyName: { equals: candidate.companyName, mode: 'insensitive' } },
+                  { city: { equals: candidate.city || '', mode: 'insensitive' } },
+                ],
+              },
+            ],
+          },
+        });
+
+        if (existingLead) {
+          stats.duplicatePrevented++;
+          console.log(`  Deduplication: Lead already exists (${existingLead.id}) — linking candidate.`);
+
+          await prisma.leadCandidate.update({
+            where: { id: candidate.id },
+            data: {
+              status: 'REJECTED',
+              rejectionReason: 'duplicate_lead',
+              qualifiedLeadId: existingLead.id,
+              lastEnrichmentAt: new Date(),
+              enrichmentAttempts: { increment: 1 },
+            },
+          });
+
+          await prisma.enrichmentJob.update({
+            where: { id: job.id },
+            data: {
+              status: EnrichmentJobStatus.COMPLETED,
+              completedAt: new Date(),
+              lockedAt: null,
+              lockedBy: null,
+              lockExpiresAt: null,
+            },
+          });
+
+          stats.processed.push({
+            candidateId: candidate.id,
+            companyName: candidate.companyName,
+            outcome: 'DUPLICATE_LINKED',
+            leadId: existingLead.id,
+          });
+        } else {
+          stats.qualified++;
+          stats.leadsCreated++;
+
+          // Automatic Lead creation into CRM /leads
+          const newLead = await prisma.lead.create({
+            data: {
+              companyName: candidate.companyName,
+              businessCategory: candidate.businessCategory || 'Medical',
+              address: candidate.address || candidate.city,
+              city: candidate.city,
+              country: candidate.country || 'UK',
+              postcode: candidate.postcode,
+              phone: candidate.phone,
+              email: result.email,
+              website: null, // Confirmed NO_SITE
+              websiteStatus: 'none',
+              segment: 'NO_SITE',
+              source: candidate.discoverySource?.name || 'public_web_research',
+              status: 'NEW',
+              score: 0,
+            },
+          });
+
+          console.log(`  ★ AUTOMATIC LEAD CREATED: ${candidate.companyName} (Lead ID: ${newLead.id})`);
+
+          await prisma.leadCandidate.update({
+            where: { id: candidate.id },
+            data: {
+              status: 'QUALIFIED',
+              email: result.email,
+              website: null,
+              qualifiedLeadId: newLead.id,
+              lastEnrichmentAt: new Date(),
+              enrichmentAttempts: { increment: 1 },
+              metadata: {
+                ...(candidate.metadata || {}),
+                enrichmentOutcome: 'QUALIFIED_LEAD_CREATED',
+                leadId: newLead.id,
+                enrichedAt: new Date().toISOString(),
+                evidence: result.metadata,
+              },
+            },
+          });
+
+          await prisma.enrichmentJob.update({
+            where: { id: job.id },
+            data: {
+              status: EnrichmentJobStatus.COMPLETED,
+              completedAt: new Date(),
+              lockedAt: null,
+              lockedBy: null,
+              lockExpiresAt: null,
+            },
+          });
+
+          stats.processed.push({
+            candidateId: candidate.id,
+            companyName: candidate.companyName,
+            outcome: 'QUALIFIED_LEAD_CREATED',
+            email: result.email,
+            leadId: newLead.id,
+          });
+        }
+
+      // -----------------------------------------------------------
+      // Branch 3: Unresolved (NO_RESULT) -> Cooldown & Future Retry
+      // -----------------------------------------------------------
+      } else {
+        stats.unresolved++;
+        console.log(`  - UNRESOLVED: ${candidate.companyName} (${outcomeReason})`);
+
+        await prisma.leadCandidate.update({
+          where: { id: candidate.id },
+          data: {
+            status: 'NEEDS_ENRICHMENT',
+            lastEnrichmentAt: new Date(),
+            enrichmentAttempts: { increment: 1 },
+          },
+        });
+
+        await handleJobRetryOrExhaustion(job.id, WORKER_ID);
+
+        stats.processed.push({
+          candidateId: candidate.id,
+          companyName: candidate.companyName,
+          outcome: 'UNRESOLVED',
+          reason: outcomeReason,
+        });
+      }
+
+    } catch (err) {
+      console.error(`  ! Error processing candidate ${candidate.companyName}:`, err);
+      stats.errors++;
+      try {
+        await handleJobRetryOrExhaustion(job.id, WORKER_ID);
+      } catch {}
+    }
+  }
+
+  const durationMs = Date.now() - startTime;
+  console.log('\n================================================================');
+  console.log('PRODUCTION ENRICHMENT RUN SUMMARY');
+  console.log('================================================================');
+  console.log(JSON.stringify({
+    workerId: WORKER_ID,
+    batchSize,
+    selected: stats.selected,
+    attempted: stats.attempted,
+    identityMatched: stats.identityMatched,
+    emailsDiscovered: stats.emailsDiscovered,
+    acceptedBusinessEmails: stats.acceptedBusinessEmails,
+    liveWebsitesDiscovered: stats.liveWebsitesDiscovered,
+    confirmedNoSiteCount: stats.confirmedNoSiteCount,
+    qualified: stats.qualified,
+    leadsCreated: stats.leadsCreated,
+    duplicatePrevented: stats.duplicatePrevented,
+    unresolved: stats.unresolved,
+    rejected: stats.rejected,
+    errors: stats.errors,
+    failureReasons: stats.failureReasons,
+    durationMs,
+  }, null, 2));
+
+  return {
+    status: 'COMPLETED',
+    executed: true,
+    stats,
+    durationMs,
+  };
 }
 
-main().catch(async (e) => {
-  console.error('[enrichment] Fatal error:', e);
-  try { await prisma.$disconnect(); } catch {}
-  process.exit(1);
-});
+export { runEnrichmentWorker, selectAndQueueEligibleCandidates };
+
+// Direct execution from CLI / GitHub Actions
+if (import.meta.url === `file://${process.argv[1]}`) {
+  runEnrichmentWorker()
+    .then((result) => {
+      console.log('\nEnrichment worker finished successfully.');
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error('\nFatal error in enrichment worker:', err);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}

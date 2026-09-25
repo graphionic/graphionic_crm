@@ -1,0 +1,60 @@
+# ClientForge CRM — Production Automated Candidate Enrichment
+# Worker: Node 20 + Prisma + Public Web Research
+# Schedule: hourly (24 runs/day, 10 candidates/run = 240 attempts/day)
+# Independent pipeline: consumes NEEDS_ENRICHMENT candidates asynchronously
+
+name: Candidate Enrichment Worker
+
+on:
+  schedule:
+    - cron: '30 * * * *'  # Runs at minute 30 of every hour (offset from collection at :00)
+  workflow_dispatch: {}     # Manual trigger support
+
+concurrency:
+  group: clientforge-enrichment
+  cancel-in-progress: false
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci --ignore-scripts
+          ./node_modules/.bin/prisma generate
+
+      - name: Run production enrichment worker
+        run: |
+          echo "[enrichment] Starting Production Candidate Enrichment Worker"
+          echo "[enrichment] GitHub Run ID: $GITHUB_RUN_ID"
+          echo "[enrichment] GitHub Run Attempt: $GITHUB_RUN_ATTEMPT"
+          npx tsx scripts/enrichment-worker.mjs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Candidate Enrichment Worker Run" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run ID**: $GITHUB_RUN_ID" >> $GITHUB_STEP_SUMMARY
+          echo "- **Attempt**: $GITHUB_RUN_ATTEMPT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Provider**: `public_web_research` (Zero-Cost)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check execution logs above for candidate qualification and CRM Lead creation." >> $GITHUB_STEP_SUMMARY

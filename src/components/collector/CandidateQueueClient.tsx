@@ -216,32 +216,56 @@ export default function CandidateQueueClient({
         </div>
       </div>
 
-      {/* Filter Experience */}
-      <div style={{ background: "white", border: "1px solid #E5E3DF", borderRadius: 12, padding: 14, display: "grid", gap: 10 }}>
-        {/* Row 1: Search */}
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <input
-            value={candidateSearch}
-            onChange={e => setCandidateSearch(e.target.value)}
-            placeholder="Search company name, email, phone, city, external ID..."
-            style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 13, background: "#FAF9F7" }}
-          />
-          {hasActiveFilters && (
-            <button
-              onClick={clearAllFilters}
-              style={{ padding: "9px 14px", borderRadius: 8, border: "1px solid #E5E3DF", background: "#FAF9F7", fontSize: 12, fontWeight: 500, cursor: "pointer", color: "#EC6262", whiteSpace: "nowrap" }}
-            >
-              Clear filters
-            </button>
-          )}
-        </div>
+      {/* Compact Filter Toolbar */}
+      <div className="candidate-filter-toolbar-card" style={{ background: "#FFFFFF", border: "1px solid #E5E3DF", borderRadius: 8, padding: "8px 12px" }}>
+        <div className="candidate-filter-toolbar" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {/* Search */}
+          <div className="candidate-filter-search" style={{ flex: "1 1 280px", minWidth: 280, maxWidth: 420, position: "relative" }}>
+            <svg style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 15, height: 15, color: "#9299A8", pointerEvents: "none" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              value={candidateSearch}
+              onChange={e => setCandidateSearch(e.target.value)}
+              placeholder="Search company name, email, phone, city, external ID..."
+              style={{
+                width: "100%",
+                height: 42,
+                padding: "0 12px 0 36px",
+                borderRadius: 8,
+                border: "1px solid #E5E3DF",
+                fontSize: 14,
+                color: "#151927",
+                background: "#FAF9F7",
+                outline: "none",
+                fontFamily: "'Poppins', system-ui, sans-serif",
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
 
-        {/* Row 2: Facet Selects */}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          {/* Status */}
           <select
             value={candidateStatus}
             onChange={e => { setCandidateStatus(e.target.value); setCandidatePage(1); }}
-            style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 12, background: "white", minWidth: 140 }}
+            className="candidate-filter-ctrl candidate-ctrl-status"
+            style={{
+              height: 42,
+              width: 160,
+              minWidth: 150,
+              maxWidth: 170,
+              flex: "0 1 auto",
+              padding: "0 10px",
+              borderRadius: 8,
+              border: "1px solid #E5E3DF",
+              fontSize: 14,
+              color: "#151927",
+              background: "#FFFFFF",
+              outline: "none",
+              cursor: "pointer",
+              fontFamily: "'Poppins', system-ui, sans-serif",
+              boxSizing: "border-box",
+            }}
           >
             <option value="All">All Statuses</option>
             <option value="NEEDS_ENRICHMENT">Needs Enrichment</option>
@@ -251,10 +275,28 @@ export default function CandidateQueueClient({
             <option value="DISCOVERED">Discovered</option>
           </select>
 
+          {/* Category */}
           <select
             value={candidateCategory}
             onChange={e => { setCandidateCategory(e.target.value); setCandidatePage(1); }}
-            style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 12, background: "white", minWidth: 130 }}
+            className="candidate-filter-ctrl candidate-ctrl-category"
+            style={{
+              height: 42,
+              width: 170,
+              minWidth: 160,
+              maxWidth: 180,
+              flex: "0 1 auto",
+              padding: "0 10px",
+              borderRadius: 8,
+              border: "1px solid #E5E3DF",
+              fontSize: 14,
+              color: "#151927",
+              background: "#FFFFFF",
+              outline: "none",
+              cursor: "pointer",
+              fontFamily: "'Poppins', system-ui, sans-serif",
+              boxSizing: "border-box",
+            }}
           >
             <option value="All">All Categories</option>
             {categories.map((c: any) => (
@@ -262,10 +304,28 @@ export default function CandidateQueueClient({
             ))}
           </select>
 
+          {/* Source */}
           <select
             value={candidateSourceId}
             onChange={e => { setCandidateSourceId(e.target.value); setCandidatePage(1); }}
-            style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 12, background: "white", minWidth: 130 }}
+            className="candidate-filter-ctrl candidate-ctrl-source"
+            style={{
+              height: 42,
+              width: 160,
+              minWidth: 150,
+              maxWidth: 170,
+              flex: "0 1 auto",
+              padding: "0 10px",
+              borderRadius: 8,
+              border: "1px solid #E5E3DF",
+              fontSize: 14,
+              color: "#151927",
+              background: "#FFFFFF",
+              outline: "none",
+              cursor: "pointer",
+              fontFamily: "'Poppins', system-ui, sans-serif",
+              boxSizing: "border-box",
+            }}
           >
             <option value="All">All Sources</option>
             {sources.map((s: any) => (
@@ -273,17 +333,52 @@ export default function CandidateQueueClient({
             ))}
           </select>
 
+          {/* City */}
           <input
             value={candidateCity === "All" ? "" : candidateCity}
             onChange={e => { setCandidateCity(e.target.value || "All"); setCandidatePage(1); }}
-            placeholder="Filter city..."
-            style={{ width: 120, padding: "8px 10px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 12, background: "white" }}
+            placeholder="City..."
+            className="candidate-filter-ctrl candidate-ctrl-city"
+            style={{
+              height: 42,
+              width: 150,
+              minWidth: 140,
+              maxWidth: 160,
+              flex: "0 1 auto",
+              padding: "0 12px",
+              borderRadius: 8,
+              border: "1px solid #E5E3DF",
+              fontSize: 14,
+              color: "#151927",
+              background: "#FFFFFF",
+              outline: "none",
+              fontFamily: "'Poppins', system-ui, sans-serif",
+              boxSizing: "border-box",
+            }}
           />
 
+          {/* Sort */}
           <select
             value={candidateSortBy}
             onChange={e => setCandidateSortBy(e.target.value)}
-            style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 12, background: "white" }}
+            className="candidate-filter-ctrl candidate-ctrl-sort"
+            style={{
+              height: 42,
+              width: 150,
+              minWidth: 140,
+              maxWidth: 160,
+              flex: "0 1 auto",
+              padding: "0 10px",
+              borderRadius: 8,
+              border: "1px solid #E5E3DF",
+              fontSize: 14,
+              color: "#151927",
+              background: "#FFFFFF",
+              outline: "none",
+              cursor: "pointer",
+              fontFamily: "'Poppins', system-ui, sans-serif",
+              boxSizing: "border-box",
+            }}
           >
             <option value="createdAt">Newest First</option>
             <option value="companyName">Business A–Z</option>
@@ -291,58 +386,129 @@ export default function CandidateQueueClient({
             <option value="city">City</option>
           </select>
 
+          {/* Page Size */}
           <select
             value={candidatePageSize}
             onChange={e => { setCandidatePageSize(parseInt(e.target.value)); setCandidatePage(1); }}
-            style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #E5E3DF", fontSize: 12, background: "white" }}
+            className="candidate-filter-ctrl candidate-ctrl-pagesize"
+            style={{
+              height: 42,
+              width: 110,
+              minWidth: 100,
+              maxWidth: 120,
+              flex: "0 1 auto",
+              padding: "0 10px",
+              borderRadius: 8,
+              border: "1px solid #E5E3DF",
+              fontSize: 14,
+              color: "#151927",
+              background: "#FFFFFF",
+              outline: "none",
+              cursor: "pointer",
+              fontFamily: "'Poppins', system-ui, sans-serif",
+              boxSizing: "border-box",
+            }}
           >
             <option value="25">25 / page</option>
             <option value="50">50 / page</option>
             <option value="100">100 / page</option>
           </select>
 
-          <div style={{ marginLeft: "auto", fontSize: 11, color: "#9299A8", display: "flex", gap: 12 }}>
-            <span>Total: {candidateData?.total ?? 0}</span>
-            {candidateData && <span>Page {candidateData.page} of {candidateData.totalPages}</span>}
+          {/* Clear Filters (conditional) */}
+          {hasActiveFilters && (
+            <button
+              onClick={clearAllFilters}
+              style={{
+                height: 42,
+                padding: "0 12px",
+                borderRadius: 8,
+                border: "1px solid #FBD5D5",
+                background: "#FDECEC",
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+                color: "#EC6262",
+                whiteSpace: "nowrap",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                boxSizing: "border-box",
+              }}
+              title="Reset all filters"
+            >
+              <span>✕ Clear</span>
+            </button>
+          )}
+
+          {/* Total & Page Counts */}
+          <div className="candidate-filter-meta" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#9299A8", whiteSpace: "nowrap", paddingLeft: 4 }}>
+            <span>Total: <strong style={{ color: "#151927" }}>{candidateData?.total ?? 0}</strong></span>
+            {candidateData && (
+              <span style={{ fontSize: 12, background: "#FAF9F7", padding: "2px 8px", borderRadius: 4, border: "1px solid #E5E3DF" }}>
+                Page {candidateData.page} of {candidateData.totalPages || 1}
+              </span>
+            )}
           </div>
         </div>
 
         {/* Active Filter Chips */}
         {hasActiveFilters && (
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", paddingTop: 4, borderTop: "1px solid #F0EEEA" }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 8, paddingTop: 6, borderTop: "1px solid #F0EEEA" }}>
             <span style={{ fontSize: 11, color: "#9299A8", fontWeight: 500 }}>Active filters:</span>
             {candidateSearchDebounced && (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 6, background: "#F0ECFA", color: "#49339A", fontSize: 11, border: "1px solid #E0D6F5" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 5, background: "#F0ECFA", color: "#49339A", fontSize: 11, border: "1px solid #E0D6F5" }}>
                 Search: "{candidateSearchDebounced}"
-                <button onClick={() => setCandidateSearch("")} style={{ background: "none", border: "none", color: "#49339A", cursor: "pointer", padding: 0, fontSize: 12 }}>×</button>
+                <button onClick={() => setCandidateSearch("")} style={{ background: "none", border: "none", color: "#49339A", cursor: "pointer", padding: 0, fontSize: 12, lineHeight: 1 }}>×</button>
               </span>
             )}
             {candidateStatus !== "All" && (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 6, background: "#F0ECFA", color: "#49339A", fontSize: 11, border: "1px solid #E0D6F5" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 5, background: "#F0ECFA", color: "#49339A", fontSize: 11, border: "1px solid #E0D6F5" }}>
                 Status: {candidateStatus}
-                <button onClick={() => setCandidateStatus("All")} style={{ background: "none", border: "none", color: "#49339A", cursor: "pointer", padding: 0, fontSize: 12 }}>×</button>
+                <button onClick={() => setCandidateStatus("All")} style={{ background: "none", border: "none", color: "#49339A", cursor: "pointer", padding: 0, fontSize: 12, lineHeight: 1 }}>×</button>
               </span>
             )}
             {candidateCategory !== "All" && (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 6, background: "#F0ECFA", color: "#49339A", fontSize: 11, border: "1px solid #E0D6F5" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 5, background: "#F0ECFA", color: "#49339A", fontSize: 11, border: "1px solid #E0D6F5" }}>
                 Category: {categories.find(c => c.slug === candidateCategory)?.name || candidateCategory}
-                <button onClick={() => setCandidateCategory("All")} style={{ background: "none", border: "none", color: "#49339A", cursor: "pointer", padding: 0, fontSize: 12 }}>×</button>
+                <button onClick={() => setCandidateCategory("All")} style={{ background: "none", border: "none", color: "#49339A", cursor: "pointer", padding: 0, fontSize: 12, lineHeight: 1 }}>×</button>
               </span>
             )}
             {candidateCity && candidateCity !== "All" && (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 6, background: "#F0ECFA", color: "#49339A", fontSize: 11, border: "1px solid #E0D6F5" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 5, background: "#F0ECFA", color: "#49339A", fontSize: 11, border: "1px solid #E0D6F5" }}>
                 City: {candidateCity}
-                <button onClick={() => setCandidateCity("All")} style={{ background: "none", border: "none", color: "#49339A", cursor: "pointer", padding: 0, fontSize: 12 }}>×</button>
+                <button onClick={() => setCandidateCity("All")} style={{ background: "none", border: "none", color: "#49339A", cursor: "pointer", padding: 0, fontSize: 12, lineHeight: 1 }}>×</button>
               </span>
             )}
             {candidateSourceId !== "All" && (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 6, background: "#F0ECFA", color: "#49339A", fontSize: 11, border: "1px solid #E0D6F5" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 5, background: "#F0ECFA", color: "#49339A", fontSize: 11, border: "1px solid #E0D6F5" }}>
                 Source: {sources.find(s => s.id === candidateSourceId)?.name || candidateSourceId}
-                <button onClick={() => setCandidateSourceId("All")} style={{ background: "none", border: "none", color: "#49339A", cursor: "pointer", padding: 0, fontSize: 12 }}>×</button>
+                <button onClick={() => setCandidateSourceId("All")} style={{ background: "none", border: "none", color: "#49339A", cursor: "pointer", padding: 0, fontSize: 12, lineHeight: 1 }}>×</button>
               </span>
             )}
           </div>
         )}
+
+        <style>{`
+          @media (max-width: 1200px) {
+            .candidate-filter-search {
+              flex: 1 1 100% !important;
+              max-width: 100% !important;
+            }
+            .candidate-filter-meta {
+              width: 100%;
+              justify-content: flex-end;
+              margin-top: 4px;
+            }
+          }
+          @media (max-width: 640px) {
+            .candidate-filter-ctrl {
+              flex: 1 1 calc(50% - 6px) !important;
+              min-width: 0 !important;
+              max-width: none !important;
+              width: auto !important;
+            }
+          }
+        `}</style>
       </div>
 
       {/* Candidate Data Table */}

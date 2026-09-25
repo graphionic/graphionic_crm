@@ -1,6 +1,6 @@
 # ClientForge CRM — Final Production Collection Expansion & Release Readiness Specification
 
-**Document Version:** 1.0.0 (Release Baseline)  
+**Document Version:** 1.1.0 (International Expansion Baseline)  
 **Execution Date:** 2026-09-25  
 **System Status:** READY FOR PRODUCTION / OPERATIONAL  
 **Release Decision:** **GO**
@@ -9,7 +9,7 @@
 
 ## 1. Executive Summary & Baseline Status
 
-ClientForge CRM has completed its comprehensive multi-phase lead collection, qualification, and data hardening roadmap. The platform operates on a resilient, multi-tiered architecture with fail-closed safety isolation, zero-cost primary open discovery (OpenStreetMap/Overpass API), automated duplicate suppression, strict website evidence filtering (including email domain live verification to eliminate false NO_SITE leads), and granular operator queue workflows.
+ClientForge CRM operates a resilient, multi-tiered lead collection, qualification, and data hardening platform. The system uses zero-cost primary open discovery (OpenStreetMap/Overpass API), automated duplicate suppression, strict website evidence filtering (including email domain live verification to eliminate false NO_SITE leads), and granular operator queue workflows with fail-closed safety isolation.
 
 ### Baseline Production Snapshot (Read-Only)
 | Metric | Value | Status / Notes |
@@ -20,6 +20,10 @@ ClientForge CRM has completed its comprehensive multi-phase lead collection, qua
 | **Status: QUALIFIED / DISCOVERED** | **0 / 0** | Transferred or awaiting verification |
 | **Total CRM Leads (Active)** | **88** | 100% verified `NO_SITE` segment, `NEW` status |
 | **Total Collector Runs** | **20** | 19 SUCCESS (95.0%), 1 FAILED (historical setup) |
+| **Active Collection Locations** | **30** | Across USA (10), UK (8), AU (5), CA (3), AE (2), NZ (1), TH (1) |
+| **Disabled Locations** | **1** | Surat, India (`IN`) — historical records preserved, future collection disabled |
+| **Active Lead Categories** | **7** | Dental, Eye Clinic, Hospital, Pet Store, Physio, IVF, Orthopedic |
+| **Total Active Target Space** | **210** | 30 active locations × 7 active categories |
 | **Google Places Guardrails** | **DISABLED** | `enabled=false`, `failClosed=true`, `activationMode=DISABLED` |
 | **Google Usage Events** | **2** | 2 successful canary/probe records, 0 pending reservations |
 | **Google Cache Entries** | **2** | 2 cached text search queries |
@@ -75,16 +79,39 @@ ClientForge CRM has completed its comprehensive multi-phase lead collection, qua
 4. **Google Places** (`https://places.googleapis.com`): Google Places New API v1, `priority = 90`, `enabled = false`.
 
 ### 2.5 Active Market Locations (`CollectorLocation`)
-| City | Country | Priority | Radius | Enabled | Last Collected |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **London** | UK (`GB`) | 100 (HIGH) | 30 km | `true` | Active |
-| **New York** | US (`US`) | 100 (HIGH) | 30 km | `true` | Active |
-| **Manchester** | UK (`GB`) | 90 (HIGH) | 25 km | `true` | Active |
-| **Houston** | US (`US`) | 90 (HIGH) | 25 km | `true` | Active |
-| **Dubai** | UAE (`AE`) | 80 (HIGH) | 25 km | `true` | Active |
-| **Surat** | India (`IN`) | 80 (HIGH) | 25 km | `true` | Active |
-| **Melbourne** | Australia (`AU`) | 70 (MED) | 25 km | `true` | Active |
-| **Bangkok** | Thailand (`TH`) | 60 (MED) | 25 km | `true` | Active |
+| City | Country | State / Region | Coordinates (Lat, Lng) | Radius | Enabled | Priority |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **New York** | United States (`US`) | New York | 40.7128, -74.0060 | 30 km | `true` | 100 (HIGH) |
+| **Houston** | United States (`US`) | Texas | 29.7604, -95.3698 | 25 km | `true` | 90 (HIGH) |
+| **Dallas** | United States (`US`) | Texas | 32.7767, -96.7970 | 25 km | `true` | 85 (HIGH) |
+| **Austin** | United States (`US`) | Texas | 30.2672, -97.7431 | 25 km | `true` | 80 (HIGH) |
+| **Miami** | United States (`US`) | Florida | 25.7617, -80.1918 | 25 km | `true` | 80 (HIGH) |
+| **Orlando** | United States (`US`) | Florida | 28.5383, -81.3792 | 25 km | `true` | 75 (MED) |
+| **Chicago** | United States (`US`) | Illinois | 41.8781, -87.6298 | 30 km | `true` | 90 (HIGH) |
+| **Phoenix** | United States (`US`) | Arizona | 33.4484, -112.0740 | 25 km | `true` | 75 (MED) |
+| **San Diego** | United States (`US`) | California | 32.7157, -117.1611 | 25 km | `true` | 80 (HIGH) |
+| **Atlanta** | United States (`US`) | Georgia | 33.7490, -84.3880 | 25 km | `true` | 80 (HIGH) |
+| **London** | United Kingdom (`GB`) | England | 51.5074, -0.1278 | 30 km | `true` | 100 (HIGH) |
+| **Manchester** | United Kingdom (`GB`) | England | 53.4808, -2.2426 | 25 km | `true` | 90 (HIGH) |
+| **Birmingham** | United Kingdom (`GB`) | England | 52.4862, -1.8904 | 25 km | `true` | 85 (HIGH) |
+| **Leeds** | United Kingdom (`GB`) | England | 53.8008, -1.5491 | 25 km | `true` | 80 (HIGH) |
+| **Bristol** | United Kingdom (`GB`) | England | 51.4545, -2.5879 | 25 km | `true` | 75 (MED) |
+| **Liverpool** | United Kingdom (`GB`) | England | 53.4084, -2.9916 | 25 km | `true` | 75 (MED) |
+| **Glasgow** | United Kingdom (`GB`) | Scotland | 55.8642, -4.2518 | 25 km | `true` | 80 (HIGH) |
+| **Edinburgh** | United Kingdom (`GB`) | Scotland | 55.9533, -3.1883 | 25 km | `true` | 80 (HIGH) |
+| **Melbourne** | Australia (`AU`) | Victoria | -37.8136, 144.9631 | 25 km | `true` | 70 (MED) |
+| **Sydney** | Australia (`AU`) | New South Wales | -33.8688, 151.2093 | 25 km | `true` | 85 (HIGH) |
+| **Brisbane** | Australia (`AU`) | Queensland | -27.4698, 153.0251 | 25 km | `true` | 75 (MED) |
+| **Perth** | Australia (`AU`) | Western Australia | -31.9505, 115.8605 | 25 km | `true` | 70 (MED) |
+| **Adelaide** | Australia (`AU`) | South Australia | -34.9285, 138.6007 | 25 km | `true` | 65 (MED) |
+| **Toronto** | Canada (`CA`) | Ontario | 43.6532, -79.3832 | 25 km | `true` | 85 (HIGH) |
+| **Vancouver** | Canada (`CA`) | British Columbia | 49.2827, -123.1207 | 25 km | `true` | 80 (HIGH) |
+| **Calgary** | Canada (`CA`) | Alberta | 51.0447, -114.0719 | 25 km | `true` | 70 (MED) |
+| **Dubai** | UAE (`AE`) | Dubai | 25.2048, 55.2708 | 25 km | `true` | 80 (HIGH) |
+| **Abu Dhabi** | UAE (`AE`) | Abu Dhabi | 24.4539, 54.3773 | 25 km | `true` | 75 (MED) |
+| **Auckland** | New Zealand (`NZ`) | Auckland | -36.8485, 174.7633 | 25 km | `true` | 70 (MED) |
+| **Bangkok** | Thailand (`TH`) | Bangkok | 13.7563, 100.5018 | 25 km | `true` | 60 (MED) |
+| *Surat* | *India (`IN`)* | *Gujarat* | *21.1702, 72.8311* | *25 km* | *`false`* | *80 (DISABLED)* |
 
 ### 2.6 Active Lead Categories (`LeadCategory`)
 | Category | Slug | Priority | OSM Tags / Targeting | Enabled |
@@ -121,7 +148,7 @@ ClientForge CRM has completed its comprehensive multi-phase lead collection, qua
 | **Houston & Texas (US)** | 97 | 63 | 34 | 1 | duplicate_in_run (27) / existing_website (7) |
 | **New York City (US)** | 97 | 56 | 41 | 5 | existing_website (30) / duplicate_in_run (11) |
 | **Manchester & North West (UK)** | 96 | 68 | 28 | 1 | duplicate_in_run (15) / existing_website (13) |
-| **Surat & Gujarat (IN)** | 70 | 70 | 0 | 1 | None (high potential raw directory) |
+| **Surat & Gujarat (IN)** | 70 | 70 | 0 | 1 | None (historical preserved, now disabled) |
 | **Southeast Asia & Other Leads** | N/A | N/A | N/A | 57 | Historical qualification pipeline |
 
 ---
@@ -168,7 +195,7 @@ Total Rejections Recorded: **356**
 1. **`duplicate_in_run` (181 records)**: Overlapping bounding boxes in adjacent collector runs or multi-node OSM structures are caught before CRM insertion.
 2. **`existing_website` (171 records)**: Businesses having explicit `contact:website` or `website` tags are filtered to ensure our sales reps only target businesses genuinely lacking web presence.
 3. **`generic_email` (2 records)**: Generic webmail addresses with no verifiable business domain.
-4. **`email_domain_has_live_website` (2 records)**: The Emma Clinic anti-pattern filter. Prevents leads whose email domain (e.g. `info@emmaclinicthailand.com`) resolves to a live website.
+4. **`email_domain_has_live_website` (2 records)**: The Emma Clinic anti-pattern filter. Prevents leads whose email domain resolves to a live website.
 
 ---
 
@@ -204,28 +231,36 @@ Total Rejections Recorded: **356**
 
 ---
 
-## 10. Controlled Production Expansion Strategy
+## 10. International Collection Footprint & Expansion Strategy
 
-### 10.1 Expansion Principles
-1. **Zero-Cost First:** Leverage OpenStreetMap Overpass mirrors to map thousands of SMBs across target markets before incurring credit expenditure.
-2. **Predictable Cadence:** Maintain 15-minute rotation intervals with jitter and request cooldowns to prevent rate limiting.
-3. **Strict Lead Quality Gate:** Retain mandatory email domain live checks and OSM website rejection.
+### 10.1 Active Footprint Overview
+ClientForge collection operations are expanded to **30 high-potential international markets** across 7 sovereign regions:
+* **USA (10 Markets):** New York, Houston, Dallas, Austin, Miami, Orlando, Chicago, Phoenix, San Diego, Atlanta.
+* **United Kingdom (8 Markets):** London, Manchester, Birmingham, Leeds, Bristol, Liverpool, Glasgow, Edinburgh.
+* **Australia (5 Markets):** Melbourne, Sydney, Brisbane, Perth, Adelaide.
+* **Canada (3 Markets):** Toronto, Vancouver, Calgary.
+* **United Arab Emirates (2 Markets):** Dubai, Abu Dhabi.
+* **New Zealand (1 Market):** Auckland.
+* **Thailand (1 Market):** Bangkok.
 
-### 10.2 Target Market Rollout Plan
-* **Phase 1 (Immediate / Active):** London, Manchester, New York, Houston, Dubai, Melbourne, Bangkok, Surat.
-* **Phase 2 (Month 1 Expansion):**
-  * UK: Birmingham, Leeds, Glasgow, Edinburgh, Bristol.
-  * US: Los Angeles, Chicago, Dallas, Miami, Atlanta.
-  * Australia: Sydney, Brisbane, Perth.
-  * UAE: Abu Dhabi, Sharjah.
-* **Phase 3 (Month 2 Expansion):**
-  * Canada: Toronto, Vancouver, Montreal.
-  * Europe: Dublin, Amsterdam, Frankfurt.
+### 10.2 India Exclusion Policy
+* **Policy Mandate:** India (`IN`) is strictly excluded from all future collection routines.
+* **Historical Data Safety:** Historical Surat candidates (70), leads (1), and collector runs are fully preserved in the database.
+* **Configuration State:** The Surat `CollectorLocation` record is set to `enabled = false`. Active Indian location count is strictly **0**.
 
-### 10.3 Category Rollout Plan
-* **Tier 1 (Active):** Eye Clinics, Dental Clinics.
-* **Tier 2 (Next 14 Days):** Physiotherapy Clinics, Veterinary & Pet Care, Specialized Outpatient Hospitals.
-* **Tier 3 (Next 30 Days):** IVF Clinics, Orthopedic Centers, Chiropractic Clinics.
+### 10.3 Target Space & Rotation Schedule
+* **Active Locations:** 30
+* **Active Categories:** 7 (Dental, Eye Clinic, Hospital, Pet Store, Physio, IVF, Orthopedic)
+* **Total Target Space:** $30 \times 7 = \mathbf{210}$ discrete `(Location \times Category)` collection targets.
+* **Schedule Cadence:** GitHub Actions scheduled cron runs hourly (`0 * * * *`), resulting in **24 scheduled runs/day**.
+* **Estimated Full Rotation Duration:** $210 \text{ targets} / 24 \text{ runs/day} = \mathbf{8.75 \text{ days}}$ (~8 days, 18 hours) to complete a theoretical full global rotation cycle (operational estimate subject to runtime cooldowns, skips, or upstream retry backoffs).
+
+### 10.4 Critical Operational & Enrichment Note
+> **IMPORTANT:** Expanding the geographic discovery footprint expands the top-of-funnel pool of physical businesses without websites. However, **expanding discovery does NOT solve the email enrichment bottleneck**.
+>
+> In OpenStreetMap data, only ~3.2% of physical businesses include explicit public email tags. The remaining ~96.8% of businesses are safely categorized as `NEEDS_ENRICHMENT`.
+> 
+> **Candidate $\rightarrow$ Lead conversion remains strictly dependent on obtaining usable business email and confirming the absence of a live website.**
 
 ---
 
@@ -266,7 +301,7 @@ Total Rejections Recorded: **356**
 - [ ] Check Enrichment Engine remains `DISABLED`.
 
 ### 12.3 Operator Weekly Checklist
-- [ ] Review candidate volume trends across all 8 active locations.
+- [ ] Review candidate volume trends across active locations.
 - [ ] Rotate active category priorities if dental or eye saturation reaches diminishing returns.
 - [ ] Clean up suppressed or unsubscribed contacts in `/settings/suppression`.
 - [ ] Run full test suite (`npm test` / `scripts/test-final-production-readiness.mjs`).
@@ -301,13 +336,14 @@ Total Rejections Recorded: **356**
 | Category | Requirement | Validation Method | Result | Status |
 | :--- | :--- | :--- | :--- | :--- |
 | **Collector Core** | Continuous OSM Overpass ingestion | Automated collector worker runs | 20 runs, 913 candidates | **PASS** |
+| **International Footprint** | 30 active locations across 7 regions | Database configuration audit | 30 active, Surat disabled | **PASS** |
 | **Data Quality** | Multi-layer website evidence filtering | Duplicate, website, domain live check | 356 filtered accurately | **PASS** |
 | **CRM Leads** | Lead table integrity & traceability | Foreign key link & segment verification | 88 valid `NO_SITE` leads | **PASS** |
 | **Safety** | Google Places fail-closed isolation | Zero network trap & budget check | `enabled=false`, 0 leaks | **PASS** |
 | **Safety** | Enrichment engine fail-closed | Zero job execution check | `enabled=false`, 0 leaks | **PASS** |
 | **UI Operations**| Candidate Queue & Inspector Drawer | Forensic drawer & quick filters | 100% operational | **PASS** |
 | **UI Operations**| Google Guardrails Settings UI | Dynamic config update with auth | 100% operational | **PASS** |
-| **Test Coverage**| End-to-end regression suites | Automated test runners | 226+ assertions passed | **PASS** |
+| **Test Coverage**| End-to-end regression suites | Automated test runners | 240+ assertions passed | **PASS** |
 | **Build & Bundle**| Clean Next.js production build | `npm run build` | 91 routes compiled clean | **PASS** |
 
 ---

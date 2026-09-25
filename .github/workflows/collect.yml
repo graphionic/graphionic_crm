@@ -1,6 +1,6 @@
 # ClientForge CRM — Phase 4B Dynamic Collector Worker
 # Node.js + Prisma production collector
-# Schedule: every 3 hours (conservative, fits GitHub free tier)
+# Schedule: hourly (24 runs/day, ~8.75 days per full 210-target rotation)
 # GitHub cron = when worker wakes up
 # CollectorConfig.collectionFrequencyMinutes = whether assignment is eligible (DB)
 # These are different concepts — documented in PHASE_4B_COLLECTOR_WORKER.md
@@ -9,7 +9,7 @@ name: Collector Worker
 
 on:
   schedule:
-    - cron: '0 */3 * * *'  # every 3 hours
+    - cron: '0 * * * *'  # hourly
   workflow_dispatch: {}     # manual trigger only, no push trigger
 
 concurrency:

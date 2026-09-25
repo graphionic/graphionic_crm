@@ -167,12 +167,14 @@ async function runSuite() {
   assert.strictEqual(attemptCount, 0, 'Expected 0 enrichment attempts');
   console.log('[PASS L] Zero enrichment jobs and zero enrichment attempts');
 
-  // Test M: All 8 production market locations configured and enabled
-  const locations = await prisma.collectorLocation.findMany();
-  assert.strictEqual(locations.length, 8, 'Expected exactly 8 configured locations');
-  const allLocsEnabled = locations.every(l => l.enabled === true);
-  assert.ok(allLocsEnabled, 'All configured locations must be enabled');
-  console.log('[PASS M] All 8 production market locations configured and enabled');
+  // Test M: All 30 active international market locations configured & Surat disabled
+  const totalLocations = await prisma.collectorLocation.count();
+  const activeLocations = await prisma.collectorLocation.count({ where: { enabled: true } });
+  const activeIndia = await prisma.collectorLocation.count({ where: { countryCode: 'IN', enabled: true } });
+  assert.strictEqual(totalLocations, 31, `Expected 31 total locations, got ${totalLocations}`);
+  assert.strictEqual(activeLocations, 30, `Expected 30 active locations, got ${activeLocations}`);
+  assert.strictEqual(activeIndia, 0, 'India must have 0 active collection locations');
+  console.log('[PASS M] All 30 international market locations configured & active; Surat disabled');
 
   // Test N: All 7 production lead categories configured and enabled
   const categories = await prisma.leadCategory.findMany();

@@ -2,7 +2,6 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { requireActiveUser } from "@/lib/session";
 import { LEAD_STATUSES, SEGMENTS, statusTone, segmentTone, countryLabel } from "@/lib/constants";
-import LiveCollectionWidget from "./live-collection";
 
 export const dynamic = "force-dynamic";
 
@@ -71,11 +70,6 @@ export default async function DashboardPage() {
 
   return (
     <>
-      {/* LIVE COLLECTION WIDGET - Vercel compatible */}
-      <div style={{ marginBottom: 18 }}>
-        <LiveCollectionWidget />
-      </div>
-
       <div className="page-head">
         <div>
           <h2>Dashboard</h2>

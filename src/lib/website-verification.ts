@@ -1,10 +1,6 @@
 /**
  * ClientForge CRM — Website Verification
- * Phase 4B shared implementation
- * Reusable for both Next.js API and Node collector worker
- * 
- * Prevents Emma Clinic type false NO_SITE:
- * If email domain has live website, reject as FALSE NO_SITE
+ * Generic HTTP/HTTPS live site detection and domain parsing utility
  */
 
 export const GENERIC_EMAIL_DOMAINS = new Set([
@@ -15,7 +11,7 @@ export const GENERIC_EMAIL_DOMAINS = new Set([
   'me.com', 'mac.com', 'qq.com', '163.com', '126.com'
 ]);
 
-export const USER_AGENT = 'ClientForge-Collector/1.0';
+export const USER_AGENT = 'ClientForge-CRM/1.0';
 
 export interface WebsiteCheckOptions {
   httpsCheck?: boolean;
@@ -79,14 +75,12 @@ export function isValidDomain(domain: string): boolean {
   if (!d.includes('.')) return false;
   if (GENERIC_EMAIL_DOMAINS.has(d)) return false;
   if (d.includes(' ') || d.includes('/') || d.includes('\\')) return false;
-  // Basic domain regex
   if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)) return false;
   return true;
 }
 
 /**
  * Check if HTTP response body looks like real HTML site
- * Not every 200 is a valid company site
  */
 function isRealHtmlBody(body: string, statusCode: number): { isReal: boolean; reason: string } {
   if (statusCode < 200 || statusCode >= 400) {
@@ -96,20 +90,15 @@ function isRealHtmlBody(body: string, statusCode: number): { isReal: boolean; re
     return { isReal: false, reason: `body_too_small_${body?.length || 0}` };
   }
   const lower = body.toLowerCase();
-  // Must contain html indicators
   const hasHtml = lower.includes('<html') || lower.includes('<!doctype') || lower.includes('<body');
   if (!hasHtml) {
     return { isReal: false, reason: 'no_html_tag' };
   }
-  // Reject obvious parking / error pages that are technically HTML but not real company site?
-  // For Phase 4B, keep conservative: if has html and >500 chars, consider live
-  // Future: add more heuristics for parking pages
   return { isReal: true, reason: 'valid_html' };
 }
 
 /**
  * Fetch with timeout, redirect handling, body limit
- * Uses native fetch (Node 18+ / Next.js)
  */
 async function fetchWithSafety(
   url: string,
@@ -135,7 +124,6 @@ async function fetchWithSafety(
 
     const statusCode = res.status;
 
-    // Handle redirects manually if followRedirects enabled but we want bounded count
     if (options.followRedirects && [301, 302, 303, 307, 308].includes(statusCode)) {
       if (redirectCount >= options.maxRedirects) {
         return {
@@ -156,14 +144,11 @@ async function fetchWithSafety(
           redirectCount,
         };
       }
-      // Resolve relative redirect
       const nextUrl = new URL(location, url).toString();
-      // Prevent redirect loops to same domain? Allow but count
       return fetchWithSafety(nextUrl, options, redirectCount + 1);
     }
 
     if (statusCode >= 200 && statusCode < 400) {
-      // Read body with size limit
       const reader = res.body?.getReader();
       let body = '';
       let totalBytes = 0;
@@ -175,14 +160,11 @@ async function fetchWithSafety(
             if (done) break;
             totalBytes += value.length;
             if (totalBytes > options.maxBodyBytes) {
-              // Stop reading, we have enough to decide
               body += new TextDecoder().decode(value.slice(0, options.maxBodyBytes - (totalBytes - value.length)));
               break;
             }
             body += new TextDecoder().decode(value);
-            // Early exit if we already have enough to confirm HTML
             if (body.length > 2000 && body.toLowerCase().includes('<html')) {
-              // Continue reading a bit more to ensure >500, but not full body
               if (body.length > 5000) break;
             }
           }
@@ -192,7 +174,6 @@ async function fetchWithSafety(
           try { reader.releaseLock(); } catch {}
         }
       } else {
-        // Fallback: text()
         const text = await res.text().catch(() => '');
         body = text.slice(0, options.maxBodyBytes);
         totalBytes = body.length;
@@ -230,7 +211,6 @@ async function fetchWithSafety(
 
 /**
  * Main: Check if email domain has live website
- * Returns live=true if domain hosts real site → should REJECT as FALSE NO_SITE
  */
 export async function hasLiveWebsite(
   domain: string,
@@ -252,26 +232,21 @@ export async function hasLiveWebsite(
     return { live: false, reason: 'invalid_domain_format' };
   }
 
-  // Try HTTPS first if enabled
   if (options.httpsCheck) {
     const httpsResult = await fetchWithSafety(`https://${normalized}`, options, 0);
     if (httpsResult.live) {
       return { ...httpsResult, reason: `https_${httpsResult.reason}` };
     }
-    // If HTTPS gave definitive 200 but body not real HTML, still consider not live
-    // Only fallback to HTTP if HTTPS failed or not live
     if (options.httpFallback) {
       const httpResult = await fetchWithSafety(`http://${normalized}`, options, 0);
       if (httpResult.live) {
         return { ...httpResult, reason: `http_${httpResult.reason}` };
       }
-      // Return most informative reason
       return httpResult;
     }
     return httpsResult;
   }
 
-  // Only HTTP if HTTPS disabled
   if (options.httpFallback) {
     return fetchWithSafety(`http://${normalized}`, options, 0);
   }
@@ -322,7 +297,6 @@ export async function verifyLeadWebsite(
   const website = (input.website || '').trim();
   const email = (input.email || '').trim();
 
-  // Rule: require_no_website / reject_existing_website
   if (website && (requireNoWebsite || rejectExistingWebsite)) {
     return {
       shouldReject: true,
@@ -336,7 +310,6 @@ export async function verifyLeadWebsite(
   const emailDomain = extractEmailDomain(email);
 
   if (!emailDomain) {
-    // If email required rule handled elsewhere, here we just pass
     return {
       shouldReject: false,
       emailDomain: null,
@@ -344,7 +317,6 @@ export async function verifyLeadWebsite(
     };
   }
 
-  // Rule: reject_generic
   if (rejectGeneric && isGenericEmailDomain(emailDomain)) {
     return {
       shouldReject: true,
@@ -355,7 +327,6 @@ export async function verifyLeadWebsite(
     };
   }
 
-  // Rule: verify_email_domain_website (Emma Clinic fix)
   if (verifyEmailDomainWebsite) {
     const websiteCheck = await hasLiveWebsite(emailDomain, {
       httpsCheck,

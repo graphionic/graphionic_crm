@@ -18,7 +18,7 @@ export function NavLink({
   tone?: string;
 }) {
   const pathname = usePathname();
-  const exactOnly = href === "/dashboard" || href === "/collection" || href === "/settings";
+  const exactOnly = href === "/dashboard" || href === "/settings";
   const active = exactOnly
     ? pathname === href
     : pathname === href || pathname.startsWith(href + "/");

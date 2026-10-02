@@ -5,16 +5,20 @@ import { NavLink, LogoutButton } from "./shell-client";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireActiveUser();
 
-  const [leadCount, dueCount] = await Promise.all([
-    prisma.lead.count(),
-    prisma.lead.count({
+  let leadCount = 0;
+  let dueCount = 0;
+  try {
+    leadCount = await prisma.lead.count();
+    dueCount = await prisma.lead.count({
       where: {
         nextFollowUpAt: { lte: new Date() },
         doNotContact: false,
         status: { notIn: ["WON", "LOST"] },
       },
-    }),
-  ]);
+    });
+  } catch (e) {
+    console.error("Failed to load layout counts:", e);
+  }
 
   return (
     <div className="shell">
@@ -44,8 +48,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
         <div className="sidebar-foot">
           <div className="who">
-            {user.name ? <>{user.name}<br /></> : null}
-            {user.email}
+            {user?.name ? <>{user.name}<br /></> : null}
+            {user?.email}
           </div>
           <LogoutButton />
         </div>

@@ -14,7 +14,7 @@ export default async function LeadsPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   await requireActiveUser();
-  const sp = await searchParams;
+  const sp = (await searchParams) || {};
 
   const q = (sp.q || "").trim();
   const status = sp.status || "";

@@ -110,9 +110,17 @@ export async function sendLeadWhatsapp(
     }
   }
 
+  // Resolve template parameters dynamically from lead
+  let templateParams = opts.params || [];
+  if (opts.mode === "template" && templateParams.length === 0) {
+    if (opts.templateName === "dental_website_intro") {
+      templateParams = [lead.companyName || "", lead.city || ""];
+    }
+  }
+
   const result =
     opts.mode === "template"
-      ? await sendTemplate(to, opts.templateName || "", opts.language || "en_US", opts.params || [])
+      ? await sendTemplate(to, opts.templateName || "", opts.language || "en", templateParams)
       : await sendText(to, opts.text || "");
 
   await prisma.activity.create({
@@ -122,11 +130,11 @@ export async function sendLeadWhatsapp(
       direction: "OUT",
       channel: "whatsapp_cloud",
       templateName: opts.mode === "template" ? opts.templateName : null,
-      body: opts.mode === "template" ? `[template: ${opts.templateName}]` : opts.text,
+      body: opts.mode === "template" ? (opts.text || `[template: ${opts.templateName}]`) : opts.text,
       status: result.ok ? "sent" : "failed",
       externalId: result.messageId ?? null,
       error: result.ok ? null : result.error ?? null,
-      meta: JSON.stringify({ mode: opts.mode, params: opts.params ?? [] }),
+      meta: JSON.stringify({ mode: opts.mode, params: templateParams }),
     },
   });
 

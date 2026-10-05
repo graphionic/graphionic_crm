@@ -56,8 +56,8 @@ Best of luck with the business.`,
     <>
       <div className="page-head">
         <div>
-          <h2>Message templates</h2>
-          <p>Reusable email and WhatsApp copy. Placeholders in double braces get filled per lead.</p>
+          <h2>Email templates</h2>
+          <p>Reusable email outreach copy. Placeholders in double braces get filled per lead.</p>
         </div>
       </div>
 

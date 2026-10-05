@@ -78,13 +78,29 @@ export default async function LeadDetailPage({
   ]);
 
   const waEnabled = settings.wa_enabled === "true";
-  const waTemplates: Array<{ name: string; language: string }> = [];
+  const waTemplates: Array<{ name: string; language: string; category: string; status: string; body: string }> = [];
   let waTplFetch: Array<{ name: string; language: string; status: string; category: string; body: string }> = [];
   if (waEnabled && settings.wa_access_token && settings.wa_business_account_id) {
-    const { listTemplates } = await import("@/lib/whatsapp");
-    const r = await listTemplates();
-    if (r.ok) waTplFetch = r.templates ?? [];
-    for (const t of waTplFetch) waTemplates.push({ name: t.name, language: t.language });
+    try {
+      const { listTemplates } = await import("@/lib/whatsapp");
+      const r = await listTemplates();
+      if (r.ok && r.templates) {
+        waTplFetch = r.templates;
+        for (const t of r.templates) {
+          if (t.status === "APPROVED") {
+            waTemplates.push({
+              name: t.name,
+              language: t.language,
+              category: t.category,
+              status: t.status,
+              body: t.body,
+            });
+          }
+        }
+      }
+    } catch {
+      // Ignore Meta API network or token issues
+    }
   }
 
   const { subject, body } = draftEmail(lead, user.name || "");
@@ -170,12 +186,16 @@ export default async function LeadDetailPage({
           />
           <WaSender
             leadId={lead.id}
+            companyName={lead.companyName}
+            city={lead.city}
             number={lead.whatsapp || lead.phone}
             optedIn={lead.optedInWhatsapp}
             canFreeform={windowState.allowed}
             windowReason={windowState.reason}
             templates={waTemplates}
             waEnabled={waEnabled}
+            isSuppressed={Boolean(suppressed)}
+            doNotContact={lead.doNotContact}
           />
         </div>
 

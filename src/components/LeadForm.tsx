@@ -221,10 +221,15 @@ export function LeadForm({
             <input type="checkbox" name="optedInEmail" defaultChecked={Boolean(initial.optedInEmail)} />
             <span>Email opt-in / lawful basis recorded</span>
           </label>
-          <label className="check">
-            <input type="checkbox" name="optedInWhatsapp" defaultChecked={Boolean(initial.optedInWhatsapp)} />
-            <span>WhatsApp opt-in recorded (they asked me to message them)</span>
-          </label>
+          <div style={{ margin: "10px 0" }}>
+            <label className="check" style={{ fontWeight: 600 }}>
+              <input type="checkbox" name="optedInWhatsapp" defaultChecked={Boolean(initial.optedInWhatsapp)} />
+              <span>WhatsApp opt-in</span>
+            </label>
+            <div className="hint" style={{ marginTop: 2, marginLeft: 24, fontSize: 13, color: "var(--muted)" }}>
+              Enable only when this contact has genuinely agreed to receive WhatsApp messages.
+            </div>
+          </div>
           <label className="check">
             <input type="checkbox" name="doNotContact" defaultChecked={Boolean(initial.doNotContact)} />
             <span>Do not contact — block all outreach to this lead</span>

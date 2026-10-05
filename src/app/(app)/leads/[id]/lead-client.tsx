@@ -104,32 +104,82 @@ export function Composer({
   );
 }
 
+type WaTemplateOption = {
+  name: string;
+  language: string;
+  category?: string;
+  status?: string;
+  body: string;
+  displayName?: string;
+};
+
 export function WaSender({
   leadId,
+  companyName,
+  city,
   number,
   optedIn,
   canFreeform,
   windowReason,
   templates,
   waEnabled,
+  isSuppressed,
+  doNotContact,
 }: {
   leadId: string;
+  companyName: string;
+  city: string | null;
   number: string | null;
   optedIn: boolean;
   canFreeform: boolean;
   windowReason: string;
-  templates: Array<{ name: string; language: string }>;
+  templates: WaTemplateOption[];
   waEnabled: boolean;
+  isSuppressed?: boolean;
+  doNotContact?: boolean;
 }) {
   const router = useRouter();
   const [mode, setMode] = useState<"text" | "template">(canFreeform ? "text" : "template");
   const [text, setText] = useState("");
-  const [tpl, setTpl] = useState(templates[0]?.name || "");
-  const [lang, setLang] = useState(templates[0]?.language || "en_US");
+  
+  // Find dental_website_intro as default or use the first template
+  const defaultTpl = templates.find((t) => t.name === "dental_website_intro") || templates[0];
+  const [tpl, setTpl] = useState(defaultTpl?.name || "");
+  const [lang, setLang] = useState(defaultTpl?.language || "en");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
 
-  const blocked = !waEnabled || !number || !optedIn;
+  const selectedTplObj = templates.find((x) => x.name === tpl) || defaultTpl;
+
+  // Variable mapping for dental_website_intro / 2-var templates
+  const param1 = companyName ? companyName.trim() : "";
+  const param2 = city ? city.trim() : "";
+  const templateParams = [param1, param2];
+
+  // Render preview by replacing {{1}} and {{2}}
+  const renderedPreview = selectedTplObj?.body
+    ? selectedTplObj.body
+        .replace(/\{\{1\}\}/g, param1 || "{{1}}")
+        .replace(/\{\{2\}\}/g, param2 || "{{2}}")
+    : "";
+
+  // Validation
+  const missingPhone = !number;
+  const missingCompany = !param1;
+  const missingCity = !param2;
+  const requiresVariables = Boolean(
+    selectedTplObj?.body && (selectedTplObj.body.includes("{{1}}") || selectedTplObj.body.includes("{{2}}"))
+  );
+  const missingVariables = requiresVariables && (missingCompany || missingCity);
+
+  const blocked =
+    !waEnabled ||
+    missingPhone ||
+    !optedIn ||
+    Boolean(isSuppressed) ||
+    Boolean(doNotContact) ||
+    (mode === "template" && (!tpl || missingVariables)) ||
+    (mode === "text" && (!canFreeform || !text.trim()));
 
   return (
     <div className="card">
@@ -147,8 +197,28 @@ export function WaSender({
             WhatsApp is switched off. Enable it in <a href="/settings/whatsapp">Settings → WhatsApp</a>.
           </div>
         ) : null}
-        {!number ? (
-          <div className="callout warn">No WhatsApp number on this lead.</div>
+        {isSuppressed ? (
+          <div className="callout bad">
+            This contact is on the suppression list — sending is blocked.
+          </div>
+        ) : null}
+        {doNotContact ? (
+          <div className="callout bad">
+            Lead is marked do-not-contact — sending is blocked.
+          </div>
+        ) : null}
+        {missingPhone ? (
+          <div className="callout warn">No WhatsApp / phone number on this lead.</div>
+        ) : null}
+        {mode === "template" && missingCompany ? (
+          <div className="callout warn">
+            Practice name (companyName) is missing on this lead — required for variable <code>{"{{1}}"}</code>.
+          </div>
+        ) : null}
+        {mode === "template" && missingCity ? (
+          <div className="callout warn">
+            City is missing on this lead — required for variable <code>{"{{2}}"}</code>.
+          </div>
         ) : null}
         {number && !optedIn ? (
           <div className="callout bad">
@@ -167,11 +237,11 @@ export function WaSender({
         </div>
 
         <div className="tabs" style={{ marginBottom: 14 }}>
-          <button type="button" className={mode === "text" ? "on" : ""} onClick={() => setMode("text")}>
-            Free-form text {canFreeform ? "" : "(locked)"}
-          </button>
           <button type="button" className={mode === "template" ? "on" : ""} onClick={() => setMode("template")}>
             Approved template
+          </button>
+          <button type="button" className={mode === "text" ? "on" : ""} onClick={() => setMode("text")}>
+            Free-form text {canFreeform ? "" : "(locked)"}
           </button>
         </div>
 
@@ -204,27 +274,83 @@ export function WaSender({
               </div>
             ) : (
               <>
-                <label className="f">
-                  <span>Template</span>
-                  <select
-                    value={tpl}
-                    onChange={(e) => {
-                      setTpl(e.target.value);
-                      const t = templates.find((x) => x.name === e.target.value);
-                      if (t) setLang(t.language);
+                <div className="grid c2">
+                  <label className="f">
+                    <span>Template</span>
+                    <select
+                      value={tpl}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setTpl(val);
+                        const t = templates.find((x) => x.name === val);
+                        if (t) setLang(t.language);
+                      }}
+                    >
+                      {templates.map((t) => (
+                        <option key={`${t.name}-${t.language}`} value={t.name}>
+                          {t.name} ({t.language})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="f">
+                    <span>Language</span>
+                    <input value={lang} onChange={(e) => setLang(e.target.value)} />
+                  </label>
+                </div>
+
+                {/* Structured Preview Before Send (Step 4) */}
+                <div
+                  style={{
+                    background: "var(--slate-soft)",
+                    border: "1px solid var(--border)",
+                    marginTop: 12,
+                    marginBottom: 14,
+                    padding: 12,
+                    borderRadius: "var(--radius)",
+                  }}
+                >
+                  <dl className="kv" style={{ marginBottom: 10 }}>
+                    <dt>Template</dt>
+                    <dd>
+                      <b>{selectedTplObj?.name || tpl}</b>
+                    </dd>
+                    <dt>Language</dt>
+                    <dd>{lang}</dd>
+                    <dt>Recipient</dt>
+                    <dd>{number || "—"}</dd>
+                    <dt>Practice</dt>
+                    <dd>{param1 || <span className="badge red">Missing</span>}</dd>
+                    <dt>City</dt>
+                    <dd>{param2 || <span className="badge red">Missing</span>}</dd>
+                  </dl>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      color: "var(--muted)",
+                      marginBottom: 4,
                     }}
                   >
-                    {templates.map((t) => (
-                      <option key={`${t.name}-${t.language}`} value={t.name}>
-                        {t.name} ({t.language})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="f">
-                  <span>Language</span>
-                  <input value={lang} onChange={(e) => setLang(e.target.value)} />
-                </label>
+                    Message preview:
+                  </div>
+                  <div
+                    style={{
+                      whiteSpace: "pre-wrap",
+                      fontFamily: "var(--sans)",
+                      fontSize: 13,
+                      background: "var(--surface)",
+                      border: "1px solid var(--border)",
+                      padding: "10px 12px",
+                      borderRadius: "calc(var(--radius) - 2px)",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {renderedPreview || <span className="muted">No preview available</span>}
+                  </div>
+                </div>
               </>
             )}
           </>
@@ -232,14 +358,15 @@ export function WaSender({
 
         <button
           className="btn wa"
-          disabled={pending || blocked || (mode === "template" && !tpl) || (mode === "text" && !text.trim())}
+          disabled={pending || blocked}
           onClick={() =>
             start(async () => {
               const r = await sendLeadWhatsapp(leadId, {
                 mode,
-                text,
+                text: mode === "template" ? renderedPreview : text,
                 templateName: tpl,
                 language: lang,
+                params: mode === "template" ? templateParams : undefined,
               });
               setMsg({ ok: r.ok, text: r.ok ? "WhatsApp message sent and logged." : r.error || "Failed" });
               if (r.ok) {

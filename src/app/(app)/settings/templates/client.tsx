@@ -64,28 +64,19 @@ export function TemplateForm({ starters }: { starters: Starter[] }) {
               <span>Channel</span>
               <select name="channel" value={channel} onChange={(e) => setChannel(e.target.value)}>
                 <option value="EMAIL">Email</option>
-                <option value="WHATSAPP">WhatsApp</option>
               </select>
             </label>
 
-            {channel === "EMAIL" ? (
-              <label className="f" style={{ gridColumn: "1 / -1" }}>
-                <span>Subject line</span>
-                <input name="subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
-              </label>
-            ) : (
-              <>
-                <label className="f">
-                  <span>Meta template name</span>
-                  <input name="waTemplateName" placeholder="website_audit_followup" />
-                  <span className="hint">Must match the approved template name in WhatsApp Manager exactly.</span>
-                </label>
-                <label className="f">
-                  <span>Language code</span>
-                  <input name="waLanguage" defaultValue="en_US" />
-                </label>
-              </>
-            )}
+            <label className="f" style={{ gridColumn: "1 / -1" }}>
+              <span>Subject line</span>
+              <input name="subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
+            </label>
+          </div>
+
+          <div className="callout" style={{ margin: "12px 0 16px", background: "var(--slate-soft)", borderColor: "var(--border)" }}>
+            <p style={{ margin: 0, fontSize: 13 }}>
+              WhatsApp templates are managed in Meta WhatsApp Manager and loaded automatically through WhatsApp API settings.
+            </p>
           </div>
 
           <label className="f">

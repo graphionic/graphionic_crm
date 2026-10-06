@@ -7,11 +7,12 @@ export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   await requireActiveUser();
-  const [s, suppressions, templates, counts] = await Promise.all([
+  const [s, suppressions, templates, counts, skillsCount] = await Promise.all([
     getSettings(),
     prisma.suppression.count(),
     prisma.template.count(),
     prisma.lead.count(),
+    prisma.himiSkill.count(),
   ]);
 
   const mailOk =
@@ -66,6 +67,13 @@ export default async function SettingsPage() {
           statusOk={himiOk}
         />
         <Card
+          href="/settings/himi/skills"
+          title="HIMI Dynamic Skills"
+          desc={`Manage dynamic procedural intelligence, sales strategies, and guidance rules (${skillsCount} skills).`}
+          status={`${skillsCount} configured`}
+          statusOk={skillsCount > 0}
+        />
+        <Card
           href="/settings/email"
           title="Email, domain &amp; DNS"
           desc="Outgoing mail (SMTP or Resend), your from-address, and the SPF/DKIM/DMARC records for your sending domain — with a live DNS check."
@@ -94,6 +102,7 @@ export default async function SettingsPage() {
           statusOk={templates > 0}
         />
       </div>
+
 
       <div className="card">
         <div className="card-head"><h3>Workspace</h3></div>

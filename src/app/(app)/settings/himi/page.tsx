@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireActiveUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
 import { HimiSettingsForm } from "./form";
@@ -18,6 +19,15 @@ export default async function HimiSettingsPage() {
           <h2>HIMI / OpenAI Settings</h2>
           <p>Configure the OpenAI credentials and model used by HIMI, your conversational CRM agent.</p>
         </div>
+      </div>
+
+      <div className="hstack" style={{ gap: 12, marginBottom: 20, borderBottom: "1px solid var(--border-color, #e5e7eb)", paddingBottom: 10 }}>
+        <Link href="/settings/himi" className="btn sm primary">
+          OpenAI Configuration
+        </Link>
+        <Link href="/settings/himi/skills" className="btn sm">
+          Dynamic Skills
+        </Link>
       </div>
 
       <HimiSettingsForm

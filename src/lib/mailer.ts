@@ -15,10 +15,43 @@ function isConfigured(c: Awaited<ReturnType<typeof mailConfig>>) {
   return false;
 }
 
+function textToHtml(text: string): string {
+  const escaped = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+  const withLinks = escaped.replace(
+    /\bhttps?:\/\/[^\s<>'"]+/gi,
+    (url) => `<a href="${url}" style="color: #2563eb; text-decoration: underline;">${url}</a>`
+  );
+
+  const paragraphs = withLinks.split(/\n{2,}/);
+  const htmlBody = paragraphs
+    .map((p) => `<p style="margin: 0 0 14px 0; line-height: 1.6;">${p.replace(/\n/g, "<br/>")}</p>`)
+    .join("\n");
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #151927; margin: 0; padding: 0;">
+  <div>
+${htmlBody}
+  </div>
+</body>
+</html>`;
+}
+
 export async function sendEmail(opts: {
   to: string;
   subject: string;
   body: string;
+  html?: string;
   replyTo?: string;
 }): Promise<SendResult> {
   const c = await mailConfig();
@@ -26,6 +59,7 @@ export async function sendEmail(opts: {
     return { ok: false, provider: c.provider, error: "Mail is not configured. Open Settings → Email." };
   }
   const from = c.fromName ? `${c.fromName} <${c.fromEmail}>` : c.fromEmail;
+  const html = opts.html || textToHtml(opts.body);
 
   if (c.provider === "resend") {
     try {
@@ -40,6 +74,7 @@ export async function sendEmail(opts: {
           to: [opts.to],
           subject: opts.subject,
           text: opts.body,
+          html,
           reply_to: opts.replyTo || c.replyTo || c.fromEmail,
         }),
       });
@@ -66,6 +101,7 @@ export async function sendEmail(opts: {
       to: opts.to,
       subject: opts.subject,
       text: opts.body,
+      html,
       replyTo: opts.replyTo || c.replyTo || undefined,
     });
     return { ok: true, provider: "smtp", messageId: info.messageId };

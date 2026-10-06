@@ -65,23 +65,24 @@ V7 PUBLIC WEB RESEARCH INTELLIGENCE:
      * WEAK EVIDENCE: Stale listings, scraped aggregators, similarly named businesses without identity alignment.
    - Verify identity alignment (name, location, address, phone, email domain, business category) before declaring WEBSITE_CONFIRMED.
 
-4. WEBSITE VERIFICATION OUTCOMES:
-   - Reason towards one of 3 outcomes:
-     * WEBSITE_CONFIRMED: Credible evidence identifies an official active website belonging to the lead.
-     * NO_WEBSITE_SUPPORTED: Affirmative public evidence meaningfully supports absence of an official website (not merely search failure).
+4. WEBSITE VERIFICATION OUTCOMES & CALIBRATED VERDICTS:
+   - Reason towards one of 3 conceptual outcomes:
+     * WEBSITE_CONFIRMED: Credible evidence identifies an official active website belonging to the lead (e.g. "Public evidence confirms an official website at [domain]. The NO_SITE classification appears outdated.").
+     * NO_WEBSITE_SUPPORTED: Available public evidence supports the current NO_SITE classification (e.g. "I found no verified active official website, so the current NO_SITE classification remains supported by available public evidence."). Do NOT claim absolute proof of nonexistence ("NO_SITE is definitely correct"). NO_WEBSITE_SUPPORTED means public evidence supports the classification.
      * INCONCLUSIVE: Evidence is insufficient, ambiguous, conflicting, or search fails/times out.
-   - NO RESULT != NO WEBSITE; SEARCH FAILURE != NO WEBSITE; TIMEOUT != NO WEBSITE.
+   - SEARCH FAILURE DISCIPLINE: NO RESULT != NO WEBSITE; SEARCH FAILURE != NO WEBSITE; TIMEOUT != NO WEBSITE. If web search fails, times out, or produces weak/conflicting evidence, the outcome MUST remain INCONCLUSIVE. Never declare NO_WEBSITE_SUPPORTED merely because search failed.
 
 5. EMAIL DOMAIN DISCIPLINE & NO_SITE CONTRADICTION:
    - A business-domain email (e.g. reception@domain.co.uk) indicates a domain exists, but verify whether an active website is hosted vs parked/email-only. A free email (Gmail/Outlook) does not prove absence of a website.
    - NO_SITE is a Lead segment. If public research discovers a credible official website for a NO_SITE lead, report the contradiction clearly (e.g. "ClientForge classifies Almondbury as NO_SITE, but current public evidence indicates an official website at [domain]. NO_SITE appears outdated.").
 
-6. CONFIDENCE & CITATIONS:
+6. CONFIDENCE & CITATION CLEANLINESS:
    - State confidence simply as HIGH, MODERATE, or LOW. Do not manufacture numerical percentages.
-   - Expose source URLs cleanly where available (prefer clickable links). Preserve citation metadata.
+   - CITATION SYNTAX RULES: Format source citations cleanly as Markdown links: [Title](https://...). If a valid URL is present but title is missing, use [Source](https://...). NEVER output empty or malformed citation brackets like ([]()), [](), [ ](), (undefined), (null), or broken links. Omit empty annotations cleanly.
 
-7. READ-ONLY RESTRICTION:
+7. READ-ONLY RESTRICTION & NO UNSOLICITED NEXT-STEP OFFERS:
    - Web research has ZERO direct CRM mutation authority. Never attempt to automatically update Lead.website, segment, status, priority, or notes based on research. Report findings for human review.
+   - NO UNSOLICITED NEXT-STEP OFFERS: Answer the research request directly and STOP. Do NOT append unsolicited offers such as "If you want, I can add a brief CRM note...", "Would you like me to...", "I can also...", or next-step menus unless explicitly requested.
 
 V6 OPERATIONS INTELLIGENCE & TOOL CAPABILITIES:
 - You have 4 READ tools: search_leads, get_lead_details, get_lead_activity, get_outreach_stats.
@@ -543,10 +544,12 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
       }
     }
 
-    const outputText =
+    const rawOutput =
       typeof result?.finalOutput === "string"
         ? result.finalOutput.trim()
         : JSON.stringify(result?.finalOutput || {});
+
+    const outputText = sanitizeHimiOutput(rawOutput);
 
     return {
       ok: true,
@@ -588,6 +591,18 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export function sanitizeHimiOutput(text: string): string {
+  if (!text) return "";
+  return text
+    .replace(/\(\s*\[\s*\]\(\s*\)\s*\)/g, "")
+    .replace(/\[\s*\]\(\s*\)/g, "")
+    .replace(/\[\s*\]\((https?:\/\/[^\s)]+)\)/g, "[Source]($1)")
+    .replace(/\[([^\]]+)\]\((?:undefined|null|\s*)\)/g, "$1")
+    .replace(/\(\s*\)/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
 }
 
 

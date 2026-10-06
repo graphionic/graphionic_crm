@@ -464,7 +464,9 @@ export default function HimiClient() {
                         {Array.from(
                           new Set(
                             msg.toolCalls.map(
-                              (t) => FRIENDLY_TOOL_LABELS[t.name] || t.name
+                              (t) =>
+                                FRIENDLY_TOOL_LABELS[t.name] ||
+                                (t.name.startsWith("web_search") ? "Web research" : t.name)
                             )
                           )
                         ).join(" · ")}
@@ -559,13 +561,42 @@ function FormattedText({ content }: { content: string }) {
 }
 
 function renderInline(text: string) {
-  const parts = text.split(/(\*\*.*?\*\*|`.*?`)/g);
+  // Pre-clean residual broken link artifacts
+  const sanitized = text
+    .replace(/\(\s*\[\s*\]\(\s*\)\s*\)/g, "")
+    .replace(/\[\s*\]\(\s*\)/g, "")
+    .replace(/\(\s*\)/g, "");
+
+  const parts = sanitized.split(/(\*\*.*?\*\*|`.*?`|\[.*?\]\(.*?\))/g);
   return parts.map((part, i) => {
     if (part.startsWith("**") && part.endsWith("**")) {
       return <strong key={i}>{part.slice(2, -2)}</strong>;
     }
     if (part.startsWith("`") && part.endsWith("`")) {
       return <code key={i} className="himi-code">{part.slice(1, -1)}</code>;
+    }
+    if (part.startsWith("[") && part.includes("](")) {
+      const match = part.match(/^\[(.*?)\]\((.*?)\)$/);
+      if (match) {
+        const linkText = match[1].trim();
+        const linkUrl = match[2].trim();
+        if (!linkUrl || linkUrl === "undefined" || linkUrl === "null") {
+          return linkText ? <span key={i}>{linkText}</span> : null;
+        }
+        const displayTitle = linkText || "Source";
+        const href = /^https?:\/\//i.test(linkUrl) ? linkUrl : `https://${linkUrl}`;
+        return (
+          <a
+            key={i}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ textDecoration: "underline", color: "var(--primary, #3b82f6)" }}
+          >
+            {displayTitle}
+          </a>
+        );
+      }
     }
     return part;
   });

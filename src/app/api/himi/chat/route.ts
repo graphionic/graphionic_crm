@@ -1,5 +1,6 @@
 import { getSessionUser } from "@/lib/session";
 import { runHimiNativeTurn } from "@/lib/himi/agent";
+import { executeConfirmedHimiAction } from "@/lib/himi/tools";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -13,6 +14,38 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => ({}));
+
+    // Handle cancellation request
+    if (body?.cancelPendingAction) {
+      return NextResponse.json({
+        ok: true,
+        response: "Action cancelled. No changes were made.",
+      });
+    }
+
+    // Handle user confirmation of a pending controlled action
+    if (body?.confirmedPendingAction) {
+      const execResult = await executeConfirmedHimiAction(
+        body.confirmedPendingAction,
+        user.email
+      );
+
+      if (!execResult.ok) {
+        return NextResponse.json(
+          { ok: false, error: execResult.error || "Failed to execute action." },
+          { status: 400 }
+        );
+      }
+
+      return NextResponse.json({
+        ok: true,
+        agent: "HIMI",
+        response: execResult.response,
+        executedAction: execResult.executedAction,
+      });
+    }
+
+    // Normal message validation
     if (!body?.message) {
       return NextResponse.json({ ok: false, error: "Message is required." }, { status: 400 });
     }
@@ -31,3 +64,4 @@ export async function POST(req: Request) {
     );
   }
 }
+

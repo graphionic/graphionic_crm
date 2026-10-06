@@ -9,12 +9,30 @@ type ToolCallMeta = {
   durationMs?: number;
 };
 
+type PendingAction = {
+  action: "update_lead_status" | "update_lead_priority" | "add_lead_note";
+  leadId: string;
+  companyName: string;
+  currentValue?: string | null;
+  newValue: string;
+  arguments: Record<string, any>;
+};
+
+type ExecutedAction = {
+  action: string;
+  companyName: string;
+  previousValue?: string | null;
+  newValue: string;
+};
+
 type ChatMessage = {
   id: string;
   sender: "user" | "himi";
   text: string;
   toolCalls?: ToolCallMeta[];
   isError?: boolean;
+  pendingAction?: PendingAction;
+  executedAction?: ExecutedAction;
   timestamp: string;
 };
 
@@ -23,6 +41,9 @@ const FRIENDLY_TOOL_LABELS: Record<string, string> = {
   get_lead_details: "Lead details",
   get_lead_activity: "Activity",
   get_outreach_stats: "Outreach stats",
+  update_lead_status: "Update status",
+  update_lead_priority: "Update priority",
+  add_lead_note: "Add note",
 };
 
 export default function HimiClient() {
@@ -30,6 +51,7 @@ export default function HimiClient() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [connected, setConnected] = useState<boolean | null>(null);
+  const [activePendingAction, setActivePendingAction] = useState<PendingAction | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -53,9 +75,144 @@ export default function HimiClient() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
+  const handleConfirmAction = async (pending: PendingAction) => {
+    if (loading) return;
+
+    const userMsgId = `user-${Date.now()}`;
+    const userMsg: ChatMessage = {
+      id: userMsgId,
+      sender: "user",
+      text: "Confirm",
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+
+    setMessages((prev) => [...prev, userMsg]);
+    setActivePendingAction(null);
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/himi/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          confirmedPendingAction: pending,
+        }),
+      });
+
+      const data = await res.json();
+      const himiMsgId = `himi-${Date.now()}`;
+
+      if (data.ok) {
+        setConnected(true);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: himiMsgId,
+            sender: "himi",
+            text: data.response || "Action executed successfully.",
+            executedAction: data.executedAction,
+            timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          },
+        ]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: himiMsgId,
+            sender: "himi",
+            text: data.error || "Execution failed. Please try again.",
+            isError: true,
+            timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          },
+        ]);
+      }
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `himi-err-${Date.now()}`,
+          sender: "himi",
+          text: "Failed to confirm action due to connection error.",
+          isError: true,
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancelAction = async () => {
+    if (loading) return;
+
+    const userMsgId = `user-${Date.now()}`;
+    const userMsg: ChatMessage = {
+      id: userMsgId,
+      sender: "user",
+      text: "Cancel",
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+
+    setMessages((prev) => [...prev, userMsg]);
+    setActivePendingAction(null);
+    setLoading(true);
+
+    try {
+      await fetch("/api/himi/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cancelPendingAction: true }),
+      });
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `himi-${Date.now()}`,
+          sender: "himi",
+          text: "Action cancelled. No changes were made.",
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        },
+      ]);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `himi-${Date.now()}`,
+          sender: "himi",
+          text: "Action cancelled.",
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSend = async (messageText?: string) => {
     const textToSend = (messageText || input).trim();
     if (!textToSend || loading) return;
+
+    // Natural-language confirmation / rejection check if activePendingAction exists
+    if (activePendingAction) {
+      const lower = textToSend.toLowerCase();
+      const isConfirm = /^(yes|yep|yeah|confirm|do it|proceed|ok|sure|go ahead)$/i.test(lower);
+      const isCancel = /^(no|nope|cancel|don't do it|never mind|stop)$/i.test(lower);
+
+      if (isConfirm) {
+        if (!messageText) setInput("");
+        await handleConfirmAction(activePendingAction);
+        return;
+      }
+
+      if (isCancel) {
+        if (!messageText) setInput("");
+        await handleCancelAction();
+        return;
+      }
+
+      // If user types an unrelated command, discard stale pending action
+      setActivePendingAction(null);
+    }
 
     const userMsgId = `user-${Date.now()}`;
     const userMsg: ChatMessage = {
@@ -89,6 +246,9 @@ export default function HimiClient() {
 
       if (data.ok && data.response) {
         setConnected(true);
+        if (data.pendingAction) {
+          setActivePendingAction(data.pendingAction);
+        }
         setMessages((prev) => [
           ...prev,
           {
@@ -96,6 +256,7 @@ export default function HimiClient() {
             sender: "himi",
             text: data.response,
             toolCalls: data.toolCalls || [],
+            pendingAction: data.pendingAction,
             timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           },
         ]);
@@ -138,8 +299,8 @@ export default function HimiClient() {
   const suggestionPrompts = [
     "How many leads do we have?",
     "Show me high-priority dental leads.",
-    "What happened with Mayank Parmar Test?",
-    "How is our outreach performing?",
+    "Mark Mayank Parmar Test as contacted",
+    "Set priority of Mayank Parmar Test to HIGH",
   ];
 
   return (
@@ -155,7 +316,7 @@ export default function HimiClient() {
         </div>
 
         <div className="status-group">
-          <span className="readonly-pill">Read-only</span>
+          <span className="readonly-pill">Controlled Actions</span>
           {connected === true ? (
             <span className="status-pill connected">
               <span className="status-dot" /> Connected
@@ -190,7 +351,7 @@ export default function HimiClient() {
           <div className="himi-empty-state">
             <div className="himi-hero-avatar">✦</div>
             <h3>HIMI</h3>
-            <p>Ask anything about your ClientForge CRM.</p>
+            <p>Ask anything about your ClientForge CRM or perform controlled Lead actions after confirmation.</p>
 
             <div className="himi-suggestions">
               {suggestionPrompts.map((prompt, idx) => (
@@ -221,6 +382,68 @@ export default function HimiClient() {
                   </div>
 
                   <FormattedText content={msg.text} />
+
+                  {/* Confirmation Card UI */}
+                  {msg.pendingAction ? (
+                    <div className="himi-confirm-card">
+                      <div className="himi-confirm-title">
+                        <span>⚠</span> CONFIRMATION REQUIRED
+                      </div>
+                      <div className="himi-confirm-details">
+                        <strong>{msg.pendingAction.companyName}</strong>
+                        <br />
+                        {msg.pendingAction.action === "update_lead_status" && (
+                          <>Status Change: <code>{msg.pendingAction.currentValue || "N/A"}</code> → <code>{msg.pendingAction.newValue}</code></>
+                        )}
+                        {msg.pendingAction.action === "update_lead_priority" && (
+                          <>Priority Change: <code>{msg.pendingAction.currentValue || "N/A"}</code> → <code>{msg.pendingAction.newValue}</code></>
+                        )}
+                        {msg.pendingAction.action === "add_lead_note" && (
+                          <>Add Note: <em>"{msg.pendingAction.newValue}"</em></>
+                        )}
+                      </div>
+                      {activePendingAction && activePendingAction.leadId === msg.pendingAction.leadId ? (
+                        <div className="himi-confirm-actions">
+                          <button
+                            className="btn sm primary"
+                            onClick={() => handleConfirmAction(msg.pendingAction!)}
+                            disabled={loading}
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            className="btn sm danger"
+                            onClick={() => handleCancelAction()}
+                            disabled={loading}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                          (Action completed or expired)
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+
+                  {/* Success Execution Card UI */}
+                  {msg.executedAction ? (
+                    <div className="himi-success-card">
+                      <span>✓</span>
+                      <div>
+                        <strong>Updated {msg.executedAction.companyName}</strong>
+                        <br />
+                        {msg.executedAction.previousValue ? (
+                          <span style={{ fontSize: 12 }}>
+                            {msg.executedAction.previousValue} → {msg.executedAction.newValue}
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: 12 }}>Note recorded in lead timeline</span>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
 
                   {/* Secondary Tool Execution Indicator */}
                   {msg.toolCalls && msg.toolCalls.length > 0 ? (

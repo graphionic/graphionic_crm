@@ -459,3 +459,50 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 .himi-composer button:hover:not(:disabled) { background: var(--brand-hover); }
 .himi-composer button:disabled { opacity: .5; cursor: not-allowed; }
 
+/* HIMI V5 Controlled Actions Cards */
+.himi-confirm-card {
+  background: var(--amber-soft);
+  border: 1px solid var(--amber-line);
+  border-radius: var(--radius-card);
+  padding: 14px 16px;
+  margin-top: 12px;
+}
+.himi-confirm-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--amber);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.himi-confirm-details {
+  font-size: 13.5px;
+  color: var(--ink);
+  font-weight: 500;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+.himi-confirm-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.himi-success-card {
+  background: var(--green-soft);
+  border: 1px solid var(--green-line);
+  border-radius: var(--radius-card);
+  padding: 12px 16px;
+  margin-top: 10px;
+  font-size: 13.5px;
+  color: var(--green);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+

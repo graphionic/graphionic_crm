@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { executeHimiTool } from "./tools";
+import { executeHimiTool, HimiPendingAction } from "./tools";
 import { himiConfig } from "@/lib/settings";
 
 export interface HimiHistoryMessage {
@@ -24,6 +24,7 @@ export interface HimiChatResponse {
   response?: string;
   error?: string;
   toolCalls?: ToolCallExecution[];
+  pendingAction?: HimiPendingAction;
 }
 
 function himiSystemInstructions(): string {
@@ -34,27 +35,24 @@ Core Purpose & Identity:
 - ClientForge tracks business leads and communication timelines (Activities).
 - Outreach channels are Email (handled via Resend) and WhatsApp (handled via Meta WhatsApp Cloud API).
 
-STRICT READ-ONLY BOUNDARY:
-- Current HIMI capabilities are STRICTLY READ-ONLY.
-- You have 4 available tools: search_leads, get_lead_details, get_lead_activity, get_outreach_stats.
-- If the user asks to modify a lead, change a status, create a record, delete data, send an email, or send a WhatsApp message (e.g. "Send Mayank a WhatsApp", "Change lead to interested"), REFUSE NATIVELY AND GRACEFULLY.
-- State clearly that you currently have read-only CRM access and cannot perform database updates or send outreach messages yet.
-- NEVER pretend or claim an unsupported action occurred.
+V5 CONTROLLED CRM ACTIONS BOUNDARY:
+- You have 4 READ tools: search_leads, get_lead_details, get_lead_activity, get_outreach_stats.
+- You have 3 CONTROLLED ACTION tools: update_lead_status, update_lead_priority, add_lead_note.
+- EVERY MUTATION REQUIRES EXPLICIT HUMAN CONFIRMATION.
+- NEVER claim or attempt a database mutation without user confirmation. When a user asks to change a lead's status, priority, or add a note, resolve the exact single Lead ID using read tools first, then call the appropriate controlled action tool to prepare a pending action for user confirmation.
+- V5 supports updating only ONE Lead at a time. BULK MUTATIONS ARE STRICTLY FORBIDDEN (e.g. "mark all dental leads contacted" -> REFUSE bulk mutation gracefully).
 
-Data Integrity & Tool Selection:
-- ClientForge tools are your sole source of truth. Always call the appropriate read-only tools to retrieve real CRM data.
+STRICTLY LOCKED CAPABILITIES:
+- You CANNOT create leads, delete leads, or bulk modify leads.
+- You CANNOT edit contact names, email addresses, phone numbers, websites, address/location details, consent settings, or suppression lists.
+- EMAIL AND WHATSAPP SENDING REMAIN LOCKED. (e.g. "Send Mayank a WhatsApp", "Email this lead" -> REFUSE NATIVELY AND GRACEFULLY). State clearly that email and WhatsApp outreach functions are locked.
+- You CANNOT modify email/WhatsApp templates, Settings, users, or campaign automation.
+
+Data Integrity & Precision:
+- ClientForge tools are your sole source of truth. Always call the appropriate read tools to retrieve real CRM data.
 - NEVER fabricate leads, contact details, email addresses, phone numbers, or activity histories.
-- If a search for a company name returns MULTIPLE plausible lead records, list the matching leads concisely (ID, Company Name, City/Country) and ask the user to clarify which lead they mean.
-- If no leads match or database data is unavailable, state so clearly.
-
-ClientForge Lead Qualification Rules:
-- Rule: CONFIRMED NO WEBSITE + (VALID PHONE OR VALID EMAIL) = VALID LEAD.
-- No website + valid email = valid lead.
-- No website + valid phone = valid lead.
-- No website + both = valid lead.
-- No website + neither = invalid.
-- Live/working website = invalid for NO_SITE targeting.
-- Critical logic: Missing website data or a failed search is NOT proof that a business has no website. Never infer confirmed no-site status without verification.
+- AMBIGUOUS LEADS: If a search returns MULTIPLE matching lead records for a company name, list the matching leads concisely (ID, Company Name, City/Country) and ask the user to clarify which exact lead they mean. Do NOT guess or select a lead arbitrarily.
+- NO-OP PROTECTION: If a requested status or priority is already identical to the current value, inform the user that the lead already has that value without proposing a redundant update.
 
 Tone & Style:
 - Concise, operational, confident only when supported by CRM data, helpful, and natural.
@@ -82,6 +80,7 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
   setDefaultOpenAIKey(config.apiKey);
 
   const toolCallsExecuted: ToolCallExecution[] = [];
+  let capturedPendingAction: HimiPendingAction | undefined = undefined;
   const defaultTimeout = 45000;
 
   const searchLeadsTool = (tool as any)({
@@ -186,11 +185,108 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     },
   });
 
+  const updateLeadStatusTool = (tool as any)({
+    name: "update_lead_status",
+    description: "Prepare a pending lead status update (NEW, QUALIFIED, CONTACTED, REPLIED, CALL_BOOKED, PROPOSAL_SENT, WON, LOST, NURTURE) for user confirmation.",
+    parameters: z.object({
+      lead_id: z.string().describe("Unique Lead ID"),
+      status: z.enum([
+        "NEW",
+        "QUALIFIED",
+        "CONTACTED",
+        "REPLIED",
+        "CALL_BOOKED",
+        "PROPOSAL_SENT",
+        "WON",
+        "LOST",
+        "NURTURE",
+      ]).describe("Target pipeline status"),
+    }),
+    strict: true,
+    timeoutMs: defaultTimeout,
+    execute: async (args: any) => {
+      const startedAt = Date.now();
+      let ok = true;
+      let res: any;
+      try {
+        res = await executeHimiTool("update_lead_status", args);
+        ok = res?.ok === true;
+        if (res?.pendingAction) {
+          capturedPendingAction = res.pendingAction;
+        }
+      } catch (err) {
+        ok = false;
+        res = { ok: false, error: { code: "TOOL_EXECUTION_ERROR", message: err instanceof Error ? err.message : String(err) } };
+      }
+      toolCallsExecuted.push({ name: "update_lead_status", ok, durationMs: Date.now() - startedAt });
+      return JSON.stringify(res);
+    },
+  });
+
+  const updateLeadPriorityTool = (tool as any)({
+    name: "update_lead_priority",
+    description: "Prepare a pending lead priority update (LOW, MEDIUM, HIGH) for user confirmation.",
+    parameters: z.object({
+      lead_id: z.string().describe("Unique Lead ID"),
+      priority: z.enum(["LOW", "MEDIUM", "HIGH"]).describe("Target priority level"),
+    }),
+    strict: true,
+    timeoutMs: defaultTimeout,
+    execute: async (args: any) => {
+      const startedAt = Date.now();
+      let ok = true;
+      let res: any;
+      try {
+        res = await executeHimiTool("update_lead_priority", args);
+        ok = res?.ok === true;
+        if (res?.pendingAction) {
+          capturedPendingAction = res.pendingAction;
+        }
+      } catch (err) {
+        ok = false;
+        res = { ok: false, error: { code: "TOOL_EXECUTION_ERROR", message: err instanceof Error ? err.message : String(err) } };
+      }
+      toolCallsExecuted.push({ name: "update_lead_priority", ok, durationMs: Date.now() - startedAt });
+      return JSON.stringify(res);
+    },
+  });
+
+  const addLeadNoteTool = (tool as any)({
+    name: "add_lead_note",
+    description: "Prepare a pending note to be added to a lead's history for user confirmation.",
+    parameters: z.object({
+      lead_id: z.string().describe("Unique Lead ID"),
+      note: z.string().describe("Note content to add"),
+    }),
+    strict: true,
+    timeoutMs: defaultTimeout,
+    execute: async (args: any) => {
+      const startedAt = Date.now();
+      let ok = true;
+      let res: any;
+      try {
+        res = await executeHimiTool("add_lead_note", args);
+        ok = res?.ok === true;
+        if (res?.pendingAction) {
+          capturedPendingAction = res.pendingAction;
+        }
+      } catch (err) {
+        ok = false;
+        res = { ok: false, error: { code: "TOOL_EXECUTION_ERROR", message: err instanceof Error ? err.message : String(err) } };
+      }
+      toolCallsExecuted.push({ name: "add_lead_note", ok, durationMs: Date.now() - startedAt });
+      return JSON.stringify(res);
+    },
+  });
+
   const availableTools = [
     searchLeadsTool,
     getLeadDetailsTool,
     getLeadActivityTool,
     getOutreachStatsTool,
+    updateLeadStatusTool,
+    updateLeadPriorityTool,
+    addLeadNoteTool,
   ];
 
   const himiAgent = new Agent({
@@ -228,12 +324,12 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
       agent: "HIMI",
       response: outputText,
       toolCalls: toolCallsExecuted,
+      pendingAction: capturedPendingAction,
     };
   } catch (error) {
     const rawMsg = error instanceof Error ? error.message : String(error);
     console.error("[HIMI Agent Turn Error]:", rawMsg);
 
-    // Keep user-facing application level messages clean
     if (rawMsg.includes("OpenAI API key") || rawMsg.includes("message is required")) {
       return {
         ok: false,
@@ -251,3 +347,4 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     clearTimeout(timeout);
   }
 }
+

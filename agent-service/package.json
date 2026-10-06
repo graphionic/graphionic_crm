@@ -1,0 +1,19 @@
+{
+  "name": "clientforge-himi-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "HIMI — ClientForge AI Agent & MCP Bridge.",
+  "scripts": {
+    "start": "node src/server.js",
+    "check": "node --check src/server.js && node --check src/mcp-server.js && node --check src/himi-tools.js && node --check scripts/smoke-local.mjs && node --check test/mcp-server.test.mjs",
+    "test": "node --test",
+    "smoke": "node scripts/smoke-local.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "@openai/agents": "0.13.2",
+    "@prisma/client": "^6.2.1",
+    "zod": "4.4.3"
+  }
+}

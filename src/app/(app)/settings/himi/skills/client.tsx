@@ -20,7 +20,6 @@ export type SkillItem = {
 
 export function SkillsManager({ initialSkills }: { initialSkills: SkillItem[] }) {
   const router = useRouter();
-  const [skills] = useState<SkillItem[]>(initialSkills);
   const [editingSkill, setEditingSkill] = useState<SkillItem | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -63,7 +62,7 @@ export function SkillsManager({ initialSkills }: { initialSkills: SkillItem[] })
 
       <div className="hstack" style={{ marginBottom: 16, justifyContent: "space-between" }}>
         <div>
-          <h3 style={{ fontSize: 16, margin: 0 }}>Registered HIMI Skills ({skills.length})</h3>
+          <h3 style={{ fontSize: 16, margin: 0 }}>Registered HIMI Skills ({initialSkills.length})</h3>
           <p className="small muted" style={{ margin: 0 }}>
             Skills define procedural intelligence for HIMI conversations.
           </p>
@@ -102,7 +101,7 @@ export function SkillsManager({ initialSkills }: { initialSkills: SkillItem[] })
             </button>
           </div>
           <div className="card-body">
-            <form onSubmit={handleSave}>
+            <form key={editingSkill ? editingSkill.id : "create"} onSubmit={handleSave}>
               <div className="grid c2">
                 <label className="f">
                   <span>Name *</span>
@@ -221,7 +220,7 @@ export function SkillsManager({ initialSkills }: { initialSkills: SkillItem[] })
           <h3>Configured Skills</h3>
         </div>
         <div className="card-body tight">
-          {skills.length === 0 ? (
+          {initialSkills.length === 0 ? (
             <div className="empty">
               <b>No dynamic skills configured</b>
               Create your first HIMI skill or run the project seed script to populate initial defaults.
@@ -240,7 +239,8 @@ export function SkillsManager({ initialSkills }: { initialSkills: SkillItem[] })
                   </tr>
                 </thead>
                 <tbody>
-                  {skills.map((skill) => (
+                  {initialSkills.map((skill) => (
+
                     <tr key={skill.id} style={{ opacity: skill.enabled ? 1 : 0.65 }}>
                       <td>
                         <button

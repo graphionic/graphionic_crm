@@ -97,7 +97,7 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
       priority: z.string().optional().describe("Priority level (LOW, MEDIUM, HIGH)"),
       limit: z.number().int().optional().describe("Max records to return (default 20, max 100)"),
     }),
-    strict: false,
+    strict: true,
     timeoutMs: defaultTimeout,
     execute: async (args: any) => {
       const startedAt = Date.now();
@@ -121,7 +121,7 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     parameters: z.object({
       lead_id: z.string().describe("Unique Lead ID"),
     }),
-    strict: false,
+    strict: true,
     timeoutMs: defaultTimeout,
     execute: async (args: any) => {
       const startedAt = Date.now();
@@ -146,7 +146,7 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
       lead_id: z.string().describe("Unique Lead ID"),
       limit: z.number().int().optional().describe("Max activities to return (default 20)"),
     }),
-    strict: false,
+    strict: true,
     timeoutMs: defaultTimeout,
     execute: async (args: any) => {
       const startedAt = Date.now();
@@ -168,7 +168,7 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     name: "get_outreach_stats",
     description: "Retrieve a compact read-only summary of lead counts, status breakdowns, and activity statistics.",
     parameters: z.object({}),
-    strict: false,
+    strict: true,
     timeoutMs: defaultTimeout,
     execute: async (args: any) => {
       const startedAt = Date.now();
@@ -230,9 +230,21 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
       toolCalls: toolCallsExecuted,
     };
   } catch (error) {
+    const rawMsg = error instanceof Error ? error.message : String(error);
+    console.error("[HIMI Agent Turn Error]:", rawMsg);
+
+    // Keep user-facing application level messages clean
+    if (rawMsg.includes("OpenAI API key") || rawMsg.includes("message is required")) {
+      return {
+        ok: false,
+        error: rawMsg,
+        toolCalls: toolCallsExecuted,
+      };
+    }
+
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Failed to execute HIMI turn.",
+      error: "HIMI couldn't complete that request. Please try again.",
       toolCalls: toolCallsExecuted,
     };
   } finally {

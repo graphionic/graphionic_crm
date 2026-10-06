@@ -12,7 +12,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     if (!body?.message) {
       return NextResponse.json({ ok: false, error: "Message is required." }, { status: 400 });
     }
@@ -24,8 +24,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json(result, { status: result.ok ? 200 : 400 });
   } catch (error) {
+    console.error("[HIMI API Route Error]:", error instanceof Error ? error.message : String(error));
     return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : "Failed to execute HIMI turn." },
+      { ok: false, error: "HIMI couldn't complete that request. Please try again." },
       { status: 500 }
     );
   }

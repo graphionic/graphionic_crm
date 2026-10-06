@@ -4,10 +4,20 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireActiveUser } from "@/lib/session";
 
+const MAX_RESOURCE_CONTENT_CHARS = 3000;
+
 export async function listSkills() {
   await requireActiveUser();
   try {
     return await prisma.himiSkill.findMany({
+      include: {
+        resources: {
+          orderBy: [
+            { priority: "asc" },
+            { createdAt: "desc" },
+          ],
+        },
+      },
       orderBy: [
         { priority: "asc" },
         { createdAt: "desc" },
@@ -18,7 +28,6 @@ export async function listSkills() {
     return [];
   }
 }
-
 
 export async function createSkill(fd: FormData) {
   await requireActiveUser();
@@ -150,5 +159,126 @@ export async function toggleSkillEnabled(id: string, enabled: boolean) {
     };
   } catch (e) {
     return { ok: false, message: `Failed to toggle skill state: ${(e as Error).message}` };
+  }
+}
+
+// ---------------------------------------------------------------- Skill Resources
+
+export async function createSkillResource(skillId: string, fd: FormData) {
+  await requireActiveUser();
+  if (!skillId) {
+    return { ok: false, message: "Parent Skill ID is required." };
+  }
+
+  const g = (k: string) => String(fd.get(k) ?? "").trim();
+  const title = g("title");
+  const content = g("content");
+  const priorityRaw = g("priority");
+  const priority = priorityRaw ? parseInt(priorityRaw, 10) : 0;
+  const enabled = fd.get("enabled") === "true" || fd.get("enabled") === "on";
+
+  if (!title) {
+    return { ok: false, message: "Resource title is required." };
+  }
+  if (!content) {
+    return { ok: false, message: "Resource content is required." };
+  }
+  if (content.length > MAX_RESOURCE_CONTENT_CHARS) {
+    return {
+      ok: false,
+      message: `Resource content exceeds maximum limit of ${MAX_RESOURCE_CONTENT_CHARS.toLocaleString()} characters.`,
+    };
+  }
+
+  try {
+    const parent = await prisma.himiSkill.findUnique({ where: { id: skillId } });
+    if (!parent) {
+      return { ok: false, message: "Parent skill does not exist." };
+    }
+
+    const resource = await prisma.himiSkillResource.create({
+      data: {
+        skillId,
+        title,
+        content,
+        priority: isNaN(priority) ? 0 : priority,
+        enabled,
+      },
+    });
+
+    revalidatePath("/settings/himi/skills");
+    revalidatePath("/settings/himi");
+    return { ok: true, message: `Resource "${resource.title}" created successfully.`, resource };
+  } catch (e) {
+    return { ok: false, message: `Failed to create resource: ${(e as Error).message}` };
+  }
+}
+
+export async function updateSkillResource(id: string, fd: FormData) {
+  await requireActiveUser();
+  if (!id) {
+    return { ok: false, message: "Resource ID is required." };
+  }
+
+  const g = (k: string) => String(fd.get(k) ?? "").trim();
+  const title = g("title");
+  const content = g("content");
+  const priorityRaw = g("priority");
+  const priority = priorityRaw ? parseInt(priorityRaw, 10) : 0;
+  const enabled = fd.get("enabled") === "true" || fd.get("enabled") === "on";
+
+  if (!title) {
+    return { ok: false, message: "Resource title is required." };
+  }
+  if (!content) {
+    return { ok: false, message: "Resource content is required." };
+  }
+  if (content.length > MAX_RESOURCE_CONTENT_CHARS) {
+    return {
+      ok: false,
+      message: `Resource content exceeds maximum limit of ${MAX_RESOURCE_CONTENT_CHARS.toLocaleString()} characters.`,
+    };
+  }
+
+  try {
+    const resource = await prisma.himiSkillResource.update({
+      where: { id },
+      data: {
+        title,
+        content,
+        priority: isNaN(priority) ? 0 : priority,
+        enabled,
+      },
+    });
+
+    revalidatePath("/settings/himi/skills");
+    revalidatePath("/settings/himi");
+    return { ok: true, message: `Resource "${resource.title}" updated successfully.`, resource };
+  } catch (e) {
+    return { ok: false, message: `Failed to update resource: ${(e as Error).message}` };
+  }
+}
+
+export async function toggleSkillResourceEnabled(id: string, enabled: boolean) {
+  await requireActiveUser();
+  if (!id) {
+    return { ok: false, message: "Resource ID is required." };
+  }
+
+  try {
+    const resource = await prisma.himiSkillResource.update({
+      where: { id },
+      data: { enabled },
+    });
+
+    revalidatePath("/settings/himi/skills");
+    revalidatePath("/settings/himi");
+    return {
+      ok: true,
+      message: `Resource "${resource.title}" ${enabled ? "enabled" : "disabled"}.`,
+      resource,
+    };
+  } catch (e) {
+    return { ok: false, message: `Failed to toggle resource state: ${(e as Error).message}` };
   }
 }

@@ -148,19 +148,35 @@ model Template {
 
 // ---------------------------------------------------------------- himi skills
 model HimiSkill {
-  id            String   @id @default(cuid())
-  slug          String   @unique
+  id            String              @id @default(cuid())
+  slug          String              @unique
   name          String
   description   String?
-  instructions  String   @db.Text
-  usageGuidance String?  @db.Text
-  category      String   @default("GENERAL")
-  enabled       Boolean  @default(true)
-  priority      Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  instructions  String              @db.Text
+  usageGuidance String?             @db.Text
+  category      String              @default("GENERAL")
+  enabled       Boolean             @default(true)
+  priority      Int                 @default(0)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  resources     HimiSkillResource[]
 
   @@index([enabled, priority])
   @@index([category])
 }
+
+model HimiSkillResource {
+  id        String    @id @default(cuid())
+  skillId   String
+  skill     HimiSkill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  title     String
+  content   String    @db.Text
+  enabled   Boolean   @default(true)
+  priority  Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([skillId, enabled, priority])
+}
+
 

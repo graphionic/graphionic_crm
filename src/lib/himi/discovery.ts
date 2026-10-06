@@ -10,9 +10,13 @@ export interface DynamicSkillMetadata {
   priority: number;
 }
 
+export const MAX_TOTAL_RESOURCE_CHARS = 5000;
+export const MAX_RESOURCES_PER_SKILL = 5;
+
 /**
  * Semantically discovers and returns guidance for enabled HimiSkills from Prisma.
  * Uses a lightweight, fast OpenAI completion call to evaluate skill metadata relevance.
+ * Loads enabled supporting resources for selected skills within character budgets.
  * Gracefully returns an empty string on any failure or if no skills are relevant.
  */
 export async function getDynamicSkillInstructions(
@@ -44,7 +48,7 @@ export async function getDynamicSkillInstructions(
       return "";
     }
 
-    // 2. Format metadata for semantic selection (excluding heavy procedural instructions)
+    // 2. Format metadata for semantic selection (excluding heavy procedural instructions & resources)
     const skillsMetadata = enabledSkills.map((s) => ({
       slug: s.slug,
       name: s.name,
@@ -115,10 +119,57 @@ Rules:
       return "";
     }
 
-    // Format selected skill guidance blocks
-    const guidanceBlocks = matchedSkills.map(
-      (s) => `[Skill: ${s.name}]\n${s.instructions.trim()}`
-    );
+    // 3. Fetch enabled supporting resources for selected skill IDs
+    const selectedSkillIds = matchedSkills.map((s) => s.id);
+    const resourcesBySkillId: Record<string, Array<{ title: string; content: string }>> = {};
+
+    try {
+      const enabledResources = await prisma.himiSkillResource.findMany({
+        where: {
+          skillId: { in: selectedSkillIds },
+          enabled: true,
+        },
+        select: {
+          skillId: true,
+          title: true,
+          content: true,
+        },
+        orderBy: [{ priority: "asc" }, { createdAt: "desc" }],
+      });
+
+      for (const r of enabledResources) {
+        if (!resourcesBySkillId[r.skillId]) {
+          resourcesBySkillId[r.skillId] = [];
+        }
+        if (resourcesBySkillId[r.skillId].length < MAX_RESOURCES_PER_SKILL) {
+          resourcesBySkillId[r.skillId].push({
+            title: r.title.trim(),
+            content: r.content.trim(),
+          });
+        }
+      }
+    } catch (resErr) {
+      console.error("[Resource Loading Failure]:", resErr);
+      // Fail safely: continue with selected skill instructions only
+    }
+
+    // 4. Compose guidance blocks while enforcing total resource character budget without truncating individual resources
+    let totalResourceCharsUsed = 0;
+    const guidanceBlocks: string[] = [];
+
+    for (const s of matchedSkills) {
+      let skillBlock = `[Skill: ${s.name}]\n${s.instructions.trim()}`;
+
+      const skillResources = resourcesBySkillId[s.id] || [];
+      for (const res of skillResources) {
+        if (totalResourceCharsUsed + res.content.length <= MAX_TOTAL_RESOURCE_CHARS) {
+          skillBlock += `\n\n[Resource: ${res.title}]\n${res.content}`;
+          totalResourceCharsUsed += res.content.length;
+        }
+      }
+
+      guidanceBlocks.push(skillBlock);
+    }
 
     return `--- RELEVANT SKILL GUIDANCE ---\n\n${guidanceBlocks.join("\n\n")}`;
   } catch (err) {

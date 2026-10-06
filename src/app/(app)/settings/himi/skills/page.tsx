@@ -14,6 +14,11 @@ export default async function HimiSkillsSettingsPage() {
     ...s,
     createdAt: s.createdAt.toISOString(),
     updatedAt: s.updatedAt.toISOString(),
+    resources: (s.resources || []).map((r) => ({
+      ...r,
+      createdAt: r.createdAt.toISOString(),
+      updatedAt: r.updatedAt.toISOString(),
+    })),
   }));
 
   return (
@@ -21,7 +26,7 @@ export default async function HimiSkillsSettingsPage() {
       <div className="page-head">
         <div>
           <h2>HIMI / Dynamic Skills</h2>
-          <p>Manage dynamic skills, procedural rules, and intelligence guidelines used by HIMI.</p>
+          <p>Manage dynamic skills, procedural rules, supporting resources, and intelligence guidelines used by HIMI.</p>
         </div>
       </div>
 

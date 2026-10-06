@@ -20,6 +20,9 @@ export default async function SettingsPage() {
       : Boolean(s.smtp_host && s.smtp_user && s.smtp_pass);
   const waOk = Boolean(s.wa_phone_number_id && s.wa_access_token && s.wa_enabled === "true");
 
+  const himiKey = s.openai_api_key || process.env.OPENAI_API_KEY || "";
+  const himiOk = Boolean(himiKey);
+
   const Card = ({
     href,
     title,
@@ -56,6 +59,13 @@ export default async function SettingsPage() {
 
       <div className="grid c2">
         <Card
+          href="/settings/himi"
+          title="HIMI / OpenAI Agent"
+          desc="OpenAI API key and model selection for HIMI, your conversational CRM AI assistant."
+          status={himiOk ? "Connected" : "Not set up"}
+          statusOk={himiOk}
+        />
+        <Card
           href="/settings/email"
           title="Email, domain &amp; DNS"
           desc="Outgoing mail (SMTP or Resend), your from-address, and the SPF/DKIM/DMARC records for your sending domain — with a live DNS check."
@@ -90,6 +100,8 @@ export default async function SettingsPage() {
         <div className="card-body">
           <dl className="kv">
             <dt>Leads</dt><dd><b>{counts.toLocaleString()}</b></dd>
+            <dt>HIMI Agent</dt><dd>{himiOk ? "enabled" : "not configured"}</dd>
+            <dt>HIMI Model</dt><dd>{s.openai_model || process.env.OPENAI_MODEL || "gpt-5-mini"}</dd>
             <dt>Mail provider</dt><dd>{s.mail_provider || "smtp"}</dd>
             <dt>From address</dt><dd>{s.mail_from_email || <span className="muted">not set</span>}</dd>
             <dt>Sending domain</dt><dd>{s.sending_domain || <span className="muted">not set</span>}</dd>

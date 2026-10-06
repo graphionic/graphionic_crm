@@ -15,6 +15,7 @@ export const SECRET_KEYS = new Set([
   "wa_access_token",
   "wa_app_secret",
   "wa_verify_token",
+  "openai_api_key",
 ]);
 
 export type SettingsMap = Record<string, string>;
@@ -101,3 +102,15 @@ export async function whatsappConfig() {
     defaultCountryCode: s.wa_default_country_code || "44",
   };
 }
+
+export async function himiConfig() {
+  const s = await getSettings();
+  const apiKey = (s.openai_api_key || process.env.OPENAI_API_KEY || "").trim();
+  const model = (s.openai_model || process.env.OPENAI_MODEL || "gpt-5-mini").trim();
+  return {
+    apiKey,
+    model,
+    hasKey: Boolean(apiKey),
+  };
+}
+

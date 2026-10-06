@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import Link from "next/link";
 
 type ToolCallMeta = {
   name: string;
@@ -25,11 +26,6 @@ const FRIENDLY_TOOL_LABELS: Record<string, string> = {
 };
 
 export default function HimiClient() {
-  const [sessionId] = useState(() =>
-    typeof crypto !== "undefined" && crypto.randomUUID
-      ? crypto.randomUUID()
-      : `session-${Date.now()}`
-  );
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -44,7 +40,7 @@ export default function HimiClient() {
       try {
         const res = await fetch("/api/himi/health");
         const data = await res.json();
-        setConnected(data.ok && data.connected === true);
+        setConnected(Boolean(data.ok && data.configured));
       } catch {
         setConnected(false);
       }
@@ -69,6 +65,11 @@ export default function HimiClient() {
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     };
 
+    const historyPayload = messages.slice(-10).map((m) => ({
+      sender: m.sender === "user" ? "user" : "assistant",
+      text: m.text,
+    }));
+
     setMessages((prev) => [...prev, userMsg]);
     if (!messageText) setInput("");
     setLoading(true);
@@ -78,8 +79,8 @@ export default function HimiClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sessionId,
           message: textToSend,
+          history: historyPayload,
         }),
       });
 
@@ -117,7 +118,7 @@ export default function HimiClient() {
         {
           id: `himi-err-${Date.now()}`,
           sender: "himi",
-          text: "HIMI is temporarily unavailable. Please check agent service connectivity.",
+          text: "HIMI request failed. Please check your connection and OpenAI settings.",
           isError: true,
           timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         },
@@ -161,7 +162,7 @@ export default function HimiClient() {
             </span>
           ) : connected === false ? (
             <span className="status-pill offline">
-              <span className="status-dot" /> Offline
+              <span className="status-dot" /> Not Configured
             </span>
           ) : (
             <span className="status-pill offline">
@@ -170,6 +171,17 @@ export default function HimiClient() {
           )}
         </div>
       </div>
+
+      {connected === false ? (
+        <div style={{ padding: "12px 16px 0 16px" }}>
+          <div className="callout warn" style={{ margin: 0 }}>
+            <b>HIMI needs an OpenAI API Key.</b> Configure it in{" "}
+            <Link href="/settings/himi" style={{ textDecoration: "underline", color: "inherit", fontWeight: 600 }}>
+              Settings → HIMI / OpenAI
+            </Link>.
+          </div>
+        </div>
+      ) : null}
 
       {/* Main Chat Messages Container */}
       <div className="himi-chat-container">

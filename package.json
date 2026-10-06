@@ -12,6 +12,7 @@
     "seed": "node scripts/seed.mjs"
   },
   "dependencies": {
+    "@openai/agents": "^0.13.2",
     "@prisma/client": "^6.2.1",
     "bcryptjs": "^2.4.3",
     "jose": "^5.9.6",

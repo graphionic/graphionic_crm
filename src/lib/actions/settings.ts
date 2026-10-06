@@ -169,3 +169,21 @@ export async function saveWebhookSecret(fd: FormData) {
     return { ok: false, message: `Save failed: ${(e as Error).message}` };
   }
 }
+
+export async function saveHimiSettings(fd: FormData) {
+  await requireActiveUser();
+  const g = (k: string) => String(fd.get(k) ?? "").trim();
+  try {
+    await setSettings({
+      openai_api_key: g("openai_api_key"),
+      openai_model: g("openai_model") || "gpt-5-mini",
+    });
+    revalidatePath("/settings/himi");
+    revalidatePath("/settings");
+    revalidatePath("/himi");
+    return { ok: true, message: "HIMI / OpenAI settings saved." };
+  } catch (e) {
+    return { ok: false, message: `Save failed: ${(e as Error).message}` };
+  }
+}
+

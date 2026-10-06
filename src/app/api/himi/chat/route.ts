@@ -1,5 +1,9 @@
 import { getSessionUser } from "@/lib/session";
+import { runHimiNativeTurn } from "@/lib/himi/agent";
 import { NextResponse } from "next/server";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   const user = await getSessionUser();
@@ -7,22 +11,22 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const himiUrl = process.env.HIMI_AGENT_URL || "http://127.0.0.1:8787";
-
   try {
     const body = await req.json();
-    const res = await fetch(`${himiUrl.replace(/\/$/, "")}/v1/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+    if (!body?.message) {
+      return NextResponse.json({ ok: false, error: "Message is required." }, { status: 400 });
+    }
+
+    const result = await runHimiNativeTurn({
+      message: String(body.message),
+      history: Array.isArray(body.history) ? body.history : undefined,
     });
 
-    const data = await res.json();
-    return NextResponse.json(data, { status: res.status });
-  } catch {
+    return NextResponse.json(result, { status: result.ok ? 200 : 400 });
+  } catch (error) {
     return NextResponse.json(
-      { ok: false, error: "HIMI service is temporarily unavailable. Please try again." },
-      { status: 503 }
+      { ok: false, error: error instanceof Error ? error.message : "Failed to execute HIMI turn." },
+      { status: 500 }
     );
   }
 }

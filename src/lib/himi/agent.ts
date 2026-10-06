@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { executeHimiTool, HimiPendingAction } from "./tools";
 import { himiConfig } from "@/lib/settings";
-import { getRelevantSkillInstructions } from "./skills";
+import { getDynamicSkillInstructions } from "./discovery";
 
 export interface HimiHistoryMessage {
   sender: "user" | "assistant" | string;
@@ -28,8 +28,9 @@ export interface HimiChatResponse {
   pendingAction?: HimiPendingAction;
 }
 
-function himiSystemInstructions(query: string): string {
-  const skillInstructions = getRelevantSkillInstructions(query);
+function himiSystemInstructions(skillGuidance?: string): string {
+  const skillInstructions = (skillGuidance || "").trim();
+
 
   return `You are HIMI — the AI Sales Operations Intelligence Assistant for ClientForge CRM.
 
@@ -504,12 +505,22 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     webSearchTool({ searchContextSize: "medium" }),
   ];
 
+  // Dynamically discover semantically relevant skills from Prisma
+  let skillGuidance = "";
+  try {
+    skillGuidance = await getDynamicSkillInstructions(userPrompt, config.apiKey, config.model);
+  } catch (err) {
+    console.error("[HIMI Dynamic Skill Discovery Error]:", err);
+    skillGuidance = "";
+  }
+
   const himiAgent = new Agent({
     name: "HIMI",
     model: config.model,
-    instructions: () => himiSystemInstructions(userPrompt),
+    instructions: () => himiSystemInstructions(skillGuidance),
     tools: availableTools,
   });
+
 
   let promptText = userPrompt;
   if (Array.isArray(payload.history) && payload.history.length > 0) {

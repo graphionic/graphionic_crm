@@ -4,12 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "(prisma migrate deploy && node scripts/seed-skills.mjs) || true && prisma generate && next build",
     "start": "next start",
     "postinstall": "prisma generate",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
-    "seed": "node scripts/seed.mjs"
+    "seed": "node scripts/seed.mjs",
+    "seed:skills": "node scripts/seed-skills.mjs"
+
   },
   "dependencies": {
     "@openai/agents": "0.13.2",

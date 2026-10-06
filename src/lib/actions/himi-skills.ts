@@ -6,13 +6,19 @@ import { requireActiveUser } from "@/lib/session";
 
 export async function listSkills() {
   await requireActiveUser();
-  return prisma.himiSkill.findMany({
-    orderBy: [
-      { priority: "asc" },
-      { createdAt: "desc" },
-    ],
-  });
+  try {
+    return await prisma.himiSkill.findMany({
+      orderBy: [
+        { priority: "asc" },
+        { createdAt: "desc" },
+      ],
+    });
+  } catch (e) {
+    console.error("Failed to query HimiSkill records:", e);
+    return [];
+  }
 }
+
 
 export async function createSkill(fd: FormData) {
   await requireActiveUser();

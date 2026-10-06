@@ -7,13 +7,20 @@ export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   await requireActiveUser();
-  const [s, suppressions, templates, counts, skillsCount] = await Promise.all([
+  const [s, suppressions, templates, counts] = await Promise.all([
     getSettings(),
     prisma.suppression.count(),
     prisma.template.count(),
     prisma.lead.count(),
-    prisma.himiSkill.count(),
   ]);
+
+  let skillsCount = 0;
+  try {
+    skillsCount = await prisma.himiSkill.count();
+  } catch (e) {
+    console.error("Failed to query HimiSkill count:", e);
+  }
+
 
   const mailOk =
     s.mail_provider === "resend"

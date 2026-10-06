@@ -181,15 +181,33 @@ export function SkillsManager({ initialSkills }: { initialSkills: SkillItem[] })
                   <span className="hint">Procedural system instructions injected into HIMI prompt when active.</span>
                 </label>
 
-                <label className="f" style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 }}>
+                <label
+                  style={{
+                    display: "inline-flex",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 10,
+                    marginTop: 12,
+                    cursor: "pointer",
+                    userSelect: "none",
+                  }}
+                >
                   <input
                     type="checkbox"
                     name="enabled"
                     value="true"
                     defaultChecked={editingSkill ? editingSkill.enabled : true}
+                    style={{
+                      width: 18,
+                      height: 18,
+                      margin: 0,
+                      cursor: "pointer",
+                      accentColor: "var(--accent, #3b82f6)",
+                    }}
                   />
-                  <span>Enable skill immediately</span>
+                  <span style={{ fontSize: 14, fontWeight: 500 }}>Enable skill immediately</span>
                 </label>
+
               </div>
 
               <div className="hstack" style={{ marginTop: 16, gap: 12 }}>

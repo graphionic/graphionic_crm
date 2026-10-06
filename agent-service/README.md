@@ -6,14 +6,14 @@ HIMI is the native AI agent and Streamable HTTP MCP bridge for **ClientForge CRM
 
 - **Engine:** Built on Node.js (ES Modules) using `@openai/agents` SDK and `@modelcontextprotocol/sdk`.
 - **Purpose:** Operates ClientForge CRM read-only queries, lead inspections, activity history analysis, and outreach stats summaries.
-- **Protocol:** Provides an authenticated MCP Streamable HTTP endpoint at `/mcp` for Codex / AI assistant integrations.
+- **Protocol:** Provides an authenticated MCP Streamable HTTP endpoint at `/mcp` and a conversational endpoint at `/v1/chat`.
 - **Persistence:** Connects to ClientForge PostgreSQL via Prisma Client (`@prisma/client`).
 
 ## Current Read-Only Limitation
 
-HIMI's initial tool foundation is **100% read-only**. It cannot modify database records, mutate lead statuses, or send outreach messages. Write operations (lead management, status updates, email/WhatsApp dispatching) will be added in deliberate future phases.
+HIMI v2 is **100% read-only**. It cannot modify database records, mutate lead statuses, or send outreach messages. Write operations (lead management, status updates, email/WhatsApp dispatching) will be added in deliberate future phases. If asked to perform write or outreach actions, HIMI natively refuses.
 
-## Available MCP Tools
+## Available MCP & Conversational Tools
 
 | Tool Name | Description | Access |
 | --- | --- | --- |
@@ -21,6 +21,40 @@ HIMI's initial tool foundation is **100% read-only**. It cannot modify database 
 | `get_lead_details` | Retrieve complete details for a single lead using its ClientForge ID. | Read-Only |
 | `get_lead_activity` | Retrieve chronological communication and activity history for a specific lead. | Read-Only |
 | `get_outreach_stats` | Provide a compact summary of lead counts, status breakdowns, and activity statistics. | Read-Only |
+
+## Conversational Endpoint (`POST /v1/chat`)
+
+Send natural-language CRM questions to HIMI. HIMI autonomously selects the necessary read-only tools and formulates natural answers.
+
+### Request Format
+
+```json
+{
+  "sessionId": "optional-session-id",
+  "message": "Show me high priority dental leads in London"
+}
+```
+
+### Response Format
+
+```json
+{
+  "ok": true,
+  "agent": "HIMI",
+  "response": "Here are the high-priority dental leads in London...",
+  "toolCalls": [
+    {
+      "name": "search_leads",
+      "ok": true,
+      "durationMs": 35
+    }
+  ]
+}
+```
+
+### Conversational Continuity (`sessionId`)
+
+Pass a `sessionId` string to maintain in-memory conversation history across turns (e.g. asking follow-up questions like "Which of those have email addresses?").
 
 ## Installation & Setup
 
@@ -37,7 +71,7 @@ npm.cmd test
 
 ## Environment Variables
 
-In the ClientForge repository, HIMI automatically inherits the root `.env` file. For standalone local use, copy `.env.example` to `.env`:
+HIMI automatically inherits the root `.env` file in the ClientForge repository. For standalone local use, copy `.env.example` to `.env`:
 
 - `OPENAI_API_KEY`: OpenAI API key.
 - `OPENAI_MODEL`: Defaults to `gpt-5-mini`.

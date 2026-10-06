@@ -2,13 +2,12 @@ import { createServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Agent, run, setDefaultOpenAIKey, tool } from '@openai/agents';
+import { Agent, MemorySession, run, setDefaultOpenAIKey, tool } from '@openai/agents';
 import { createMcpRequestHandler } from './mcp-server.js';
 import { HIMI_TOOL_DEFINITIONS, executeHimiTool } from './himi-tools.js';
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(currentDirectory, '..', '..');
-const inheritedMcpAccessToken = Object.hasOwn(process.env, 'MCP_ACCESS_TOKEN');
 loadProjectEnvironment(projectRoot);
 
 const host = process.env.OPENAI_AGENT_SDK_HOST || (process.env.PORT ? '0.0.0.0' : '127.0.0.1');
@@ -26,6 +25,19 @@ const mcpHandler = createMcpRequestHandler({
 
 if (apiKey) {
   setDefaultOpenAIKey(apiKey);
+}
+
+// Lightweight in-memory session store for conversational continuity
+const activeSessions = new Map();
+
+function getOrCreateSession(sessionId) {
+  if (!sessionId) return undefined;
+  let session = activeSessions.get(sessionId);
+  if (!session) {
+    session = new MemorySession();
+    activeSessions.set(sessionId, session);
+  }
+  return session;
 }
 
 const server = createServer(async (request, response) => {
@@ -51,31 +63,38 @@ const server = createServer(async (request, response) => {
     // MCP HTTP Endpoint
     if (await mcpHandler(request, response, url)) return;
 
-    // Agent structured execution endpoint
-    if (request.method === 'POST' && (url.pathname === '/v1/agent-turn' || url.pathname === '/v1/structured-json')) {
-      if (!apiKey) {
-        return sendJson(response, 500, { error: 'OPENAI_API_KEY is not configured.' });
+    // Conversational Chat Endpoint
+    if (request.method === 'POST' && (url.pathname === '/v1/chat' || url.pathname === '/v1/agent-turn')) {
+      const activeApiKey = (process.env.OPENAI_API_KEY || apiKey).trim();
+      if (!activeApiKey) {
+        return sendJson(response, 500, { ok: false, error: 'OPENAI_API_KEY is not configured.' });
       }
+      setDefaultOpenAIKey(activeApiKey);
       const rawBody = await readBody(request, 2_000_000);
       const body = parseJson(rawBody);
-      const result = await runHimiAgentTurn(body);
-      return sendJson(response, 200, result);
+      const result = await runHimiChatTurn(body, activeApiKey);
+      return sendJson(response, result.ok ? 200 : 400, result);
     }
 
-    return sendJson(response, 404, { error: 'Route not found.' });
+    return sendJson(response, 404, { ok: false, error: 'Route not found.' });
   } catch (error) {
     if (response.headersSent) return;
     return sendJson(response, error instanceof RequestError ? error.status : 500, {
+      ok: false,
       error: error instanceof Error ? error.message : 'Agent request failed.',
     });
   }
 });
 
-async function runHimiAgentTurn(inputPayload) {
-  const userPrompt = String(inputPayload?.prompt || inputPayload?.text || '').trim();
+async function runHimiChatTurn(inputPayload, activeApiKey) {
+  const userPrompt = String(inputPayload?.message || inputPayload?.prompt || inputPayload?.text || '').trim();
+  const sessionId = String(inputPayload?.sessionId || '').trim() || undefined;
+
   if (!userPrompt) {
-    return { ok: false, error: 'Prompt is required.' };
+    return { ok: false, error: 'message is required.' };
   }
+
+  const toolCallsExecuted = [];
 
   const availableTools = HIMI_TOOL_DEFINITIONS.map((def) => tool({
     name: def.name,
@@ -84,7 +103,21 @@ async function runHimiAgentTurn(inputPayload) {
     strict: false,
     timeoutMs: defaultTimeout,
     execute: async (arguments_) => {
-      const res = await executeHimiTool(def.name, arguments_);
+      const startedAt = Date.now();
+      let ok = true;
+      let res;
+      try {
+        res = await executeHimiTool(def.name, arguments_);
+        ok = res?.ok === true;
+      } catch (err) {
+        ok = false;
+        res = { ok: false, error: { code: 'TOOL_EXECUTION_ERROR', message: err instanceof Error ? err.message : String(err) } };
+      }
+      toolCallsExecuted.push({
+        name: def.name,
+        ok,
+        durationMs: Date.now() - startedAt,
+      });
       return JSON.stringify(res);
     },
   }));
@@ -96,16 +129,22 @@ async function runHimiAgentTurn(inputPayload) {
     tools: availableTools,
   });
 
+  const session = getOrCreateSession(sessionId);
   const timeoutController = new AbortController();
   const timeout = setTimeout(() => timeoutController.abort(), defaultTimeout);
 
   try {
-    const result = await run(himiAgent, userPrompt, {
+    const runOptions = {
       signal: timeoutController.signal,
-      workflowName: 'HIMI — ClientForge AI Agent',
+      workflowName: 'HIMI — ClientForge Conversational AI Agent',
       traceIncludeSensitiveData: false,
       maxTurns: 10,
-    });
+    };
+    if (session) {
+      runOptions.session = session;
+    }
+
+    const result = await run(himiAgent, userPrompt, runOptions);
 
     const outputText = typeof result?.finalOutput === 'string'
       ? result.finalOutput.trim()
@@ -115,6 +154,13 @@ async function runHimiAgentTurn(inputPayload) {
       ok: true,
       agent: 'HIMI',
       response: outputText,
+      toolCalls: toolCallsExecuted,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Failed to execute HIMI turn.',
+      toolCalls: toolCallsExecuted,
     };
   } finally {
     clearTimeout(timeout);
@@ -122,33 +168,38 @@ async function runHimiAgentTurn(inputPayload) {
 }
 
 function himiSystemInstructions() {
-  return `You are HIMI, the AI Agent for ClientForge CRM.
+  return `You are HIMI — the AI operations assistant for ClientForge CRM.
 
-Core Role & Purpose:
-- You operate ClientForge, an outreach CRM designed for UK, US, and UAE client acquisition.
-- ClientForge manages business leads, communication timelines (Activities), and outreach channels.
-- Outreach channels include Email (via Resend) and WhatsApp (via Meta WhatsApp Cloud API).
-- Respect contact preferences and compliance rules: never target contacts with doNotContact=true or missing required opt-ins.
+Core Purpose & Identity:
+- You help team members operate ClientForge, an outreach CRM designed for UK, US, and UAE client acquisition.
+- ClientForge tracks business leads and communication timelines (Activities).
+- Outreach channels are Email (handled via Resend) and WhatsApp (handled via Meta WhatsApp Cloud API).
 
-Data & Operational Rules:
-- Leads and Activity histories are stored in the ClientForge PostgreSQL database.
-- Always use available ClientForge CRM tools to inspect real data before making statements about leads or statistics.
-- Never fabricate, invent, or guess lead information, contact details, email addresses, or phone numbers.
-- Never claim an outreach message was sent or an action occurred unless verified by a ClientForge CRM tool response.
-- Distinguish clearly between inspecting/analyzing data and taking operational actions.
+STRICT READ-ONLY BOUNDARY (HIMI V2):
+- Current HIMI capabilities are STRICTLY READ-ONLY.
+- You have 4 available tools: search_leads, get_lead_details, get_lead_activity, get_outreach_stats.
+- If the user asks to modify a lead, change a status, create a record, delete data, send an email, or send a WhatsApp message (e.g. "Send Mayank a WhatsApp", "Change lead to interested"), REFUSE NATIVELY AND GRACEFULLY.
+- State clearly that you currently have read-only CRM access and cannot perform database updates or send outreach messages yet.
+- NEVER pretend or claim an unsupported action occurred.
 
-ClientForge Lead Qualification Knowledge:
+Data Integrity & Tool Selection:
+- ClientForge tools are your sole source of truth. Always call the appropriate read-only tools to retrieve real CRM data.
+- NEVER fabricate leads, contact details, email addresses, phone numbers, or activity histories.
+- If a search for a company name returns MULTIPLE plausible lead records, list the matching leads concisely (ID, Company Name, City/Country) and ask the user to clarify which lead they mean.
+- If no leads match or database data is unavailable, state so clearly.
+
+ClientForge Lead Qualification Rules:
 - Rule: CONFIRMED NO WEBSITE + (VALID PHONE OR VALID EMAIL) = VALID LEAD.
-- A lead with no website and a valid email is valid.
-- A lead with no website and a valid phone is valid.
-- A lead with no website and both valid email and phone is valid.
-- A lead with no website and neither valid email nor phone is invalid.
-- A lead with a live/working website is invalid for NO_SITE targeting.
-- Critical logic distinction: Missing website data or a failed search is NOT proof that a business has no website. Never mark a lead as confirmed no-site without supporting verification.
+- No website + valid email = valid lead.
+- No website + valid phone = valid lead.
+- No website + both = valid lead.
+- No website + neither = invalid.
+- Live/working website = invalid for NO_SITE targeting.
+- Critical logic: Missing website data or a failed search is NOT proof that a business has no website. Never infer confirmed no-site status without verification.
 
 Tone & Style:
-- Professional, operational, concise, and direct.
-- Focus on practical CRM insights and exact lead/outreach facts.`;
+- Concise, operational, confident only when supported by CRM data, helpful, and natural.
+- Keep responses focused, direct, and well-structured. Avoid unnecessary filler.`;
 }
 
 function positiveInteger(value, fallback) {

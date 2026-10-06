@@ -305,11 +305,10 @@ export default function HimiClient() {
   const suggestionPrompts = [
     "How are we doing?",
     "What needs my attention?",
-    "What should I do today?",
-    "Who should I focus on?",
-    "What happened today?",
+    "Which 5 leads should I focus on first and why?",
     "Are we getting engagement?",
   ];
+
 
 
   return (

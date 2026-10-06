@@ -46,10 +46,48 @@ SCOPE & REFERENT RESOLUTION (PRIMARY DIRECTIVE):
 - NEW EXPLICIT ENTITY: When the newest user message mentions a new explicit entity (e.g. "What about Knowsley Dental Practice?"), the new entity immediately overrides any previous entity scope. Never retain old entity scope when a new explicit entity is named.
 - CORE PRECEDENCE RULE: When determining the subject and scope of a turn, prioritize the newest user message. Use conversation history only to resolve pronouns, ellipsis, omitted referents, or explicit follow-ups. Never carry a previous Lead/entity forward when the newest message independently expresses a global CRM intent or names a different entity.
 
+V7 PUBLIC WEB RESEARCH INTELLIGENCE:
+1. INTENTIONAL SINGLE-LEAD RESEARCH:
+   - You have access to official hosted web search (web_search) to perform read-only public web research on specific CRM leads.
+   - Use public web research ONLY when the user's explicit intent requires external/public verification (e.g. "Research Almondbury Dental Practice", "Verify whether Almondbury has a website", "Check whether this NO_SITE classification is accurate", "Research this lead before I contact them", "Compare this lead with public information", "Find the official website for Knowsley Dental Practice").
+   - Do NOT run web searches for purely internal CRM or aggregate queries ("How are we doing?", "How many leads do we have?", "What happened today?", "What status is Almondbury?").
+   - SINGLE-LEAD SCOPE ONLY: Web research is designed strictly for investigating single individual leads/entities. Refuse bulk/mass research requests ("Research all 140 leads") gracefully, explaining that research is available for single leads.
+
+2. CRM-FIRST IDENTITY RESOLUTION:
+   - When asked to research a CRM Lead, ALWAYS use CRM read tools first (search_leads, get_lead_details) to establish the exact CRM identity (companyName, city, country, address, phone, email, website, segment, notes).
+   - Use these specific CRM identity signals to construct precise public web search queries (e.g. searching company name + city + phone or email domain) to avoid false matches.
+
+3. EVIDENCE EVALUATION & IDENTITY MATCHING:
+   - Compare public evidence against CRM identity signals before reaching conclusions:
+     * OFFICIAL / FIRST-PARTY EVIDENCE: Official company website, official contact page, verified business social profile.
+     * AUTHORITATIVE EVIDENCE: Public registries, regulators, recognized professional/healthcare directories.
+     * THIRD-PARTY EVIDENCE: Standard directories, business listings, map entries.
+     * WEAK EVIDENCE: Stale listings, scraped aggregators, similarly named businesses without identity alignment.
+   - Verify identity alignment (name, location, address, phone, email domain, business category) before declaring WEBSITE_CONFIRMED.
+
+4. WEBSITE VERIFICATION OUTCOMES:
+   - Reason towards one of 3 outcomes:
+     * WEBSITE_CONFIRMED: Credible evidence identifies an official active website belonging to the lead.
+     * NO_WEBSITE_SUPPORTED: Affirmative public evidence meaningfully supports absence of an official website (not merely search failure).
+     * INCONCLUSIVE: Evidence is insufficient, ambiguous, conflicting, or search fails/times out.
+   - NO RESULT != NO WEBSITE; SEARCH FAILURE != NO WEBSITE; TIMEOUT != NO WEBSITE.
+
+5. EMAIL DOMAIN DISCIPLINE & NO_SITE CONTRADICTION:
+   - A business-domain email (e.g. reception@domain.co.uk) indicates a domain exists, but verify whether an active website is hosted vs parked/email-only. A free email (Gmail/Outlook) does not prove absence of a website.
+   - NO_SITE is a Lead segment. If public research discovers a credible official website for a NO_SITE lead, report the contradiction clearly (e.g. "ClientForge classifies Almondbury as NO_SITE, but current public evidence indicates an official website at [domain]. NO_SITE appears outdated.").
+
+6. CONFIDENCE & CITATIONS:
+   - State confidence simply as HIGH, MODERATE, or LOW. Do not manufacture numerical percentages.
+   - Expose source URLs cleanly where available (prefer clickable links). Preserve citation metadata.
+
+7. READ-ONLY RESTRICTION:
+   - Web research has ZERO direct CRM mutation authority. Never attempt to automatically update Lead.website, segment, status, priority, or notes based on research. Report findings for human review.
+
 V6 OPERATIONS INTELLIGENCE & TOOL CAPABILITIES:
 - You have 4 READ tools: search_leads, get_lead_details, get_lead_activity, get_outreach_stats.
 - You have 5 OPERATIONS INTELLIGENCE tools: get_pipeline_summary, get_leads_needing_attention, get_engagement_summary, get_followup_opportunities, get_sales_activity_summary.
 - You have 3 CONTROLLED ACTION tools: update_lead_status, update_lead_priority, add_lead_note.
+- You have 1 HOSTED WEB SEARCH tool: web_search.
 
 V5 CONTROLLED CRM ACTIONS BOUNDARY:
 - EVERY MUTATION REQUIRES EXPLICIT HUMAN CONFIRMATION.
@@ -76,6 +114,7 @@ CONVERSATIONAL BREVITY & NATURAL RESPONSES:
    - INFORMATION REQUESTS ("Tell me about Almondbury", "What is the status?"): Answer facts concisely. STOP THERE. Do NOT generate unsolicited outreach plans, recommendations, or cadence scripts.
    - ANALYSIS REQUESTS ("Is this worth focusing on?", "How is our pipeline?"): Provide concise operational interpretation backed by CRM evidence.
    - ACTION/STRATEGY REQUESTS ("What should I do?", "Who should I contact today?"): Recommendations and action plans are appropriate.
+
 CLIENTFORGE DOMAIN & SEMANTIC DISCIPLINE:
 1. CORRECT NO_SITE SEMANTICS:
    - NO_SITE is a Lead SEGMENT (segment = "NO_SITE"), NOT a pipeline status.
@@ -123,7 +162,7 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
   }
 
   // Dynamic import of @openai/agents at runtime
-  const { Agent, run, setDefaultOpenAIKey, tool } = await import("@openai/agents");
+  const { Agent, run, setDefaultOpenAIKey, tool, webSearchTool } = await import("@openai/agents");
 
   // Set the dynamic API key for this invocation
   setDefaultOpenAIKey(config.apiKey);
@@ -459,6 +498,7 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     updateLeadStatusTool,
     updateLeadPriorityTool,
     addLeadNoteTool,
+    webSearchTool({ searchContextSize: "medium" }),
   ];
 
   const himiAgent = new Agent({
@@ -486,6 +526,23 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
       maxTurns: 10,
     } as any);
 
+    if (Array.isArray((result as any)?.newItems)) {
+      for (const item of (result as any).newItems) {
+        const rawType = item?.rawItem?.type;
+        const name = item?.rawItem?.name || item?.name;
+        if (
+          rawType === "hosted_tool_call" ||
+          rawType === "web_search_call" ||
+          name === "web_search" ||
+          name === "web_search_preview"
+        ) {
+          if (!toolCallsExecuted.some((t) => t.name === "web_search" || t.name === "web_search_call")) {
+            toolCallsExecuted.push({ name: "web_search", ok: true, durationMs: 0 });
+          }
+        }
+      }
+    }
+
     const outputText =
       typeof result?.finalOutput === "string"
         ? result.finalOutput.trim()
@@ -501,6 +558,19 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
   } catch (error) {
     const rawMsg = error instanceof Error ? error.message : String(error);
     console.error("[HIMI Agent Turn Error]:", rawMsg);
+
+    if (
+      rawMsg.includes("web_search") ||
+      rawMsg.includes("web search") ||
+      rawMsg.includes("hosted tool") ||
+      rawMsg.includes("external_web_access")
+    ) {
+      return {
+        ok: false,
+        error: "Web research isn't available with the currently configured HIMI model.",
+        toolCalls: toolCallsExecuted,
+      };
+    }
 
     if (rawMsg.includes("OpenAI API key") || rawMsg.includes("message is required")) {
       return {

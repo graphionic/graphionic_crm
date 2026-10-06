@@ -104,7 +104,67 @@ export const HIMI_TOOL_DEFINITIONS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "get_pipeline_summary",
+    description: "Retrieve a compact factual summary of pipeline counts, statuses, priorities, segments, and contactability.",
+    input_schema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_leads_needing_attention",
+    description: "Retrieve a ranked list of leads requiring human attention with factual signals.",
+    input_schema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", description: "Max records to return (default 15, max 50)" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_engagement_summary",
+    description: "Retrieve engagement statistics (Email opens, clicks, replies, WhatsApp reads) for a timeframe.",
+    input_schema: {
+      type: "object",
+      properties: {
+        timeframe: {
+          type: "string",
+          description: "Time window (today, 7_days, 30_days)",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_followup_opportunities",
+    description: "Identify leads deserving follow-up based on CRM evidence (open/read without reply, stale contacted).",
+    input_schema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", description: "Max records to return (default 15, max 50)" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_sales_activity_summary",
+    description: "Aggregate recent CRM activity (leads added, status changes, notes, emails, WhatsApps, HIMI actions).",
+    input_schema: {
+      type: "object",
+      properties: {
+        timeframe: {
+          type: "string",
+          description: "Time window (today, 7_days, 30_days)",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
 ];
+
 
 export interface HimiPendingAction {
   action: "update_lead_status" | "update_lead_priority" | "add_lead_note";
@@ -336,10 +396,418 @@ export async function executeHimiTool(name: string, args: Record<string, any> = 
       };
     }
 
+    case "get_pipeline_summary": {
+      const [
+        totalLeads,
+        statusCounts,
+        priorityCounts,
+        segmentCounts,
+        emailOnlyCount,
+        phoneOnlyCount,
+        bothCount,
+        neitherCount,
+        doNotContactCount,
+        untouchedNewCount,
+      ] = await Promise.all([
+        prisma.lead.count(),
+        prisma.lead.groupBy({ by: ["status"], _count: { _all: true } }),
+        prisma.lead.groupBy({ by: ["priority"], _count: { _all: true } }),
+        prisma.lead.groupBy({ by: ["segment"], _count: { _all: true } }),
+        prisma.lead.count({ where: { email: { not: null }, phone: null, whatsapp: null } }),
+        prisma.lead.count({ where: { email: null, OR: [{ phone: { not: null } }, { whatsapp: { not: null } }] } }),
+        prisma.lead.count({ where: { email: { not: null }, OR: [{ phone: { not: null } }, { whatsapp: { not: null } }] } }),
+        prisma.lead.count({ where: { email: null, phone: null, whatsapp: null } }),
+        prisma.lead.count({ where: { doNotContact: true } }),
+        prisma.lead.count({ where: { status: { in: ["NEW", "QUALIFIED"] }, emailSentCount: 0, whatsappSentCount: 0 } }),
+      ]);
+
+      const statusBreakdown: Record<string, number> = {};
+      for (const item of statusCounts) {
+        statusBreakdown[item.status || "UNKNOWN"] = item._count._all;
+      }
+
+      const priorityBreakdown: Record<string, number> = {};
+      for (const item of priorityCounts) {
+        priorityBreakdown[item.priority || "UNKNOWN"] = item._count._all;
+      }
+
+      const segmentBreakdown: Record<string, number> = {};
+      for (const item of segmentCounts) {
+        segmentBreakdown[item.segment || "UNCHECKED"] = item._count._all;
+      }
+
+      return {
+        ok: true,
+        data: {
+          totalLeads,
+          statusBreakdown,
+          priorityBreakdown,
+          segmentBreakdown,
+          contactability: {
+            emailOnly: emailOnlyCount,
+            phoneOnly: phoneOnlyCount,
+            both: bothCount,
+            neither: neitherCount,
+          },
+          pipelineFunnel: {
+            untouchedNew: untouchedNewCount,
+            contacted: statusBreakdown["CONTACTED"] || 0,
+            replied: statusBreakdown["REPLIED"] || 0,
+            callBooked: statusBreakdown["CALL_BOOKED"] || 0,
+            proposalSent: statusBreakdown["PROPOSAL_SENT"] || 0,
+            won: statusBreakdown["WON"] || 0,
+            lost: statusBreakdown["LOST"] || 0,
+            nurture: statusBreakdown["NURTURE"] || 0,
+            doNotContact: doNotContactCount,
+          },
+        },
+      };
+    }
+
+    case "get_leads_needing_attention": {
+      const limit = Math.min(Math.max(Number(args.limit) || 15, 1), 50);
+
+      const leads = await prisma.lead.findMany({
+        where: {
+          doNotContact: false,
+          status: { notIn: ["WON", "LOST"] },
+        },
+        take: 100,
+        orderBy: { updatedAt: "desc" },
+        include: {
+          activities: {
+            take: 3,
+            orderBy: { createdAt: "desc" },
+          },
+        },
+      });
+
+      const items = leads.map((lead) => {
+        const signals: string[] = [];
+        let scoreWeight = 0;
+
+        if (lead.priority === "HIGH") {
+          signals.push("HIGH priority lead");
+          scoreWeight += 25;
+        }
+
+        if (lead.status === "REPLIED" || lead.lastReplyAt) {
+          signals.push("Reply received (needs response)");
+          scoreWeight += 50;
+        }
+
+        if (lead.status === "PROPOSAL_SENT") {
+          signals.push("Proposal sent (pending follow-up)");
+          scoreWeight += 35;
+        }
+
+        if (lead.status === "CALL_BOOKED") {
+          signals.push("Call booked (requires preparation/action)");
+          scoreWeight += 30;
+        }
+
+        if ((lead.status === "NEW" || lead.status === "QUALIFIED") && lead.emailSentCount === 0 && lead.whatsappSentCount === 0) {
+          signals.push("Untouched lead (no outreach recorded)");
+          scoreWeight += 20;
+        }
+
+        const failedAct = lead.activities.find((a) => a.status === "failed" || (a.error && a.error.length > 0));
+        if (failedAct) {
+          signals.push(`Outreach delivery failed (${failedAct.type})`);
+          scoreWeight += 40;
+        }
+
+        const daysSinceLastActivity = lead.activities[0]
+          ? Math.floor((Date.now() - new Date(lead.activities[0].createdAt).getTime()) / (1000 * 60 * 60 * 24))
+          : Math.floor((Date.now() - new Date(lead.createdAt).getTime()) / (1000 * 60 * 60 * 24));
+
+        if (lead.status === "CONTACTED" && daysSinceLastActivity >= 5) {
+          signals.push(`Stale contacted lead (${daysSinceLastActivity} days without progress)`);
+          scoreWeight += 25;
+        }
+
+        const hasEmail = Boolean(lead.email && lead.email.trim());
+        const hasPhone = Boolean(lead.phone || lead.whatsapp);
+        const contactability = hasEmail && hasPhone ? "both" : hasEmail ? "email_only" : hasPhone ? "phone_only" : "none";
+
+        return {
+          leadId: lead.id,
+          companyName: lead.companyName,
+          status: lead.status,
+          priority: lead.priority,
+          score: lead.score,
+          contactability,
+          signals,
+          scoreWeight,
+          lastActivityAt: lead.activities[0]?.createdAt || lead.updatedAt,
+        };
+      });
+
+      const ranked = items
+        .filter((item) => item.signals.length > 0)
+        .sort((a, b) => b.scoreWeight - a.scoreWeight)
+        .slice(0, limit);
+
+      return {
+        ok: true,
+        count: ranked.length,
+        data: ranked.map(({ scoreWeight, ...rest }) => rest),
+      };
+    }
+
+    case "get_engagement_summary": {
+      const timeframe = String(args.timeframe || "7_days").toLowerCase();
+      const now = new Date();
+      let startDate = new Date();
+
+      if (timeframe === "today") {
+        startDate.setHours(0, 0, 0, 0);
+      } else if (timeframe === "30_days") {
+        startDate.setDate(now.getDate() - 30);
+      } else {
+        startDate.setDate(now.getDate() - 7);
+      }
+
+      const activities = await prisma.activity.findMany({
+        where: {
+          createdAt: { gte: startDate },
+        },
+        select: {
+          type: true,
+          direction: true,
+          status: true,
+          meta: true,
+          error: true,
+        },
+      });
+
+      let emailSent = 0;
+      let emailDelivered = 0;
+      let emailOpened = 0;
+      let emailClicked = 0;
+      let emailFailed = 0;
+
+      let waSent = 0;
+      let waDelivered = 0;
+      let waRead = 0;
+      let waFailed = 0;
+
+      let inboundCount = 0;
+
+      for (const act of activities) {
+        if (act.direction === "IN") {
+          inboundCount++;
+        }
+
+        if (act.type === "EMAIL") {
+          if (act.direction === "OUT") emailSent++;
+          if (act.status === "delivered") emailDelivered++;
+          if (act.status === "failed" || act.error) emailFailed++;
+
+          if (act.meta && (act.meta.includes('"opened"') || act.meta.includes('"open"'))) {
+            emailOpened++;
+          }
+          if (act.meta && (act.meta.includes('"clicked"') || act.meta.includes('"click"'))) {
+            emailClicked++;
+          }
+        }
+
+        if (act.type === "WHATSAPP") {
+          if (act.direction === "OUT") waSent++;
+          if (act.status === "delivered") waDelivered++;
+          if (act.status === "read") waRead++;
+          if (act.status === "failed" || act.error) waFailed++;
+        }
+      }
+
+      return {
+        ok: true,
+        timeframe,
+        startDate: startDate.toISOString(),
+        data: {
+          email: {
+            sent: emailSent,
+            delivered: emailDelivered,
+            opened: emailOpened,
+            clicked: emailClicked,
+            failed: emailFailed,
+          },
+          whatsapp: {
+            sent: waSent,
+            delivered: waDelivered,
+            read: waRead,
+            failed: waFailed,
+          },
+          inboundReplies: inboundCount,
+          totalActivitiesInWindow: activities.length,
+        },
+      };
+    }
+
+    case "get_followup_opportunities": {
+      const limit = Math.min(Math.max(Number(args.limit) || 15, 1), 50);
+
+      const leads = await prisma.lead.findMany({
+        where: {
+          doNotContact: false,
+          status: { notIn: ["WON", "LOST"] },
+          OR: [
+            { status: "CONTACTED" },
+            { status: "PROPOSAL_SENT" },
+            { status: "CALL_BOOKED" },
+            { emailSentCount: { gt: 0 } },
+            { whatsappSentCount: { gt: 0 } },
+          ],
+        },
+        take: 100,
+        orderBy: { updatedAt: "desc" },
+        include: {
+          activities: {
+            take: 5,
+            orderBy: { createdAt: "desc" },
+          },
+        },
+      });
+
+      const opportunities = leads.map((lead) => {
+        const lastAct = lead.activities[0];
+        const lastOutbound = lead.activities.find((a) => a.direction === "OUT");
+        const daysSinceActivity = lastAct
+          ? Math.floor((Date.now() - new Date(lastAct.createdAt).getTime()) / (1000 * 60 * 60 * 24))
+          : Math.floor((Date.now() - new Date(lead.updatedAt).getTime()) / (1000 * 60 * 60 * 24));
+
+        const signals: string[] = [];
+        if (lead.status === "PROPOSAL_SENT") {
+          signals.push("Proposal sent (awaiting follow-up)");
+        }
+        if (lead.status === "CALL_BOOKED") {
+          signals.push("Call booked (follow-up/prep required)");
+        }
+        if (lastOutbound && lastOutbound.status === "delivered" && lead.status === "CONTACTED") {
+          signals.push("Outreach delivered but no reply yet");
+        }
+        if (lastOutbound && lastOutbound.status === "read") {
+          signals.push("WhatsApp message read but no reply yet");
+        }
+        if (lastOutbound && lastOutbound.meta && lastOutbound.meta.includes('"opened"')) {
+          signals.push("Email opened previously (potential engagement signal)");
+        }
+        if (daysSinceActivity >= 4) {
+          signals.push(`No activity in ${daysSinceActivity} days`);
+        }
+
+        return {
+          leadId: lead.id,
+          companyName: lead.companyName,
+          status: lead.status,
+          priority: lead.priority,
+          lastOutreachDate: lead.lastEmailAt || lead.lastWhatsappAt || lastOutbound?.createdAt || null,
+          lastReplyDate: lead.lastReplyAt || null,
+          daysSinceActivity,
+          signals,
+        };
+      });
+
+      const filtered = opportunities
+        .filter((o) => o.signals.length > 0)
+        .sort((a, b) => b.daysSinceActivity - a.daysSinceActivity)
+        .slice(0, limit);
+
+      return {
+        ok: true,
+        count: filtered.length,
+        data: filtered,
+      };
+    }
+
+    case "get_sales_activity_summary": {
+      const timeframe = String(args.timeframe || "today").toLowerCase();
+      const now = new Date();
+      let startDate = new Date();
+
+      if (timeframe === "30_days") {
+        startDate.setDate(now.getDate() - 30);
+      } else if (timeframe === "7_days") {
+        startDate.setDate(now.getDate() - 7);
+      } else {
+        startDate.setHours(0, 0, 0, 0);
+      }
+
+      const [leadsCreatedCount, activities] = await Promise.all([
+        prisma.lead.count({
+          where: { createdAt: { gte: startDate } },
+        }),
+        prisma.activity.findMany({
+          where: { createdAt: { gte: startDate } },
+          orderBy: { createdAt: "desc" },
+          take: 100,
+          include: {
+            lead: {
+              select: { companyName: true },
+            },
+          },
+        }),
+      ]);
+
+      let statusChanges = 0;
+      let priorityChanges = 0;
+      let notesAdded = 0;
+      let emailsSent = 0;
+      let whatsappsSent = 0;
+      let repliesReceived = 0;
+      let himiActionsCount = 0;
+
+      for (const act of activities) {
+        if (act.meta && act.meta.includes('"source":"HIMI"')) {
+          himiActionsCount++;
+        }
+        if (act.direction === "IN") {
+          repliesReceived++;
+        }
+        if (act.type === "STATUS") {
+          if (act.body?.startsWith("Status:")) statusChanges++;
+          if (act.body?.startsWith("Priority:")) priorityChanges++;
+        }
+        if (act.type === "NOTE") notesAdded++;
+        if (act.type === "EMAIL" && act.direction === "OUT") emailsSent++;
+        if (act.type === "WHATSAPP" && act.direction === "OUT") whatsappsSent++;
+      }
+
+      const recentKeyEvents = activities.slice(0, 10).map((a) => ({
+        id: a.id,
+        companyName: a.lead?.companyName || "Unknown Lead",
+        type: a.type,
+        direction: a.direction,
+        body: a.body,
+        createdAt: a.createdAt,
+      }));
+
+      return {
+        ok: true,
+        timeframe,
+        startDate: startDate.toISOString(),
+        data: {
+          summary: {
+            leadsCreated: leadsCreatedCount,
+            statusChanges,
+            priorityChanges,
+            notesAdded,
+            emailsSent,
+            whatsappsSent,
+            repliesReceived,
+            himiActionsCount,
+            totalActivities: activities.length,
+          },
+          recentKeyEvents,
+        },
+      };
+    }
+
     default:
       return { ok: false, error: { code: "UNKNOWN_TOOL", message: `Unknown tool ${name}` } };
   }
 }
+
 
 export async function executeConfirmedHimiAction(
   pendingAction: HimiPendingAction,

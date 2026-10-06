@@ -44,7 +44,13 @@ const FRIENDLY_TOOL_LABELS: Record<string, string> = {
   update_lead_status: "Update status",
   update_lead_priority: "Update priority",
   add_lead_note: "Add note",
+  get_pipeline_summary: "Pipeline",
+  get_leads_needing_attention: "Attention",
+  get_engagement_summary: "Engagement",
+  get_followup_opportunities: "Follow-ups",
+  get_sales_activity_summary: "Sales activity",
 };
+
 
 export default function HimiClient() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -297,11 +303,14 @@ export default function HimiClient() {
   };
 
   const suggestionPrompts = [
-    "How many leads do we have?",
-    "Show me high-priority dental leads.",
-    "Mark Mayank Parmar Test as contacted",
-    "Set priority of Mayank Parmar Test to HIGH",
+    "How are we doing?",
+    "What needs my attention?",
+    "What should I do today?",
+    "Who should I focus on?",
+    "What happened today?",
+    "Are we getting engagement?",
   ];
+
 
   return (
     <div className="himi-shell">

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { executeHimiTool, HimiPendingAction } from "./tools";
 import { himiConfig } from "@/lib/settings";
+import { getRelevantSkillInstructions } from "./skills";
 
 export interface HimiHistoryMessage {
   sender: "user" | "assistant" | string;
@@ -27,20 +28,25 @@ export interface HimiChatResponse {
   pendingAction?: HimiPendingAction;
 }
 
-function himiSystemInstructions(): string {
-  return `You are HIMI — the AI operations assistant for ClientForge CRM.
+function himiSystemInstructions(query: string): string {
+  const skillInstructions = getRelevantSkillInstructions(query);
+
+  return `You are HIMI — the AI Sales Operations Intelligence Assistant for ClientForge CRM.
 
 Core Purpose & Identity:
 - You help team members operate ClientForge, an outreach CRM designed for UK, US, and UAE client acquisition.
 - ClientForge tracks business leads and communication timelines (Activities).
 - Outreach channels are Email (handled via Resend) and WhatsApp (handled via Meta WhatsApp Cloud API).
 
-V5 CONTROLLED CRM ACTIONS BOUNDARY:
+V6 OPERATIONS INTELLIGENCE & TOOL CAPABILITIES:
 - You have 4 READ tools: search_leads, get_lead_details, get_lead_activity, get_outreach_stats.
+- You have 5 OPERATIONS INTELLIGENCE tools: get_pipeline_summary, get_leads_needing_attention, get_engagement_summary, get_followup_opportunities, get_sales_activity_summary.
 - You have 3 CONTROLLED ACTION tools: update_lead_status, update_lead_priority, add_lead_note.
+
+V5 CONTROLLED CRM ACTIONS BOUNDARY:
 - EVERY MUTATION REQUIRES EXPLICIT HUMAN CONFIRMATION.
 - NEVER claim or attempt a database mutation without user confirmation. When a user asks to change a lead's status, priority, or add a note, resolve the exact single Lead ID using read tools first, then call the appropriate controlled action tool to prepare a pending action for user confirmation.
-- V5 supports updating only ONE Lead at a time. BULK MUTATIONS ARE STRICTLY FORBIDDEN (e.g. "mark all dental leads contacted" -> REFUSE bulk mutation gracefully).
+- V6 supports updating only ONE Lead at a time. BULK MUTATIONS ARE STRICTLY FORBIDDEN (e.g. "mark all dental leads contacted" -> REFUSE bulk mutation gracefully).
 
 STRICTLY LOCKED CAPABILITIES:
 - You CANNOT create leads, delete leads, or bulk modify leads.
@@ -49,14 +55,16 @@ STRICTLY LOCKED CAPABILITIES:
 - You CANNOT modify email/WhatsApp templates, Settings, users, or campaign automation.
 
 Data Integrity & Precision:
-- ClientForge tools are your sole source of truth. Always call the appropriate read tools to retrieve real CRM data.
+- ClientForge tools are your sole source of truth. Always call the appropriate analytical or read tools to retrieve real CRM data.
 - NEVER fabricate leads, contact details, email addresses, phone numbers, or activity histories.
 - AMBIGUOUS LEADS: If a search returns MULTIPLE matching lead records for a company name, list the matching leads concisely (ID, Company Name, City/Country) and ask the user to clarify which exact lead they mean. Do NOT guess or select a lead arbitrarily.
 - NO-OP PROTECTION: If a requested status or priority is already identical to the current value, inform the user that the lead already has that value without proposing a redundant update.
 
 Tone & Style:
-- Concise, operational, confident only when supported by CRM data, helpful, and natural.
-- Keep responses focused, direct, and well-structured. Avoid unnecessary filler.`;
+- Concise, operational, executive-level sales manager tone.
+- Keep responses focused, direct, well-structured with bullet points and clear priority sections.
+
+${skillInstructions}`;
 }
 
 export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiChatResponse> {
@@ -185,6 +193,124 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     },
   });
 
+  const getPipelineSummaryTool = (tool as any)({
+    name: "get_pipeline_summary",
+    description: "Retrieve a compact factual summary of pipeline counts, statuses, priorities, segments, and contactability.",
+    parameters: z.object({}),
+    strict: true,
+    timeoutMs: defaultTimeout,
+    execute: async (args: any) => {
+      const startedAt = Date.now();
+      let ok = true;
+      let res: any;
+      try {
+        res = await executeHimiTool("get_pipeline_summary", args);
+        ok = res?.ok === true;
+      } catch (err) {
+        ok = false;
+        res = { ok: false, error: { code: "TOOL_EXECUTION_ERROR", message: err instanceof Error ? err.message : String(err) } };
+      }
+      toolCallsExecuted.push({ name: "get_pipeline_summary", ok, durationMs: Date.now() - startedAt });
+      return JSON.stringify(res);
+    },
+  });
+
+  const getLeadsNeedingAttentionTool = (tool as any)({
+    name: "get_leads_needing_attention",
+    description: "Retrieve a ranked list of leads requiring human attention with factual signals.",
+    parameters: z.object({
+      limit: z.number().int().optional().describe("Max records to return (default 15, max 50)"),
+    }),
+    strict: true,
+    timeoutMs: defaultTimeout,
+    execute: async (args: any) => {
+      const startedAt = Date.now();
+      let ok = true;
+      let res: any;
+      try {
+        res = await executeHimiTool("get_leads_needing_attention", args);
+        ok = res?.ok === true;
+      } catch (err) {
+        ok = false;
+        res = { ok: false, error: { code: "TOOL_EXECUTION_ERROR", message: err instanceof Error ? err.message : String(err) } };
+      }
+      toolCallsExecuted.push({ name: "get_leads_needing_attention", ok, durationMs: Date.now() - startedAt });
+      return JSON.stringify(res);
+    },
+  });
+
+  const getEngagementSummaryTool = (tool as any)({
+    name: "get_engagement_summary",
+    description: "Retrieve engagement statistics (Email opens, clicks, replies, WhatsApp reads) for a timeframe.",
+    parameters: z.object({
+      timeframe: z.string().optional().describe("Time window (today, 7_days, 30_days)"),
+    }),
+    strict: true,
+    timeoutMs: defaultTimeout,
+    execute: async (args: any) => {
+      const startedAt = Date.now();
+      let ok = true;
+      let res: any;
+      try {
+        res = await executeHimiTool("get_engagement_summary", args);
+        ok = res?.ok === true;
+      } catch (err) {
+        ok = false;
+        res = { ok: false, error: { code: "TOOL_EXECUTION_ERROR", message: err instanceof Error ? err.message : String(err) } };
+      }
+      toolCallsExecuted.push({ name: "get_engagement_summary", ok, durationMs: Date.now() - startedAt });
+      return JSON.stringify(res);
+    },
+  });
+
+  const getFollowupOpportunitiesTool = (tool as any)({
+    name: "get_followup_opportunities",
+    description: "Identify leads deserving follow-up based on CRM evidence (open/read without reply, stale contacted).",
+    parameters: z.object({
+      limit: z.number().int().optional().describe("Max records to return (default 15, max 50)"),
+    }),
+    strict: true,
+    timeoutMs: defaultTimeout,
+    execute: async (args: any) => {
+      const startedAt = Date.now();
+      let ok = true;
+      let res: any;
+      try {
+        res = await executeHimiTool("get_followup_opportunities", args);
+        ok = res?.ok === true;
+      } catch (err) {
+        ok = false;
+        res = { ok: false, error: { code: "TOOL_EXECUTION_ERROR", message: err instanceof Error ? err.message : String(err) } };
+      }
+      toolCallsExecuted.push({ name: "get_followup_opportunities", ok, durationMs: Date.now() - startedAt });
+      return JSON.stringify(res);
+    },
+  });
+
+  const getSalesActivitySummaryTool = (tool as any)({
+    name: "get_sales_activity_summary",
+    description: "Aggregate recent CRM activity (leads added, status changes, notes, emails, WhatsApps, HIMI actions).",
+    parameters: z.object({
+      timeframe: z.string().optional().describe("Time window (today, 7_days, 30_days)"),
+    }),
+    strict: true,
+    timeoutMs: defaultTimeout,
+    execute: async (args: any) => {
+      const startedAt = Date.now();
+      let ok = true;
+      let res: any;
+      try {
+        res = await executeHimiTool("get_sales_activity_summary", args);
+        ok = res?.ok === true;
+      } catch (err) {
+        ok = false;
+        res = { ok: false, error: { code: "TOOL_EXECUTION_ERROR", message: err instanceof Error ? err.message : String(err) } };
+      }
+      toolCallsExecuted.push({ name: "get_sales_activity_summary", ok, durationMs: Date.now() - startedAt });
+      return JSON.stringify(res);
+    },
+  });
+
   const updateLeadStatusTool = (tool as any)({
     name: "update_lead_status",
     description: "Prepare a pending lead status update (NEW, QUALIFIED, CONTACTED, REPLIED, CALL_BOOKED, PROPOSAL_SENT, WON, LOST, NURTURE) for user confirmation.",
@@ -284,6 +410,11 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     getLeadDetailsTool,
     getLeadActivityTool,
     getOutreachStatsTool,
+    getPipelineSummaryTool,
+    getLeadsNeedingAttentionTool,
+    getEngagementSummaryTool,
+    getFollowupOpportunitiesTool,
+    getSalesActivitySummaryTool,
     updateLeadStatusTool,
     updateLeadPriorityTool,
     addLeadNoteTool,
@@ -292,7 +423,7 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
   const himiAgent = new Agent({
     name: "HIMI",
     model: config.model,
-    instructions: () => himiSystemInstructions(),
+    instructions: () => himiSystemInstructions(userPrompt),
     tools: availableTools,
   });
 
@@ -347,4 +478,5 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     clearTimeout(timeout);
   }
 }
+
 

@@ -41,6 +41,7 @@ export default async function EmailSettingsPage() {
           resend_api_key: s.resend_api_key || "",
           hasSmtpPass: Boolean(s.smtp_pass),
           hasResendKey: Boolean(s.resend_api_key),
+          hasResendWebhookSecret: Boolean(s.resend_webhook_secret || process.env.RESEND_WEBHOOK_SECRET),
         }}
       />
 
@@ -67,6 +68,20 @@ export default async function EmailSettingsPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-head"><h3>Resend lifecycle webhook</h3></div>
+        <div className="card-body">
+          <p className="small">
+            Resend posts email delivery, open, click, bounce, and complaint events to this webhook:
+          </p>
+          <pre className="pre">{`POST  https://YOUR-DOMAIN/api/webhooks/resend`}</pre>
+          <p className="small muted">
+            Configure this URL in Resend → Webhooks, enable all email events, and copy the signing secret
+            (<code>whsec_...</code>) into the Resend webhook signing secret field above or as <code>RESEND_WEBHOOK_SECRET</code>.
+          </p>
         </div>
       </div>
 

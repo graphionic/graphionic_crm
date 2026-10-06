@@ -8,6 +8,7 @@ import { canSendFreeform } from "@/lib/whatsapp";
 import { CopyButton } from "@/components/CopyButton";
 import { Composer, WaSender, QuickActions } from "./lead-client";
 import { isSuppressed } from "@/lib/actions/leads";
+import { parseActivityMeta } from "@/lib/resend-webhook";
 
 export const dynamic = "force-dynamic";
 
@@ -274,21 +275,43 @@ export default async function LeadDetailPage({
             <p className="muted">Nothing yet. Sends, notes, status changes and replies all appear here.</p>
           ) : (
             <ul className="timeline">
-              {lead.activities.map((a) => (
-                <li key={a.id} className={a.type}>
-                  <div className="t-top">
-                    <span className={`badge ${a.type === "WHATSAPP" ? "wa" : a.direction === "IN" ? "green" : "blue"}`}>
-                      {a.direction === "IN" ? "↓ IN" : "↑ OUT"} · {a.type}
-                    </span>
-                    {a.status ? <span className="badge slate">{a.status}</span> : null}
-                    {a.templateName ? <span className="badge slate">{a.templateName}</span> : null}
-                    <span className="t-when">{a.createdAt.toLocaleString("en-GB")}</span>
-                  </div>
-                  {a.subject ? <div style={{ fontWeight: 600, fontSize: 13.5 }}>{a.subject}</div> : null}
-                  {a.body ? <div className="t-body">{a.body}</div> : null}
-                  {a.error ? <div className="small" style={{ color: "var(--red)" }}>⚠ {a.error}</div> : null}
-                </li>
-              ))}
+              {lead.activities.map((a) => {
+                const meta = parseActivityMeta(a.meta);
+                const statusClass =
+                  a.status === "sent" || a.status === "delivered" || a.status === "read" || a.status === "received"
+                    ? "green"
+                    : a.status === "failed" || a.status === "bounced" || a.status === "complained"
+                    ? "red"
+                    : a.status === "delayed"
+                    ? "amber"
+                    : "slate";
+
+                return (
+                  <li key={a.id} className={a.type}>
+                    <div className="t-top">
+                      <span className={`badge ${a.type === "WHATSAPP" ? "wa" : a.direction === "IN" ? "green" : "blue"}`}>
+                        {a.direction === "IN" ? "↓ IN" : "↑ OUT"} · {a.type}
+                      </span>
+                      {a.status ? <span className={`badge ${statusClass}`}>{a.status}</span> : null}
+                      {meta.opened ? (
+                        <span className="badge blue" title={meta.firstOpenedAt ? `First opened: ${new Date(meta.firstOpenedAt).toLocaleString("en-GB")}` : undefined}>
+                          Opened{meta.openCount && meta.openCount > 1 ? ` (${meta.openCount})` : ""}
+                        </span>
+                      ) : null}
+                      {meta.clicked ? (
+                        <span className="badge violet" title={meta.lastClickedUrl ? `Clicked: ${meta.lastClickedUrl}` : undefined}>
+                          Clicked{meta.clickCount && meta.clickCount > 1 ? ` (${meta.clickCount})` : ""}
+                        </span>
+                      ) : null}
+                      {a.templateName ? <span className="badge slate">{a.templateName}</span> : null}
+                      <span className="t-when">{a.createdAt.toLocaleString("en-GB")}</span>
+                    </div>
+                    {a.subject ? <div style={{ fontWeight: 600, fontSize: 13.5 }}>{a.subject}</div> : null}
+                    {a.body ? <div className="t-body">{a.body}</div> : null}
+                    {a.error ? <div className="small" style={{ color: "var(--red)" }}>⚠ {a.error}</div> : null}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

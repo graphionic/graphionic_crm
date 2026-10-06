@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { requireActiveUser } from "@/lib/session";
+import { parseActivityMeta } from "@/lib/resend-webhook";
 
 export const dynamic = "force-dynamic";
 
@@ -83,32 +84,56 @@ export default async function OutboxPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((a) => (
-                    <tr key={a.id}>
-                      <td className="sub nowrap">{a.createdAt.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</td>
-                      <td>
-                        <span className={`badge ${a.type === "WHATSAPP" ? "wa" : "blue"}`}>{a.type}</span>
-                      </td>
-                      <td>
-                        <Link className="name" href={`/leads/${a.lead.id}`}>{a.lead.companyName}</Link>
-                        <div className="sub">{a.lead.country}</div>
-                      </td>
-                      <td className="sub" style={{ maxWidth: 340 }}>
-                        {a.subject ? <div style={{ fontWeight: 600, color: "var(--ink)" }}>{a.subject}</div> : null}
-                        <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {a.body || "—"}
-                        </div>
-                        {a.error ? <div style={{ color: "var(--red)" }}>⚠ {a.error}</div> : null}
-                      </td>
-                      <td className="sub">{a.templateName || a.channel || "—"}</td>
-                      <td>
-                        <span className={`badge ${a.status === "sent" ? "green" : a.status === "failed" ? "red" : "slate"}`}>
-                          {a.status || "—"}
-                        </span>
-                      </td>
-                      <td className="right"><Link className="btn sm" href={`/leads/${a.lead.id}`}>Open</Link></td>
-                    </tr>
-                  ))}
+                  {rows.map((a) => {
+                    const meta = parseActivityMeta(a.meta);
+                    const statusClass =
+                      a.status === "sent" || a.status === "delivered" || a.status === "read"
+                        ? "green"
+                        : a.status === "failed" || a.status === "bounced" || a.status === "complained"
+                        ? "red"
+                        : a.status === "delayed"
+                        ? "amber"
+                        : "slate";
+
+                    return (
+                      <tr key={a.id}>
+                        <td className="sub nowrap">{a.createdAt.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</td>
+                        <td>
+                          <span className={`badge ${a.type === "WHATSAPP" ? "wa" : "blue"}`}>{a.type}</span>
+                        </td>
+                        <td>
+                          <Link className="name" href={`/leads/${a.lead.id}`}>{a.lead.companyName}</Link>
+                          <div className="sub">{a.lead.country}</div>
+                        </td>
+                        <td className="sub" style={{ maxWidth: 340 }}>
+                          {a.subject ? <div style={{ fontWeight: 600, color: "var(--ink)" }}>{a.subject}</div> : null}
+                          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {a.body || "—"}
+                          </div>
+                          {a.error ? <div style={{ color: "var(--red)" }}>⚠ {a.error}</div> : null}
+                        </td>
+                        <td className="sub">{a.templateName || a.channel || "—"}</td>
+                        <td>
+                          <div className="hstack" style={{ gap: 4, flexWrap: "wrap" }}>
+                            <span className={`badge ${statusClass}`}>
+                              {a.status || "—"}
+                            </span>
+                            {meta.opened ? (
+                              <span className="badge blue" title={meta.firstOpenedAt ? `First opened: ${new Date(meta.firstOpenedAt).toLocaleString("en-GB")}` : undefined}>
+                                Opened{meta.openCount && meta.openCount > 1 ? ` (${meta.openCount})` : ""}
+                              </span>
+                            ) : null}
+                            {meta.clicked ? (
+                              <span className="badge violet" title={meta.lastClickedUrl ? `Clicked: ${meta.lastClickedUrl}` : undefined}>
+                                Clicked{meta.clickCount && meta.clickCount > 1 ? ` (${meta.clickCount})` : ""}
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="right"><Link className="btn sm" href={`/leads/${a.lead.id}`}>Open</Link></td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

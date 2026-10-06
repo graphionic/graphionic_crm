@@ -281,7 +281,15 @@ export default async function DashboardPage() {
                       </td>
                       <td>
                         {a.status ? (
-                          <span className={`badge ${a.status === "sent" || a.status === "received" ? "green" : a.status === "failed" ? "red" : "slate"}`}>
+                          <span className={`badge ${
+                            a.status === "sent" || a.status === "delivered" || a.status === "read" || a.status === "received"
+                              ? "green"
+                              : a.status === "failed" || a.status === "bounced" || a.status === "complained"
+                              ? "red"
+                              : a.status === "delayed"
+                              ? "amber"
+                              : "slate"
+                          }`}>
                             {a.status}
                           </span>
                         ) : <span className="muted">—</span>}

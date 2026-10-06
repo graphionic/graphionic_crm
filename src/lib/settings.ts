@@ -11,6 +11,7 @@ import { decrypt, encrypt } from "./crypto";
 export const SECRET_KEYS = new Set([
   "smtp_pass",
   "resend_api_key",
+  "resend_webhook_secret",
   "wa_access_token",
   "wa_app_secret",
   "wa_verify_token",
@@ -83,6 +84,7 @@ export async function mailConfig() {
     smtpPass: s.smtp_pass || "",
     smtpSecure: s.smtp_secure === "true",
     resendApiKey: s.resend_api_key || "",
+    resendWebhookSecret: s.resend_webhook_secret || process.env.RESEND_WEBHOOK_SECRET || "",
   };
 }
 

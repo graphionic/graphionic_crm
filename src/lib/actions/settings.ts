@@ -24,6 +24,7 @@ export async function saveMailSettings(fd: FormData) {
       smtp_pass: g("smtp_pass"),
       smtp_secure: fd.get("smtp_secure") ? "true" : "false",
       resend_api_key: g("resend_api_key"),
+      resend_webhook_secret: g("resend_webhook_secret"),
     });
     revalidatePath("/settings/email");
     return { ok: true, message: "Email settings saved." };

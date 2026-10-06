@@ -21,6 +21,7 @@ type Initial = {
   resend_api_key: string;
   hasSmtpPass: boolean;
   hasResendKey: boolean;
+  hasResendWebhookSecret?: boolean;
 };
 
 type DnsCheck = { host: string; matches: string; found: string; expected: string };
@@ -122,18 +123,31 @@ export function EmailSettingsForm({ initial }: { initial: Initial }) {
           ) : null}
 
           {provider === "resend" ? (
-            <label className="f">
-              <span>Resend API key</span>
-              <input
-                name="resend_api_key"
-                type="password"
-                placeholder={initial.hasResendKey ? "re_•••••••• (saved — leave blank to keep)" : "re_xxxxxxxxxxxx"}
-              />
-              <span className="hint">
-                Get it from resend.com → API Keys. Then add your domain there and copy the DKIM/MX
-                records into your DNS.
-              </span>
-            </label>
+            <>
+              <label className="f">
+                <span>Resend API key</span>
+                <input
+                  name="resend_api_key"
+                  type="password"
+                  placeholder={initial.hasResendKey ? "re_•••••••• (saved — leave blank to keep)" : "re_xxxxxxxxxxxx"}
+                />
+                <span className="hint">
+                  Get it from resend.com → API Keys. Then add your domain there and copy the DKIM/MX
+                  records into your DNS.
+                </span>
+              </label>
+              <label className="f">
+                <span>Resend webhook signing secret</span>
+                <input
+                  name="resend_webhook_secret"
+                  type="password"
+                  placeholder={initial.hasResendWebhookSecret ? "whsec_•••••••• (saved — leave blank to keep)" : "whsec_xxxxxxxxxxxx"}
+                />
+                <span className="hint">
+                  From resend.com → Webhooks → Signing Secret. Used to verify Svix signatures for email lifecycle tracking (sent, delivered, opened, clicked, bounced, complained).
+                </span>
+              </label>
+            </>
           ) : null}
 
           <div className="row" style={{ marginTop: 6 }}>

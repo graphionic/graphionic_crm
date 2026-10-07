@@ -234,5 +234,13 @@ model HimiPortfolioItem {
   @@index([enabled, priority])
 }
 
+// ---------------------------------------------------------------- himi action claims
+model HimiActionClaim {
+  id        String   @id @default(cuid())
+  actionId  String   @unique
+  createdAt DateTime @default(now())
+}
+
+
 
 

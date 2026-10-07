@@ -1073,6 +1073,10 @@ export async function executeConfirmedHimiAction(
       const actionId = pendingAction.actionId;
       const expectedRecipient = pendingAction.recipientEmail || args?.recipient_email;
 
+      if (!actionId) {
+        return { ok: false, error: "Missing action ID for email send execution." };
+      }
+
       if (!subject || !body) {
         return { ok: false, error: "Email subject and body are required." };
       }
@@ -1088,19 +1092,30 @@ export async function executeConfirmedHimiAction(
         };
       }
 
-      if (actionId) {
-        const existingActivity = await prisma.activity.findFirst({
-          where: {
-            leadId,
-            type: "EMAIL",
-            meta: { contains: actionId },
-          },
-        });
-        if (existingActivity) {
-          return { ok: false, error: "This email action has already been executed." };
-        }
+      if (lead.doNotContact) {
+        return { ok: false, error: "This lead is marked do-not-contact." };
       }
 
+      if (!lead.optedInEmail) {
+        return { ok: false, error: "No email opt-in recorded for this contact." };
+      }
+
+      // ---------------------------------------------------------------- ATOMIC CLAIM
+      // Postgres UNIQUE constraint on HimiActionClaim.actionId is the concurrency authority.
+      // If two requests arrive concurrently with the same actionId, exactly ONE succeeds.
+      try {
+        await prisma.himiActionClaim.create({
+          data: { actionId },
+        });
+      } catch (err: any) {
+        if (err?.code === "P2002" || String(err?.message || "").includes("HimiActionClaim_actionId_key")) {
+          return { ok: false, error: "This email action has already been processed. No additional email was sent." };
+        }
+        console.error("[HIMI Action Claim Error]:", err);
+        return { ok: false, error: "Failed to claim action execution." };
+      }
+
+      // ---------------------------------------------------------------- CANONICAL SENDER
       const sendRes = await sendLeadEmail(leadId, subject, body, { actionId });
       if (!sendRes.ok) {
         return { ok: false, error: sendRes.error || "Failed to send email." };

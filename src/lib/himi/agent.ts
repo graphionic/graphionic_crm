@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { executeHimiTool, HimiPendingAction } from "./tools";
 import { himiConfig } from "@/lib/settings";
-import { getDynamicSkillInstructions } from "./discovery";
+import {
+  getDynamicSkillInstructions,
+  DynamicSkillDiscoveryResult,
+  DynamicSkillMetadata,
+  DynamicResourceMetadata,
+} from "./discovery";
 
 export interface HimiHistoryMessage {
   sender: "user" | "assistant" | string;
@@ -26,6 +31,8 @@ export interface HimiChatResponse {
   error?: string;
   toolCalls?: ToolCallExecution[];
   pendingAction?: HimiPendingAction;
+  skills?: DynamicSkillMetadata[];
+  resources?: DynamicResourceMetadata[];
 }
 
 function himiSystemInstructions(skillGuidance?: string): string {
@@ -506,18 +513,22 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
   ];
 
   // Dynamically discover semantically relevant skills from Prisma
-  let skillGuidance = "";
+  let discoveryResult: DynamicSkillDiscoveryResult = {
+    instructions: "",
+    skills: [],
+    resources: [],
+  };
   try {
-    skillGuidance = await getDynamicSkillInstructions(userPrompt, config.apiKey, config.model);
+    discoveryResult = await getDynamicSkillInstructions(userPrompt, config.apiKey, config.model);
   } catch (err) {
     console.error("[HIMI Dynamic Skill Discovery Error]:", err);
-    skillGuidance = "";
+    discoveryResult = { instructions: "", skills: [], resources: [] };
   }
 
   const himiAgent = new Agent({
     name: "HIMI",
     model: config.model,
-    instructions: () => himiSystemInstructions(skillGuidance),
+    instructions: () => himiSystemInstructions(discoveryResult.instructions),
     tools: availableTools,
   });
 
@@ -570,6 +581,8 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
       response: outputText,
       toolCalls: toolCallsExecuted,
       pendingAction: capturedPendingAction,
+      skills: discoveryResult.skills || [],
+      resources: discoveryResult.resources || [],
     };
   } catch (error) {
     const rawMsg = error instanceof Error ? error.message : String(error);

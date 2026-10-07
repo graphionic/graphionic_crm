@@ -4,10 +4,18 @@ export interface DynamicSkillMetadata {
   id: string;
   slug: string;
   name: string;
-  description: string | null;
-  usageGuidance: string | null;
+}
+
+export interface DynamicResourceMetadata {
+  id: string;
+  title: string;
+  skillId: string;
+}
+
+export interface DynamicSkillDiscoveryResult {
   instructions: string;
-  priority: number;
+  skills: DynamicSkillMetadata[];
+  resources: DynamicResourceMetadata[];
 }
 
 export const MAX_TOTAL_RESOURCE_CHARS = 5000;
@@ -17,15 +25,21 @@ export const MAX_RESOURCES_PER_SKILL = 5;
  * Semantically discovers and returns guidance for enabled HimiSkills from Prisma.
  * Uses a lightweight, fast OpenAI completion call to evaluate skill metadata relevance.
  * Loads enabled supporting resources for selected skills within character budgets.
- * Gracefully returns an empty string on any failure or if no skills are relevant.
+ * Gracefully returns safe empty metadata on any failure or if no skills are relevant.
  */
 export async function getDynamicSkillInstructions(
   userPrompt: string,
   apiKey: string,
   modelName: string
-): Promise<string> {
+): Promise<DynamicSkillDiscoveryResult> {
+  const emptyResult: DynamicSkillDiscoveryResult = {
+    instructions: "",
+    skills: [],
+    resources: [],
+  };
+
   if (!userPrompt || !apiKey) {
-    return "";
+    return emptyResult;
   }
 
   try {
@@ -45,7 +59,7 @@ export async function getDynamicSkillInstructions(
     });
 
     if (!enabledSkills || enabledSkills.length === 0) {
-      return "";
+      return emptyResult;
     }
 
     // 2. Format metadata for semantic selection (excluding heavy procedural instructions & resources)
@@ -108,7 +122,7 @@ Rules:
     }
 
     if (!selectedSlugs || selectedSlugs.length === 0) {
-      return "";
+      return emptyResult;
     }
 
     // Limit to max 2 skills per turn
@@ -116,12 +130,21 @@ Rules:
     const matchedSkills = enabledSkills.filter((s) => selectedSet.has(s.slug));
 
     if (matchedSkills.length === 0) {
-      return "";
+      return emptyResult;
     }
+
+    const selectedSkillsMeta: DynamicSkillMetadata[] = matchedSkills.map((s) => ({
+      id: s.id,
+      slug: s.slug,
+      name: s.name,
+    }));
 
     // 3. Fetch enabled supporting resources for selected skill IDs
     const selectedSkillIds = matchedSkills.map((s) => s.id);
-    const resourcesBySkillId: Record<string, Array<{ title: string; content: string }>> = {};
+    const resourcesBySkillId: Record<
+      string,
+      Array<{ id: string; skillId: string; title: string; content: string }>
+    > = {};
 
     try {
       const enabledResources = await prisma.himiSkillResource.findMany({
@@ -130,6 +153,7 @@ Rules:
           enabled: true,
         },
         select: {
+          id: true,
           skillId: true,
           title: true,
           content: true,
@@ -143,6 +167,8 @@ Rules:
         }
         if (resourcesBySkillId[r.skillId].length < MAX_RESOURCES_PER_SKILL) {
           resourcesBySkillId[r.skillId].push({
+            id: r.id,
+            skillId: r.skillId,
             title: r.title.trim(),
             content: r.content.trim(),
           });
@@ -156,6 +182,7 @@ Rules:
     // 4. Compose guidance blocks while enforcing total resource character budget without truncating individual resources
     let totalResourceCharsUsed = 0;
     const guidanceBlocks: string[] = [];
+    const loadedResources: DynamicResourceMetadata[] = [];
 
     for (const s of matchedSkills) {
       let skillBlock = `[Skill: ${s.name}]\n${s.instructions.trim()}`;
@@ -165,15 +192,26 @@ Rules:
         if (totalResourceCharsUsed + res.content.length <= MAX_TOTAL_RESOURCE_CHARS) {
           skillBlock += `\n\n[Resource: ${res.title}]\n${res.content}`;
           totalResourceCharsUsed += res.content.length;
+          loadedResources.push({
+            id: res.id,
+            title: res.title,
+            skillId: res.skillId,
+          });
         }
       }
 
       guidanceBlocks.push(skillBlock);
     }
 
-    return `--- RELEVANT SKILL GUIDANCE ---\n\n${guidanceBlocks.join("\n\n")}`;
+    const instructions = `--- RELEVANT SKILL GUIDANCE ---\n\n${guidanceBlocks.join("\n\n")}`;
+
+    return {
+      instructions,
+      skills: selectedSkillsMeta,
+      resources: loadedResources,
+    };
   } catch (err) {
     console.error("[Dynamic Skill Discovery Failure]:", err);
-    return "";
+    return emptyResult;
   }
 }

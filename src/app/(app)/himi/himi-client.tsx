@@ -25,11 +25,25 @@ type ExecutedAction = {
   newValue: string;
 };
 
+type SkillMeta = {
+  id: string;
+  slug: string;
+  name: string;
+};
+
+type ResourceMeta = {
+  id: string;
+  title: string;
+  skillId: string;
+};
+
 type ChatMessage = {
   id: string;
   sender: "user" | "himi";
   text: string;
   toolCalls?: ToolCallMeta[];
+  skills?: SkillMeta[];
+  resources?: ResourceMeta[];
   isError?: boolean;
   pendingAction?: PendingAction;
   executedAction?: ExecutedAction;
@@ -264,6 +278,8 @@ export default function HimiClient() {
             sender: "himi",
             text: data.response,
             toolCalls: data.toolCalls || [],
+            skills: data.skills || [],
+            resources: data.resources || [],
             pendingAction: data.pendingAction,
             timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           },
@@ -455,24 +471,50 @@ export default function HimiClient() {
                     </div>
                   ) : null}
 
-                  {/* Secondary Tool Execution Indicator */}
-                  {msg.toolCalls && msg.toolCalls.length > 0 ? (
-                    <div className="himi-tool-badge">
-                      <span>✓</span>
-                      <span>
-                        Checked:{" "}
-                        {Array.from(
-                          new Set(
-                            msg.toolCalls.map(
-                              (t) =>
-                                FRIENDLY_TOOL_LABELS[t.name] ||
-                                (t.name.startsWith("web_search") ? "Web research" : t.name)
-                            )
-                          )
-                        ).join(" · ")}
-                      </span>
+                  {/* Secondary Tool Execution & Dynamic Skill Observability Indicators */}
+                  {((msg.toolCalls && msg.toolCalls.length > 0) ||
+                    (msg.skills && msg.skills.length > 0) ||
+                    (msg.resources && msg.resources.length > 0)) && (
+                    <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid var(--line-2)", display: "flex", flexDirection: "column", gap: 4 }}>
+                      {msg.toolCalls && msg.toolCalls.length > 0 && (
+                        <div className="himi-tool-badge" style={{ marginTop: 0, paddingTop: 0, borderTop: "none" }}>
+                          <span>✓</span>
+                          <span>
+                            Checked:{" "}
+                            {Array.from(
+                              new Set(
+                                msg.toolCalls.map(
+                                  (t) =>
+                                    FRIENDLY_TOOL_LABELS[t.name] ||
+                                    (t.name.startsWith("web_search") ? "Web research" : t.name)
+                                )
+                              )
+                            ).join(" · ")}
+                          </span>
+                        </div>
+                      )}
+
+                      {msg.skills && msg.skills.length > 0 && (
+                        <div className="himi-tool-badge" style={{ marginTop: 0, paddingTop: 0, borderTop: "none" }}>
+                          <span>✦</span>
+                          <span>
+                            {msg.skills.length === 1 ? "Skill" : "Skills"}:{" "}
+                            {msg.skills.map((s) => s.name).join(" · ")}
+                          </span>
+                        </div>
+                      )}
+
+                      {msg.resources && msg.resources.length > 0 && (
+                        <div className="himi-tool-badge" style={{ marginTop: 0, paddingTop: 0, borderTop: "none" }}>
+                          <span>✦</span>
+                          <span>
+                            {msg.resources.length === 1 ? "Resource" : "Resources"}:{" "}
+                            {msg.resources.map((r) => r.title).join(" · ")}
+                          </span>
+                        </div>
+                      )}
                     </div>
-                  ) : null}
+                  )}
                 </div>
               )}
             </div>

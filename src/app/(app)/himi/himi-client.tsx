@@ -494,14 +494,24 @@ export default function HimiClient() {
                     <div className="himi-success-card">
                       <span>✓</span>
                       <div>
-                        <strong>Updated {msg.executedAction.companyName}</strong>
-                        <br />
-                        {msg.executedAction.previousValue ? (
-                          <span style={{ fontSize: 12 }}>
-                            {msg.executedAction.previousValue} → {msg.executedAction.newValue}
-                          </span>
+                        {msg.executedAction.action === "send_email" ? (
+                          <>
+                            <strong>Email sent to {msg.executedAction.companyName}</strong>
+                            <br />
+                            <span style={{ fontSize: 12 }}>Recorded in lead timeline</span>
+                          </>
                         ) : (
-                          <span style={{ fontSize: 12 }}>Note recorded in lead timeline</span>
+                          <>
+                            <strong>Updated {msg.executedAction.companyName}</strong>
+                            <br />
+                            {msg.executedAction.previousValue ? (
+                              <span style={{ fontSize: 12 }}>
+                                {msg.executedAction.previousValue} → {msg.executedAction.newValue}
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: 12 }}>Note recorded in lead timeline</span>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>

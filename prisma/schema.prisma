@@ -179,4 +179,60 @@ model HimiSkillResource {
   @@index([skillId, enabled, priority])
 }
 
+// ---------------------------------------------------------------- himi business knowledge
+model HimiBusinessProfile {
+  id               String   @id @default("default")
+  businessName     String
+  description      String?  @db.Text
+  industry         String?
+  website          String?
+  contactEmail     String?
+  contactPhone     String?
+  headquarters     String?
+  targetMarkets    String?  @db.Text
+  valueProposition String?  @db.Text
+  positioning      String?  @db.Text
+  pricingPolicy    String?  @db.Text
+  salesGuidance    String?  @db.Text
+  updatedAt        DateTime @updatedAt
+}
+
+model HimiService {
+  id               String   @id @default(cuid())
+  name             String
+  category         String?
+  description      String?  @db.Text
+  deliverables     String?  @db.Text
+  technologies     String?  @db.Text
+  idealCustomer    String?  @db.Text
+  pricingGuidance  String?  @db.Text
+  timelineGuidance String?  @db.Text
+  salesNotes       String?  @db.Text
+  enabled          Boolean  @default(true)
+  priority         Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([enabled, priority])
+}
+
+model HimiPortfolioItem {
+  id               String   @id @default(cuid())
+  projectName      String
+  clientName       String?
+  industry         String?
+  description      String?  @db.Text
+  servicesProvided String?  @db.Text
+  technologies     String?  @db.Text
+  resultOutcome    String?  @db.Text
+  projectUrl       String?
+  enabled          Boolean  @default(true)
+  priority         Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([enabled, priority])
+}
+
+
 

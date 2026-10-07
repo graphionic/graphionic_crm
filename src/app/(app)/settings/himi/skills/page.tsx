@@ -37,6 +37,9 @@ export default async function HimiSkillsSettingsPage() {
         <Link href="/settings/himi/skills" className="btn sm primary">
           Dynamic Skills
         </Link>
+        <Link href="/settings/himi/knowledge" className="btn sm">
+          Business Knowledge
+        </Link>
       </div>
 
       <SkillsManager initialSkills={skills} />

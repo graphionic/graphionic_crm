@@ -28,6 +28,9 @@ export default async function HimiSettingsPage() {
         <Link href="/settings/himi/skills" className="btn sm">
           Dynamic Skills
         </Link>
+        <Link href="/settings/himi/knowledge" className="btn sm">
+          Business Knowledge
+        </Link>
       </div>
 
       <HimiSettingsForm

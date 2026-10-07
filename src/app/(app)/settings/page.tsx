@@ -15,12 +15,15 @@ export default async function SettingsPage() {
   ]);
 
   let skillsCount = 0;
+  let servicesCount = 0;
+  let portfolioCount = 0;
   try {
     skillsCount = await prisma.himiSkill.count();
+    servicesCount = await prisma.himiService.count();
+    portfolioCount = await prisma.himiPortfolioItem.count();
   } catch (e) {
-    console.error("Failed to query HimiSkill count:", e);
+    console.error("Failed to query HIMI counts:", e);
   }
-
 
   const mailOk =
     s.mail_provider === "resend"
@@ -79,6 +82,13 @@ export default async function SettingsPage() {
           desc={`Manage dynamic procedural intelligence, sales strategies, and guidance rules (${skillsCount} skills).`}
           status={`${skillsCount} configured`}
           statusOk={skillsCount > 0}
+        />
+        <Card
+          href="/settings/himi/knowledge"
+          title="HIMI Business Knowledge"
+          desc={`Manage factual business identity, services (${servicesCount}), and portfolio proof (${portfolioCount}).`}
+          status={servicesCount + portfolioCount > 0 ? `${servicesCount + portfolioCount} items` : "Not set up"}
+          statusOk={servicesCount + portfolioCount > 0}
         />
         <Card
           href="/settings/email"

@@ -10,9 +10,13 @@ type ToolCallMeta = {
 };
 
 type PendingAction = {
-  action: "update_lead_status" | "update_lead_priority" | "add_lead_note";
+  action: "update_lead_status" | "update_lead_priority" | "add_lead_note" | "send_email";
+  actionId?: string;
   leadId: string;
   companyName: string;
+  recipientEmail?: string | null;
+  subject?: string | null;
+  body?: string | null;
   currentValue?: string | null;
   newValue: string;
   arguments: Record<string, any>;
@@ -58,6 +62,7 @@ const FRIENDLY_TOOL_LABELS: Record<string, string> = {
   update_lead_status: "Update status",
   update_lead_priority: "Update priority",
   add_lead_note: "Add note",
+  prepare_send_email: "Prepare email",
   get_pipeline_summary: "Pipeline",
   get_leads_needing_attention: "Attention",
   get_engagement_summary: "Engagement",
@@ -430,6 +435,34 @@ export default function HimiClient() {
                         {msg.pendingAction.action === "add_lead_note" && (
                           <>Add Note: <em>"{msg.pendingAction.newValue}"</em></>
                         )}
+                        {msg.pendingAction.action === "send_email" && (
+                          <div style={{ marginTop: 6 }}>
+                            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
+                              SEND EMAIL
+                            </div>
+                            <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>
+                              <strong>To:</strong> {msg.pendingAction.recipientEmail || msg.pendingAction.arguments?.recipient_email || "N/A"}
+                            </div>
+                            <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6 }}>
+                              <strong>Subject:</strong> {msg.pendingAction.subject || msg.pendingAction.arguments?.subject || "N/A"}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: 12,
+                                background: "var(--surface-subtle, rgba(0, 0, 0, 0.03))",
+                                padding: "8px 10px",
+                                borderRadius: 4,
+                                maxHeight: 160,
+                                overflowY: "auto",
+                                whiteSpace: "pre-wrap",
+                                fontFamily: "inherit",
+                                border: "1px solid var(--border, #e5e7eb)",
+                              }}
+                            >
+                              {msg.pendingAction.body || msg.pendingAction.arguments?.body || ""}
+                            </div>
+                          </div>
+                        )}
                       </div>
                       {activePendingAction && activePendingAction.leadId === msg.pendingAction.leadId ? (
                         <div className="himi-confirm-actions">
@@ -438,7 +471,7 @@ export default function HimiClient() {
                             onClick={() => handleConfirmAction(msg.pendingAction!)}
                             disabled={loading}
                           >
-                            Confirm
+                            {msg.pendingAction.action === "send_email" ? "Confirm Send" : "Confirm"}
                           </button>
                           <button
                             className="btn sm danger"

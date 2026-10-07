@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { sendLeadEmail } from "@/lib/actions/send";
 
 export const HIMI_TOOL_DEFINITIONS = [
   {
@@ -196,13 +197,31 @@ export const HIMI_TOOL_DEFINITIONS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "prepare_send_email",
+    description: "Prepare a pending email action for user confirmation when the user expresses explicit intent to send an email to a lead. DOES NOT SEND EMAIL.",
+    input_schema: {
+      type: "object",
+      properties: {
+        lead_id: { type: "string", description: "Unique Lead ID" },
+        subject: { type: "string", description: "Exact email subject line" },
+        body: { type: "string", description: "Exact email body text" },
+      },
+      required: ["lead_id", "subject", "body"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 
 export interface HimiPendingAction {
-  action: "update_lead_status" | "update_lead_priority" | "add_lead_note";
+  action: "update_lead_status" | "update_lead_priority" | "add_lead_note" | "send_email";
+  actionId?: string;
   leadId: string;
   companyName: string;
+  recipientEmail?: string | null;
+  subject?: string | null;
+  body?: string | null;
   currentValue?: string | null;
   newValue: string;
   arguments: Record<string, any>;
@@ -565,6 +584,48 @@ export async function executeHimiTool(name: string, args: Record<string, any> = 
           arguments: { note: noteText },
         },
         message: `Note addition prepared for ${lead.companyName}. Awaiting user confirmation.`,
+      };
+    }
+
+    case "prepare_send_email": {
+      if (!args.lead_id || !args.subject || !args.body || !String(args.subject).trim() || !String(args.body).trim()) {
+        return { ok: false, error: { code: "INVALID_ARGS", message: "lead_id, subject, and body are required." } };
+      }
+      const lead = await prisma.lead.findUnique({
+        where: { id: args.lead_id },
+        select: { id: true, companyName: true, email: true },
+      });
+      if (!lead) {
+        return { ok: false, error: { code: "LEAD_NOT_FOUND", message: `No lead found with ID ${args.lead_id}` } };
+      }
+      if (!lead.email) {
+        return { ok: false, error: { code: "NO_EMAIL", message: `${lead.companyName} does not have an email address recorded.` } };
+      }
+      const subjectText = String(args.subject).trim();
+      const bodyText = String(args.body).trim();
+      const actionId = `act_${crypto.randomUUID()}`;
+
+      return {
+        ok: true,
+        requiresConfirmation: true,
+        pendingAction: {
+          action: "send_email",
+          actionId,
+          leadId: lead.id,
+          companyName: lead.companyName,
+          recipientEmail: lead.email,
+          subject: subjectText,
+          body: bodyText,
+          currentValue: null,
+          newValue: `To: ${lead.email} | Subject: ${subjectText}`,
+          arguments: {
+            lead_id: lead.id,
+            recipient_email: lead.email,
+            subject: subjectText,
+            body: bodyText,
+          },
+        },
+        message: `Email send prepared for ${lead.companyName} (${lead.email}). Awaiting user confirmation.`,
       };
     }
 
@@ -985,7 +1046,7 @@ export async function executeConfirmedHimiAction(
   pendingAction: HimiPendingAction,
   actorEmail?: string
 ) {
-  const ALLOWED_ACTIONS = ["update_lead_status", "update_lead_priority", "add_lead_note"];
+  const ALLOWED_ACTIONS = ["update_lead_status", "update_lead_priority", "add_lead_note", "send_email"];
   if (!pendingAction || !ALLOWED_ACTIONS.includes(pendingAction.action)) {
     return { ok: false, error: "Invalid or unallowed action type." };
   }
@@ -1006,6 +1067,55 @@ export async function executeConfirmedHimiAction(
   const actor = actorEmail || "HIMI Admin";
 
   switch (action) {
+    case "send_email": {
+      const subject = String(args?.subject || "").trim();
+      const body = String(args?.body || "").trim();
+      const actionId = pendingAction.actionId;
+      const expectedRecipient = pendingAction.recipientEmail || args?.recipient_email;
+
+      if (!subject || !body) {
+        return { ok: false, error: "Email subject and body are required." };
+      }
+
+      if (!lead.email) {
+        return { ok: false, error: `${lead.companyName} does not have an email address recorded.` };
+      }
+
+      if (expectedRecipient && lead.email !== expectedRecipient) {
+        return {
+          ok: false,
+          error: "The lead's email address changed after this action was prepared. Please prepare the email again.",
+        };
+      }
+
+      if (actionId) {
+        const existingActivity = await prisma.activity.findFirst({
+          where: {
+            leadId,
+            type: "EMAIL",
+            meta: { contains: actionId },
+          },
+        });
+        if (existingActivity) {
+          return { ok: false, error: "This email action has already been executed." };
+        }
+      }
+
+      const sendRes = await sendLeadEmail(leadId, subject, body, { actionId });
+      if (!sendRes.ok) {
+        return { ok: false, error: sendRes.error || "Failed to send email." };
+      }
+
+      return {
+        ok: true,
+        response: `Email sent to **${lead.companyName}** (${lead.email}).`,
+        executedAction: {
+          action: "send_email",
+          companyName: lead.companyName,
+          newValue: `To: ${lead.email} | Subject: ${subject}`,
+        },
+      };
+    }
     case "update_lead_status": {
       const VALID_STATUSES = [
         "NEW",

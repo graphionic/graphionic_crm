@@ -99,7 +99,7 @@ V7 PUBLIC WEB RESEARCH INTELLIGENCE:
 V6 OPERATIONS INTELLIGENCE & TOOL CAPABILITIES:
 - You have 4 READ tools: search_leads, get_lead_details, get_lead_activity, get_outreach_stats.
 - You have 5 OPERATIONS INTELLIGENCE tools: get_pipeline_summary, get_leads_needing_attention, get_engagement_summary, get_followup_opportunities, get_sales_activity_summary.
-- You have 3 CONTROLLED ACTION tools: update_lead_status, update_lead_priority, add_lead_note.
+- You have 4 CONTROLLED ACTION tools: update_lead_status, update_lead_priority, add_lead_note, prepare_send_email.
 - You have 3 BUSINESS KNOWLEDGE tools: get_business_profile, get_business_services, get_business_portfolio.
 - You have 1 HOSTED WEB SEARCH tool: web_search.
 
@@ -115,15 +115,18 @@ V5 CONTROLLED CRM ACTIONS BOUNDARY:
 - NEVER claim or attempt a database mutation without user confirmation. When a user asks to change a lead's status, priority, or add a note, resolve the exact single Lead ID using read tools first, then call the appropriate controlled action tool to prepare a pending action for user confirmation.
 - V6 supports updating only ONE Lead at a time. BULK MUTATIONS ARE STRICTLY FORBIDDEN (e.g. "mark all dental leads contacted" -> REFUSE bulk mutation gracefully).
 
-V10 OUTREACH INTELLIGENCE & DRAFTING BOUNDARY:
-- HIMI may analyze outreach context and prepare non-executing outreach recommendations and drafts (emails, WhatsApp copy, angles, subject lines) when requested.
-- Outreach recommendations and drafts are INTELLIGENCE AND DRAFTING ONLY.
-- Never send, queue, schedule, mutate consent/suppression, or claim outreach occurred; controlled execution belongs to a later confirmed-action flow.
+V11 CONTROLLED EMAIL ACTION BOUNDARY:
+- Drafting is NEVER sending. Requests to "draft", "write", "prepare", "show me", "make shorter", or "rewrite" an email output conversational text only and MUST NOT invoke send or preparation tools.
+- ONLY when the user expresses explicit execution intent ("send it", "send that email", "email them", "send this to Knowsley"), call prepare_send_email to prepare a controlled pending action for user confirmation.
+- Preparation DOES NOT send email. Preparation creates a pending confirmation card. Explicit user confirmation via the UI is mandatory before any email is sent.
+- Never send immediately, even if the user says "send it now" or "just send it".
+- Single prospect only. Never attempt bulk email sends.
+- Never claim an email was sent before confirmed execution succeeds.
 
 STRICTLY LOCKED CAPABILITIES:
 - You CANNOT create leads, delete leads, or bulk modify leads.
 - You CANNOT edit contact names, email addresses, phone numbers, websites, address/location details, consent settings, or suppression lists.
-- EMAIL AND WHATSAPP SENDING REMAIN LOCKED. (e.g. "Send Mayank a WhatsApp", "Email this lead" -> REFUSE NATIVELY AND GRACEFULLY). State clearly that email and WhatsApp outreach functions are locked.
+- WHATSAPP SENDING REMAIN LOCKED. (e.g. "Send Mayank a WhatsApp" -> REFUSE NATIVELY AND GRACEFULLY). State clearly that WhatsApp outreach function is locked.
 - You CANNOT modify email/WhatsApp templates, Settings, users, or campaign automation.
 
 CONVERSATIONAL BREVITY & NATURAL RESPONSES:
@@ -511,6 +514,35 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     },
   });
 
+  const prepareSendEmailTool = (tool as any)({
+    name: "prepare_send_email",
+    description: "Prepare a pending email action for user confirmation when the user expresses explicit intent to send an email to a lead. DOES NOT SEND EMAIL.",
+    parameters: z.object({
+      lead_id: z.string().describe("Unique Lead ID"),
+      subject: z.string().describe("Exact email subject line"),
+      body: z.string().describe("Exact email body text"),
+    }),
+    strict: true,
+    timeoutMs: defaultTimeout,
+    execute: async (args: any) => {
+      const startedAt = Date.now();
+      let ok = true;
+      let res: any;
+      try {
+        res = await executeHimiTool("prepare_send_email", args);
+        ok = res?.ok === true;
+        if (res?.pendingAction) {
+          capturedPendingAction = res.pendingAction;
+        }
+      } catch (err) {
+        ok = false;
+        res = { ok: false, error: { code: "TOOL_EXECUTION_ERROR", message: err instanceof Error ? err.message : String(err) } };
+      }
+      toolCallsExecuted.push({ name: "prepare_send_email", ok, durationMs: Date.now() - startedAt });
+      return JSON.stringify(res);
+    },
+  });
+
   const getBusinessProfileTool = (tool as any)({
     name: "get_business_profile",
     description: "Retrieve complete configured internal business profile, pricing policy, and sales positioning guidance.",
@@ -596,6 +628,7 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     updateLeadStatusTool,
     updateLeadPriorityTool,
     addLeadNoteTool,
+    prepareSendEmailTool,
     getBusinessProfileTool,
     getBusinessServicesTool,
     getBusinessPortfolioTool,

@@ -17,7 +17,12 @@ import { isSuppressed } from "./leads";
  * Nothing bypasses this by calling the provider directly.
  */
 
-export async function sendLeadEmail(leadId: string, subject: string, body: string) {
+export async function sendLeadEmail(
+  leadId: string,
+  subject: string,
+  body: string,
+  opts?: { actionId?: string }
+) {
   await requireActiveUser();
 
   const lead = await prisma.lead.findUnique({ where: { id: leadId } });
@@ -40,6 +45,19 @@ export async function sendLeadEmail(leadId: string, subject: string, body: strin
         "No email opt-in recorded for this contact. Tick 'Email opt-in' on the lead before sending.",
     } as const;
 
+  if (opts?.actionId) {
+    const existingActivity = await prisma.activity.findFirst({
+      where: {
+        leadId,
+        type: "EMAIL",
+        meta: { contains: opts.actionId },
+      },
+    });
+    if (existingActivity) {
+      return { ok: false, error: "This email action has already been executed." } as const;
+    }
+  }
+
   const result = await sendEmail({ to: lead.email, subject, body });
 
   await prisma.activity.create({
@@ -53,6 +71,7 @@ export async function sendLeadEmail(leadId: string, subject: string, body: strin
       status: result.ok ? "sent" : "failed",
       externalId: result.messageId ?? null,
       error: result.ok ? null : result.error ?? null,
+      meta: opts?.actionId ? JSON.stringify({ actionId: opts.actionId }) : null,
     },
   });
 

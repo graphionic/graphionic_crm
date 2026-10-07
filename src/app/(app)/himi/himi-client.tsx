@@ -65,6 +65,9 @@ const FRIENDLY_TOOL_LABELS: Record<string, string> = {
   get_sales_activity_summary: "Sales activity",
   web_search: "Web research",
   web_search_call: "Web research",
+  get_business_profile: "Business Profile",
+  get_business_services: "Business Services",
+  get_business_portfolio: "Business Portfolio",
 };
 
 

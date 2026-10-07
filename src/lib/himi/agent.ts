@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { executeHimiTool, HimiPendingAction } from "./tools";
 import { himiConfig } from "@/lib/settings";
+import { prisma } from "@/lib/prisma";
 import {
   getDynamicSkillInstructions,
   DynamicSkillDiscoveryResult,
@@ -35,8 +36,9 @@ export interface HimiChatResponse {
   resources?: DynamicResourceMetadata[];
 }
 
-function himiSystemInstructions(skillGuidance?: string): string {
+function himiSystemInstructions(skillGuidance?: string, businessIdentity?: string): string {
   const skillInstructions = (skillGuidance || "").trim();
+  const identityInstructions = (businessIdentity || "").trim();
 
 
   return `You are HIMI — the AI Sales Operations Intelligence Assistant for ClientForge CRM.
@@ -98,7 +100,15 @@ V6 OPERATIONS INTELLIGENCE & TOOL CAPABILITIES:
 - You have 4 READ tools: search_leads, get_lead_details, get_lead_activity, get_outreach_stats.
 - You have 5 OPERATIONS INTELLIGENCE tools: get_pipeline_summary, get_leads_needing_attention, get_engagement_summary, get_followup_opportunities, get_sales_activity_summary.
 - You have 3 CONTROLLED ACTION tools: update_lead_status, update_lead_priority, add_lead_note.
+- You have 3 BUSINESS KNOWLEDGE tools: get_business_profile, get_business_services, get_business_portfolio.
 - You have 1 HOSTED WEB SEARCH tool: web_search.
+
+BUSINESS KNOWLEDGE AUTHORITY & BOUNDARIES:
+- Configured Business Knowledge (retrieved via get_business_profile, get_business_services, get_business_portfolio or injected business identity) is the sole source of truth for internal company facts, capabilities, pricing rules, and portfolio proof.
+- Public web research (web_search) is for external lead research and MUST NOT override configured internal business facts or pricing.
+- If pricing guidance is missing or empty for a service, state clearly that pricing is not configured for that service rather than fabricating rates.
+- If a portfolio outcome or metric is missing, do not invent numbers or project metrics.
+- Do not claim unconfigured business capabilities merely because they sound plausible.
 
 V5 CONTROLLED CRM ACTIONS BOUNDARY:
 - EVERY MUTATION REQUIRES EXPLICIT HUMAN CONFIRMATION.
@@ -155,7 +165,7 @@ Data Integrity & Precision:
 Tone & Style:
 - Concise, natural, intelligent AI sales assistant tone.
 
-${skillInstructions}`;
+${identityInstructions ? `${identityInstructions}\n\n` : ""}${skillInstructions}`;
 }
 
 export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiChatResponse> {
@@ -496,6 +506,78 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     },
   });
 
+  const getBusinessProfileTool = (tool as any)({
+    name: "get_business_profile",
+    description: "Retrieve complete configured internal business profile, pricing policy, and sales positioning guidance.",
+    parameters: z.object({}),
+    strict: true,
+    timeoutMs: defaultTimeout,
+    execute: async (args: any) => {
+      const startedAt = Date.now();
+      let ok = true;
+      let res: any;
+      try {
+        res = await executeHimiTool("get_business_profile", args);
+        ok = res?.ok === true;
+      } catch (err) {
+        ok = false;
+        res = { ok: false, error: { code: "TOOL_EXECUTION_ERROR", message: err instanceof Error ? err.message : String(err) } };
+      }
+      toolCallsExecuted.push({ name: "get_business_profile", ok, durationMs: Date.now() - startedAt });
+      return JSON.stringify(res);
+    },
+  });
+
+  const getBusinessServicesTool = (tool as any)({
+    name: "get_business_services",
+    description: "Retrieve enabled services, deliverables, technologies, ideal customer profiles, timeline guidance, and pricing rules.",
+    parameters: z.object({
+      query: z.string().optional().describe("Search term for service name, deliverables, technologies, or ICP"),
+      category: z.string().optional().describe("Category filter"),
+    }),
+    strict: true,
+    timeoutMs: defaultTimeout,
+    execute: async (args: any) => {
+      const startedAt = Date.now();
+      let ok = true;
+      let res: any;
+      try {
+        res = await executeHimiTool("get_business_services", args);
+        ok = res?.ok === true;
+      } catch (err) {
+        ok = false;
+        res = { ok: false, error: { code: "TOOL_EXECUTION_ERROR", message: err instanceof Error ? err.message : String(err) } };
+      }
+      toolCallsExecuted.push({ name: "get_business_services", ok, durationMs: Date.now() - startedAt });
+      return JSON.stringify(res);
+    },
+  });
+
+  const getBusinessPortfolioTool = (tool as any)({
+    name: "get_business_portfolio",
+    description: "Retrieve enabled portfolio case studies, project outcomes, client references, and proof.",
+    parameters: z.object({
+      query: z.string().optional().describe("Search term for project name, client, industry, or outcome"),
+      industry: z.string().optional().describe("Industry filter"),
+    }),
+    strict: true,
+    timeoutMs: defaultTimeout,
+    execute: async (args: any) => {
+      const startedAt = Date.now();
+      let ok = true;
+      let res: any;
+      try {
+        res = await executeHimiTool("get_business_portfolio", args);
+        ok = res?.ok === true;
+      } catch (err) {
+        ok = false;
+        res = { ok: false, error: { code: "TOOL_EXECUTION_ERROR", message: err instanceof Error ? err.message : String(err) } };
+      }
+      toolCallsExecuted.push({ name: "get_business_portfolio", ok, durationMs: Date.now() - startedAt });
+      return JSON.stringify(res);
+    },
+  });
+
   const availableTools = [
     searchLeadsTool,
     getLeadDetailsTool,
@@ -509,8 +591,35 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     updateLeadStatusTool,
     updateLeadPriorityTool,
     addLeadNoteTool,
+    getBusinessProfileTool,
+    getBusinessServicesTool,
+    getBusinessPortfolioTool,
     webSearchTool({ searchContextSize: "medium" }),
   ];
+
+  // Dynamically load compact Business Profile identity if configured
+  let businessIdentityBlock = "";
+  try {
+    const busProfile = await prisma.himiBusinessProfile.findUnique({
+      where: { id: "default" },
+    });
+    if (busProfile) {
+      const parts: string[] = [];
+      if (busProfile.businessName) parts.push(`Business: ${busProfile.businessName}`);
+      if (busProfile.industry) parts.push(`Industry: ${busProfile.industry}`);
+      if (busProfile.description) parts.push(`Description: ${busProfile.description}`);
+      if (busProfile.targetMarkets) parts.push(`Target Markets: ${busProfile.targetMarkets}`);
+      if (busProfile.valueProposition) parts.push(`Value Proposition: ${busProfile.valueProposition}`);
+      if (busProfile.positioning) parts.push(`Positioning: ${busProfile.positioning}`);
+
+      if (parts.length > 0) {
+        businessIdentityBlock = `--- CONFIGURED BUSINESS IDENTITY ---\n${parts.join("\n")}\n\nConfigured Business Knowledge is authoritative for internal business facts. Do not invent missing business facts.`;
+      }
+    }
+  } catch (err) {
+    console.error("[HIMI Business Profile Load Error]:", err);
+    businessIdentityBlock = "";
+  }
 
   // Dynamically discover semantically relevant skills from Prisma
   let discoveryResult: DynamicSkillDiscoveryResult = {
@@ -528,7 +637,7 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
   const himiAgent = new Agent({
     name: "HIMI",
     model: config.model,
-    instructions: () => himiSystemInstructions(discoveryResult.instructions),
+    instructions: () => himiSystemInstructions(discoveryResult.instructions, businessIdentityBlock),
     tools: availableTools,
   });
 

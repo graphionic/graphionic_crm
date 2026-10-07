@@ -163,6 +163,39 @@ export const HIMI_TOOL_DEFINITIONS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "get_business_profile",
+    description: "Retrieve complete configured internal business profile, pricing policy, and sales positioning guidance.",
+    input_schema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_business_services",
+    description: "Retrieve enabled services, deliverables, technologies, ideal customer profiles, timeline guidance, and pricing rules.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search term for service name, deliverables, technologies, or ICP" },
+        category: { type: "string", description: "Category filter" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_business_portfolio",
+    description: "Retrieve enabled portfolio case studies, project outcomes, client references, and proof.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search term for project name, client, industry, or outcome" },
+        industry: { type: "string", description: "Industry filter" },
+      },
+      additionalProperties: false,
+    },
+  },
 ];
 
 
@@ -177,6 +210,145 @@ export interface HimiPendingAction {
 
 export async function executeHimiTool(name: string, args: Record<string, any> = {}) {
   switch (name) {
+    case "get_business_profile": {
+      try {
+        const profile = await prisma.himiBusinessProfile.findUnique({
+          where: { id: "default" },
+        });
+
+        if (!profile) {
+          return {
+            ok: true,
+            configured: false,
+            message: "No business profile is currently configured.",
+          };
+        }
+
+        return {
+          ok: true,
+          configured: true,
+          profile: {
+            businessName: profile.businessName,
+            description: profile.description,
+            industry: profile.industry,
+            website: profile.website,
+            contactEmail: profile.contactEmail,
+            contactPhone: profile.contactPhone,
+            headquarters: profile.headquarters,
+            targetMarkets: profile.targetMarkets,
+            valueProposition: profile.valueProposition,
+            positioning: profile.positioning,
+            pricingPolicy: profile.pricingPolicy,
+            salesGuidance: profile.salesGuidance,
+          },
+        };
+      } catch (err) {
+        console.error("Tool execution failed [get_business_profile]:", err);
+        return { ok: false, error: "Failed to retrieve business profile." };
+      }
+    }
+
+    case "get_business_services": {
+      try {
+        const queryTerm = String(args?.query || "").trim();
+        const categoryFilter = String(args?.category || "").trim();
+
+        const whereClause: any = { enabled: true };
+
+        if (categoryFilter) {
+          whereClause.category = { contains: categoryFilter, mode: "insensitive" };
+        }
+
+        if (queryTerm) {
+          whereClause.OR = [
+            { name: { contains: queryTerm, mode: "insensitive" } },
+            { category: { contains: queryTerm, mode: "insensitive" } },
+            { description: { contains: queryTerm, mode: "insensitive" } },
+            { deliverables: { contains: queryTerm, mode: "insensitive" } },
+            { technologies: { contains: queryTerm, mode: "insensitive" } },
+            { idealCustomer: { contains: queryTerm, mode: "insensitive" } },
+          ];
+        }
+
+        const services = await prisma.himiService.findMany({
+          where: whereClause,
+          orderBy: [{ priority: "asc" }, { createdAt: "desc" }],
+          take: 20,
+        });
+
+        return {
+          ok: true,
+          count: services.length,
+          services: services.map((s) => ({
+            id: s.id,
+            name: s.name,
+            category: s.category,
+            description: s.description,
+            deliverables: s.deliverables,
+            technologies: s.technologies,
+            idealCustomer: s.idealCustomer,
+            pricingGuidance: s.pricingGuidance,
+            timelineGuidance: s.timelineGuidance,
+            salesNotes: s.salesNotes,
+            priority: s.priority,
+          })),
+        };
+      } catch (err) {
+        console.error("Tool execution failed [get_business_services]:", err);
+        return { ok: false, error: "Failed to retrieve business services." };
+      }
+    }
+
+    case "get_business_portfolio": {
+      try {
+        const queryTerm = String(args?.query || "").trim();
+        const industryFilter = String(args?.industry || "").trim();
+
+        const whereClause: any = { enabled: true };
+
+        if (industryFilter) {
+          whereClause.industry = { contains: industryFilter, mode: "insensitive" };
+        }
+
+        if (queryTerm) {
+          whereClause.OR = [
+            { projectName: { contains: queryTerm, mode: "insensitive" } },
+            { clientName: { contains: queryTerm, mode: "insensitive" } },
+            { industry: { contains: queryTerm, mode: "insensitive" } },
+            { description: { contains: queryTerm, mode: "insensitive" } },
+            { servicesProvided: { contains: queryTerm, mode: "insensitive" } },
+            { technologies: { contains: queryTerm, mode: "insensitive" } },
+            { resultOutcome: { contains: queryTerm, mode: "insensitive" } },
+          ];
+        }
+
+        const items = await prisma.himiPortfolioItem.findMany({
+          where: whereClause,
+          orderBy: [{ priority: "asc" }, { createdAt: "desc" }],
+          take: 20,
+        });
+
+        return {
+          ok: true,
+          count: items.length,
+          portfolio: items.map((p) => ({
+            id: p.id,
+            projectName: p.projectName,
+            clientName: p.clientName,
+            industry: p.industry,
+            description: p.description,
+            servicesProvided: p.servicesProvided,
+            technologies: p.technologies,
+            resultOutcome: p.resultOutcome,
+            projectUrl: p.projectUrl,
+            priority: p.priority,
+          })),
+        };
+      } catch (err) {
+        console.error("Tool execution failed [get_business_portfolio]:", err);
+        return { ok: false, error: "Failed to retrieve portfolio proof." };
+      }
+    }
     case "search_leads": {
       const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 100);
       const where: any = {};

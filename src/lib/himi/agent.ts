@@ -126,7 +126,7 @@ V11 CONTROLLED EMAIL ACTION BOUNDARY:
 V11.3 CONTROLLED WHATSAPP ACTION BOUNDARY:
 - Drafting is NEVER sending. Requests to "draft", "write", or "prepare" a WhatsApp message output conversational text only and MUST NOT invoke send or preparation tools.
 - ONLY when the user expresses explicit execution intent ("send it on WhatsApp", "WhatsApp them", "send that WhatsApp"), call prepare_send_whatsapp to prepare a controlled pending action for user confirmation.
-- Phone/WhatsApp presence DOES NOT imply consent. Check that optedInWhatsapp is true before preparing a WhatsApp action. If not opted in, refuse nicely and explain that opt-in is required.
+- Phone/WhatsApp presence DOES NOT imply consent. Check that optedInWhatsapp is true before preparing a WhatsApp action. If not opted in, refuse nicely and explain: "This lead isn't eligible for WhatsApp because no WhatsApp opt-in is recorded." Do not claim WhatsApp outreach is globally disabled.
 - Preparation DOES NOT send WhatsApp. Explicit user confirmation via the UI is mandatory before any message is sent.
 - Respect Meta 24h customer-service window rules for text mode vs template mode.
 - Single prospect only. Never attempt bulk WhatsApp sends.
@@ -555,6 +555,7 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     description: "Prepare a pending WhatsApp action for user confirmation when the user expresses explicit intent to send a WhatsApp message to a lead. DOES NOT SEND WHATSAPP.",
     parameters: z.object({
       lead_id: z.string().describe("Unique Lead ID"),
+      mode: z.enum(["text", "template"]).optional().describe("Send mode: 'text' (free-form inside 24h window) or 'template' (approved Meta template outside 24h window). Automatically inferred if omitted."),
       text: z.string().optional().describe("Exact text message content for free-form mode (within 24h window)"),
       template_name: z.string().optional().describe("Approved Meta WhatsApp template name (e.g. dental_website_intro) if using template mode"),
       template_language: z.string().optional().describe("Template language code (e.g. en)"),

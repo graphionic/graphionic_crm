@@ -654,15 +654,17 @@ export async function executeHimiTool(name: string, args: Record<string, any> = 
     }
 
     case "prepare_send_whatsapp": {
-      if (!args.lead_id || !args.mode || (args.mode !== "text" && args.mode !== "template")) {
-        return { ok: false, error: { code: "INVALID_ARGS", message: "lead_id and valid mode ('text' or 'template') are required." } };
+      if (!args.lead_id) {
+        return { ok: false, error: { code: "INVALID_ARGS", message: "lead_id is required." } };
       }
-      if (args.mode === "text" && (!args.text || !String(args.text).trim())) {
-        return { ok: false, error: { code: "INVALID_ARGS", message: "text is required when mode is 'text'." } };
-      }
-      if (args.mode === "template" && (!args.template_name || !String(args.template_name).trim())) {
-        return { ok: false, error: { code: "INVALID_ARGS", message: "template_name is required when mode is 'template'." } };
-      }
+
+      // Infer mode if omitted: if template_name is provided, default to template, otherwise default to text
+      let mode: "text" | "template" =
+        args.mode === "text" || args.mode === "template"
+          ? args.mode
+          : args.template_name
+          ? "template"
+          : "text";
 
       const lead = await prisma.lead.findUnique({
         where: { id: args.lead_id },
@@ -681,7 +683,7 @@ export async function executeHimiTool(name: string, args: Record<string, any> = 
       }
 
       if (!lead.optedInWhatsapp) {
-        return { ok: false, error: { code: "NO_OPT_IN", message: `No WhatsApp opt-in recorded for ${lead.companyName}. WhatsApp policy requires explicit opt-in before sending.` } };
+        return { ok: false, error: { code: "NO_OPT_IN", message: `This lead isn't eligible for WhatsApp because no WhatsApp opt-in is recorded.` } };
       }
 
       const sup = await isSuppressed(lead);
@@ -689,16 +691,35 @@ export async function executeHimiTool(name: string, args: Record<string, any> = 
         return { ok: false, error: { code: "SUPPRESSED", message: `Blocked: ${to} is on the suppression list.` } };
       }
 
-      if (args.mode === "text") {
+      if (mode === "text") {
         const win = await canSendFreeform(lead.lastInboundAt);
         if (!win.allowed) {
-          return { ok: false, error: { code: "WINDOW_CLOSED", message: `${win.reason} Switch to an approved template.` } };
+          if (args.template_name) {
+            mode = "template";
+          } else {
+            return {
+              ok: false,
+              error: {
+                code: "WINDOW_CLOSED",
+                message: `${win.reason} The free-form WhatsApp message can't be sent because the 24-hour customer-service window is closed. An approved Meta template (e.g. 'dental_website_intro') is required.`,
+              },
+            };
+          }
         }
       }
 
+      if (mode === "text" && (!args.text || !String(args.text).trim())) {
+        return { ok: false, error: { code: "INVALID_ARGS", message: "text content is required when mode is 'text'." } };
+      }
+
+      let templateName = args.template_name || (mode === "template" ? "dental_website_intro" : null);
+      if (mode === "template" && !templateName) {
+        return { ok: false, error: { code: "INVALID_ARGS", message: "template_name is required when mode is 'template'." } };
+      }
+
       let resolvedParams = Array.isArray(args.params) ? args.params.map(String) : [];
-      if (args.mode === "template" && resolvedParams.length === 0) {
-        if (args.template_name === "dental_website_intro") {
+      if (mode === "template" && resolvedParams.length === 0) {
+        if (templateName === "dental_website_intro") {
           resolvedParams = [lead.companyName || "", lead.city || ""];
         }
       }
@@ -715,20 +736,20 @@ export async function executeHimiTool(name: string, args: Record<string, any> = 
           leadId: lead.id,
           companyName: lead.companyName,
           recipientPhone: to,
-          whatsappMode: args.mode,
-          templateName: args.template_name || null,
+          whatsappMode: mode,
+          templateName: templateName,
           templateLanguage: args.language || "en",
           templateParams: resolvedParams,
           body: textBody,
           currentValue: null,
-          newValue: args.mode === "text"
+          newValue: mode === "text"
             ? `To: ${to} | Text: "${(textBody || "").slice(0, 40)}..."`
-            : `To: ${to} | Template: ${args.template_name}`,
+            : `To: ${to} | Template: ${templateName}`,
           arguments: {
             lead_id: lead.id,
-            mode: args.mode,
+            mode,
             text: textBody,
-            template_name: args.template_name,
+            template_name: templateName,
             language: args.language || "en",
             params: resolvedParams,
             recipient_phone: to,

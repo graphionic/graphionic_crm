@@ -551,9 +551,9 @@ export default function HimiClient() {
                           </>
                         ) : msg.executedAction.action === "send_whatsapp" ? (
                           <>
-                            <strong>WhatsApp sent to {msg.executedAction.companyName}</strong>
+                            <strong>WhatsApp submitted for {msg.executedAction.companyName}</strong>
                             <br />
-                            <span style={{ fontSize: 12 }}>Recorded in lead timeline</span>
+                            <span style={{ fontSize: 12 }}>Delivery status will update in lead timeline</span>
                           </>
                         ) : (
                           <>

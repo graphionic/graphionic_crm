@@ -1271,7 +1271,7 @@ export async function executeConfirmedHimiAction(
 
       return {
         ok: true,
-        response: `WhatsApp message sent to **${lead.companyName}** (${currentTo}).`,
+        response: `WhatsApp message submitted to Meta for delivery to **${lead.companyName}** (${currentTo}).`,
         executedAction: {
           action: "send_whatsapp",
           companyName: lead.companyName,

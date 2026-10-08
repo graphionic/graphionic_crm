@@ -97,7 +97,7 @@ export async function sendLeadEmail(
 
 export async function sendLeadWhatsapp(
   leadId: string,
-  opts: { mode: "text" | "template"; text?: string; templateName?: string; language?: string; params?: string[] }
+  opts: { mode: "text" | "template"; text?: string; templateName?: string; language?: string; params?: string[]; actionId?: string }
 ) {
   await requireActiveUser();
 
@@ -153,7 +153,7 @@ export async function sendLeadWhatsapp(
       status: result.ok ? "sent" : "failed",
       externalId: result.messageId ?? null,
       error: result.ok ? null : result.error ?? null,
-      meta: JSON.stringify({ mode: opts.mode, params: templateParams }),
+      meta: JSON.stringify({ mode: opts.mode, params: templateParams, actionId: opts.actionId || null }),
     },
   });
 

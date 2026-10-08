@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma";
-import { sendLeadEmail } from "@/lib/actions/send";
+import { sendLeadEmail, sendLeadWhatsapp } from "@/lib/actions/send";
+import { canSendFreeform } from "@/lib/whatsapp";
+import { isSuppressed } from "@/lib/actions/leads";
 
 export const HIMI_TOOL_DEFINITIONS = [
   {
@@ -211,15 +213,37 @@ export const HIMI_TOOL_DEFINITIONS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "prepare_send_whatsapp",
+    description: "Prepare a pending WhatsApp message action for user confirmation when the user expresses explicit intent to send a WhatsApp message to a lead. DOES NOT SEND WHATSAPP.",
+    input_schema: {
+      type: "object",
+      properties: {
+        lead_id: { type: "string", description: "Unique Lead ID" },
+        mode: { type: "string", description: "Send mode: 'text' (free-form inside 24h window) or 'template' (approved template)" },
+        text: { type: "string", description: "Free-form text message content (required if mode is 'text')" },
+        template_name: { type: "string", description: "Approved Meta template name (required if mode is 'template')" },
+        language: { type: "string", description: "Template language code (e.g. 'en', default 'en')" },
+        params: { type: "array", items: { type: "string" }, description: "Optional template parameters" },
+      },
+      required: ["lead_id"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 
 export interface HimiPendingAction {
-  action: "update_lead_status" | "update_lead_priority" | "add_lead_note" | "send_email";
+  action: "update_lead_status" | "update_lead_priority" | "add_lead_note" | "send_email" | "send_whatsapp";
   actionId?: string;
   leadId: string;
   companyName: string;
   recipientEmail?: string | null;
+  recipientPhone?: string | null;
+  whatsappMode?: "text" | "template" | null;
+  templateName?: string | null;
+  templateLanguage?: string | null;
+  templateParams?: string[] | null;
   subject?: string | null;
   body?: string | null;
   currentValue?: string | null;
@@ -626,6 +650,91 @@ export async function executeHimiTool(name: string, args: Record<string, any> = 
           },
         },
         message: `Email send prepared for ${lead.companyName} (${lead.email}). Awaiting user confirmation.`,
+      };
+    }
+
+    case "prepare_send_whatsapp": {
+      if (!args.lead_id || !args.mode || (args.mode !== "text" && args.mode !== "template")) {
+        return { ok: false, error: { code: "INVALID_ARGS", message: "lead_id and valid mode ('text' or 'template') are required." } };
+      }
+      if (args.mode === "text" && (!args.text || !String(args.text).trim())) {
+        return { ok: false, error: { code: "INVALID_ARGS", message: "text is required when mode is 'text'." } };
+      }
+      if (args.mode === "template" && (!args.template_name || !String(args.template_name).trim())) {
+        return { ok: false, error: { code: "INVALID_ARGS", message: "template_name is required when mode is 'template'." } };
+      }
+
+      const lead = await prisma.lead.findUnique({
+        where: { id: args.lead_id },
+      });
+      if (!lead) {
+        return { ok: false, error: { code: "LEAD_NOT_FOUND", message: `No lead found with ID ${args.lead_id}` } };
+      }
+
+      const to = lead.whatsapp || lead.phone;
+      if (!to) {
+        return { ok: false, error: { code: "NO_WHATSAPP_PHONE", message: `${lead.companyName} does not have a WhatsApp or phone number recorded.` } };
+      }
+
+      if (lead.doNotContact) {
+        return { ok: false, error: { code: "DO_NOT_CONTACT", message: `${lead.companyName} is marked do-not-contact.` } };
+      }
+
+      if (!lead.optedInWhatsapp) {
+        return { ok: false, error: { code: "NO_OPT_IN", message: `No WhatsApp opt-in recorded for ${lead.companyName}. WhatsApp policy requires explicit opt-in before sending.` } };
+      }
+
+      const sup = await isSuppressed(lead);
+      if (sup) {
+        return { ok: false, error: { code: "SUPPRESSED", message: `Blocked: ${to} is on the suppression list.` } };
+      }
+
+      if (args.mode === "text") {
+        const win = await canSendFreeform(lead.lastInboundAt);
+        if (!win.allowed) {
+          return { ok: false, error: { code: "WINDOW_CLOSED", message: `${win.reason} Switch to an approved template.` } };
+        }
+      }
+
+      let resolvedParams = Array.isArray(args.params) ? args.params.map(String) : [];
+      if (args.mode === "template" && resolvedParams.length === 0) {
+        if (args.template_name === "dental_website_intro") {
+          resolvedParams = [lead.companyName || "", lead.city || ""];
+        }
+      }
+
+      const textBody = args.text ? String(args.text).trim() : null;
+      const actionId = `act_${crypto.randomUUID()}`;
+
+      return {
+        ok: true,
+        requiresConfirmation: true,
+        pendingAction: {
+          action: "send_whatsapp",
+          actionId,
+          leadId: lead.id,
+          companyName: lead.companyName,
+          recipientPhone: to,
+          whatsappMode: args.mode,
+          templateName: args.template_name || null,
+          templateLanguage: args.language || "en",
+          templateParams: resolvedParams,
+          body: textBody,
+          currentValue: null,
+          newValue: args.mode === "text"
+            ? `To: ${to} | Text: "${(textBody || "").slice(0, 40)}..."`
+            : `To: ${to} | Template: ${args.template_name}`,
+          arguments: {
+            lead_id: lead.id,
+            mode: args.mode,
+            text: textBody,
+            template_name: args.template_name,
+            language: args.language || "en",
+            params: resolvedParams,
+            recipient_phone: to,
+          },
+        },
+        message: `WhatsApp message prepared for ${lead.companyName} (${to}). Awaiting user confirmation.`,
       };
     }
 
@@ -1046,7 +1155,7 @@ export async function executeConfirmedHimiAction(
   pendingAction: HimiPendingAction,
   actorEmail?: string
 ) {
-  const ALLOWED_ACTIONS = ["update_lead_status", "update_lead_priority", "add_lead_note", "send_email"];
+  const ALLOWED_ACTIONS = ["update_lead_status", "update_lead_priority", "add_lead_note", "send_email", "send_whatsapp"];
   if (!pendingAction || !ALLOWED_ACTIONS.includes(pendingAction.action)) {
     return { ok: false, error: "Invalid or unallowed action type." };
   }
@@ -1067,6 +1176,88 @@ export async function executeConfirmedHimiAction(
   const actor = actorEmail || "HIMI Admin";
 
   switch (action) {
+    case "send_whatsapp": {
+      const mode = (args?.mode || pendingAction.whatsappMode || "text") as "text" | "template";
+      const text = args?.text || pendingAction.body || undefined;
+      const templateName = args?.template_name || pendingAction.templateName || undefined;
+      const language = args?.language || pendingAction.templateLanguage || "en";
+      const params = (args?.params || pendingAction.templateParams || []) as string[];
+      const actionId = pendingAction.actionId;
+      const expectedRecipient = pendingAction.recipientPhone || args?.recipient_phone;
+
+      if (!actionId) {
+        return { ok: false, error: "Missing action ID for WhatsApp send execution." };
+      }
+
+      const currentTo = lead.whatsapp || lead.phone;
+      if (!currentTo) {
+        return { ok: false, error: `${lead.companyName} does not have a WhatsApp or phone number recorded.` };
+      }
+
+      if (expectedRecipient && currentTo !== expectedRecipient) {
+        return {
+          ok: false,
+          error: "The lead's WhatsApp destination changed after this action was prepared. Please prepare the message again.",
+        };
+      }
+
+      if (lead.doNotContact) {
+        return { ok: false, error: "This lead is marked do-not-contact." };
+      }
+
+      if (!lead.optedInWhatsapp) {
+        return { ok: false, error: "No WhatsApp opt-in recorded for this contact." };
+      }
+
+      const sup = await isSuppressed(lead);
+      if (sup) {
+        return { ok: false, error: "Blocked: number is on the suppression list." };
+      }
+
+      if (mode === "text") {
+        const win = await canSendFreeform(lead.lastInboundAt);
+        if (!win.allowed) {
+          return { ok: false, error: `${win.reason} Switch to an approved template.` };
+        }
+      }
+
+      // ---------------------------------------------------------------- ATOMIC CLAIM
+      try {
+        await prisma.himiActionClaim.create({
+          data: { actionId },
+        });
+      } catch (err: any) {
+        if (err?.code === "P2002" || String(err?.message || "").includes("HimiActionClaim_actionId_key")) {
+          return { ok: false, error: "This WhatsApp action has already been processed. No additional message was sent." };
+        }
+        console.error("[HIMI Action Claim Error]:", err);
+        return { ok: false, error: "Failed to claim action execution." };
+      }
+
+      // ---------------------------------------------------------------- CANONICAL SENDER
+      const sendRes = await sendLeadWhatsapp(leadId, {
+        mode,
+        text,
+        templateName,
+        language,
+        params,
+        actionId,
+      });
+
+      if (!sendRes.ok) {
+        return { ok: false, error: sendRes.error || "Failed to send WhatsApp message." };
+      }
+
+      return {
+        ok: true,
+        response: `WhatsApp message sent to **${lead.companyName}** (${currentTo}).`,
+        executedAction: {
+          action: "send_whatsapp",
+          companyName: lead.companyName,
+          newValue: `To: ${currentTo} | ${mode === "template" ? `Template: ${templateName}` : "Free-form message"}`,
+        },
+      };
+    }
     case "send_email": {
       const subject = String(args?.subject || "").trim();
       const body = String(args?.body || "").trim();

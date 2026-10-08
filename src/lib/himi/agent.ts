@@ -99,7 +99,7 @@ V7 PUBLIC WEB RESEARCH INTELLIGENCE:
 V6 OPERATIONS INTELLIGENCE & TOOL CAPABILITIES:
 - You have 4 READ tools: search_leads, get_lead_details, get_lead_activity, get_outreach_stats.
 - You have 5 OPERATIONS INTELLIGENCE tools: get_pipeline_summary, get_leads_needing_attention, get_engagement_summary, get_followup_opportunities, get_sales_activity_summary.
-- You have 4 CONTROLLED ACTION tools: update_lead_status, update_lead_priority, add_lead_note, prepare_send_email.
+- You have 5 CONTROLLED ACTION tools: update_lead_status, update_lead_priority, add_lead_note, prepare_send_email, prepare_send_whatsapp.
 - You have 3 BUSINESS KNOWLEDGE tools: get_business_profile, get_business_services, get_business_portfolio.
 - You have 1 HOSTED WEB SEARCH tool: web_search.
 
@@ -123,10 +123,17 @@ V11 CONTROLLED EMAIL ACTION BOUNDARY:
 - Single prospect only. Never attempt bulk email sends.
 - Never claim an email was sent before confirmed execution succeeds.
 
+V11.3 CONTROLLED WHATSAPP ACTION BOUNDARY:
+- Drafting is NEVER sending. Requests to "draft", "write", or "prepare" a WhatsApp message output conversational text only and MUST NOT invoke send or preparation tools.
+- ONLY when the user expresses explicit execution intent ("send it on WhatsApp", "WhatsApp them", "send that WhatsApp"), call prepare_send_whatsapp to prepare a controlled pending action for user confirmation.
+- Phone/WhatsApp presence DOES NOT imply consent. Check that optedInWhatsapp is true before preparing a WhatsApp action. If not opted in, refuse nicely and explain that opt-in is required.
+- Preparation DOES NOT send WhatsApp. Explicit user confirmation via the UI is mandatory before any message is sent.
+- Respect Meta 24h customer-service window rules for text mode vs template mode.
+- Single prospect only. Never attempt bulk WhatsApp sends.
+
 STRICTLY LOCKED CAPABILITIES:
 - You CANNOT create leads, delete leads, or bulk modify leads.
 - You CANNOT edit contact names, email addresses, phone numbers, websites, address/location details, consent settings, or suppression lists.
-- WHATSAPP SENDING REMAIN LOCKED. (e.g. "Send Mayank a WhatsApp" -> REFUSE NATIVELY AND GRACEFULLY). State clearly that WhatsApp outreach function is locked.
 - You CANNOT modify email/WhatsApp templates, Settings, users, or campaign automation.
 
 CONVERSATIONAL BREVITY & NATURAL RESPONSES:
@@ -543,6 +550,36 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     },
   });
 
+  const prepareSendWhatsappTool = (tool as any)({
+    name: "prepare_send_whatsapp",
+    description: "Prepare a pending WhatsApp action for user confirmation when the user expresses explicit intent to send a WhatsApp message to a lead. DOES NOT SEND WHATSAPP.",
+    parameters: z.object({
+      lead_id: z.string().describe("Unique Lead ID"),
+      text: z.string().optional().describe("Exact text message content for free-form mode (within 24h window)"),
+      template_name: z.string().optional().describe("Approved Meta WhatsApp template name (e.g. dental_website_intro) if using template mode"),
+      template_language: z.string().optional().describe("Template language code (e.g. en)"),
+    }),
+    strict: true,
+    timeoutMs: defaultTimeout,
+    execute: async (args: any) => {
+      const startedAt = Date.now();
+      let ok = true;
+      let res: any;
+      try {
+        res = await executeHimiTool("prepare_send_whatsapp", args);
+        ok = res?.ok === true;
+        if (res?.pendingAction) {
+          capturedPendingAction = res.pendingAction;
+        }
+      } catch (err) {
+        ok = false;
+        res = { ok: false, error: { code: "TOOL_EXECUTION_ERROR", message: err instanceof Error ? err.message : String(err) } };
+      }
+      toolCallsExecuted.push({ name: "prepare_send_whatsapp", ok, durationMs: Date.now() - startedAt });
+      return JSON.stringify(res);
+    },
+  });
+
   const getBusinessProfileTool = (tool as any)({
     name: "get_business_profile",
     description: "Retrieve complete configured internal business profile, pricing policy, and sales positioning guidance.",
@@ -629,6 +666,7 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     updateLeadPriorityTool,
     addLeadNoteTool,
     prepareSendEmailTool,
+    prepareSendWhatsappTool,
     getBusinessProfileTool,
     getBusinessServicesTool,
     getBusinessPortfolioTool,

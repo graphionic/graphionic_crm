@@ -3,6 +3,144 @@ import { sendLeadEmail, sendLeadWhatsapp } from "@/lib/actions/send";
 import { canSendFreeform } from "@/lib/whatsapp";
 import { isSuppressed } from "@/lib/actions/leads";
 
+export function detectSecretInText(text: string): boolean {
+  if (!text) return false;
+  const patterns = [
+    /\bsk-[a-zA-Z0-9_\-]{8,}\b/i,
+    /\bre_[a-zA-Z0-9_\-]{8,}\b/i,
+    /\bwhsec_[a-zA-Z0-9_\-]{8,}\b/i,
+    /\bBearer\s+[a-zA-Z0-9_\-\.]{8,}\b/i,
+    /\bpostgres(ql)?:\/\/[^\s]+/i,
+    /\bDATABASE_URL\s*=/i,
+    /\b(?:password|passwd|api_key|secret_key|access_token|auth_token)\s*[:=]\s*[^\s]{4,}/i,
+    /-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----/i,
+  ];
+  return patterns.some((p) => p.test(text));
+}
+
+export function validateMemoryContent(content: string): { valid: boolean; error?: string } {
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return { valid: false, error: "Memory content cannot be empty." };
+  }
+  if (trimmed.length > 1000) {
+    return { valid: false, error: "Memory content exceeds maximum limit of 1000 characters." };
+  }
+  if (detectSecretInText(trimmed)) {
+    return {
+      valid: false,
+      error: "I can't store credentials or secrets in HIMI memory. Keep API keys and secrets in encrypted Settings/environment configuration.",
+    };
+  }
+
+  const lower = trimmed.toLowerCase();
+
+  // Compliance overrides
+  if (
+    lower.includes("without opt-in") ||
+    lower.includes("without opt in") ||
+    lower.includes("without consent") ||
+    lower.includes("even if not opted in") ||
+    lower.includes("even if haven't opted in") ||
+    lower.includes("even if they haven't opted in") ||
+    lower.includes("even if they have not opted in") ||
+    lower.includes("ignore do not contact") ||
+    lower.includes("ignore donotcontact") ||
+    lower.includes("bypass suppression") ||
+    lower.includes("bypass consent")
+  ) {
+    return {
+      valid: false,
+      error: "Compliance rules (opt-in consent, suppression, and do-not-contact) cannot be overridden by memory.",
+    };
+  }
+
+  // Lead CRM status / pipeline state
+  if (
+    /^(?:remember\s+(?:that\s+)?)?[a-z0-9\s\.\-]+\s+is\s+(?:contacted|qualified|replied|won|lost|nurture|call_booked|proposal_sent)\b/i.test(trimmed) ||
+    /\bstatus\s+(?:is|to)\s+(?:contacted|qualified|replied|won|lost|nurture|call_booked|proposal_sent)\b/i.test(trimmed)
+  ) {
+    return {
+      valid: false,
+      error: "Pipeline and lead status belong in structured CRM state, not memory. Use update_lead_status to update lead statuses.",
+    };
+  }
+
+  // Communication timeline and delivery events
+  if (
+    lower.includes("email bounced") ||
+    lower.includes("replied yesterday") ||
+    lower.includes("whatsapp failed to deliver")
+  ) {
+    return {
+      valid: false,
+      error: "Communication timeline and delivery events belong in Activity/Suppression records, not memory.",
+    };
+  }
+
+  // Lead-specific operational scheduling / notes
+  if (
+    /^(?:don't|do not|wait to)\s+contact\s+[a-z0-9\s\-]+(?:\s+until|\s+before)\b/i.test(trimmed) ||
+    /^(?:remember\s+(?:not to|to not)\s+contact\s+[a-z0-9\s\-]+(?:\s+until|\s+before))\b/i.test(trimmed)
+  ) {
+    return {
+      valid: false,
+      error: "Lead-specific notes and scheduled follow-ups belong in CRM lead notes, not global memory. Use add_lead_note on the specific lead.",
+    };
+  }
+
+  // System invariants / definitions
+  if (
+    lower.includes("follow-up means previously contacted") ||
+    lower.includes("follow up means previously contacted") ||
+    lower.includes("no_site is a segment") ||
+    lower.includes("no_site means")
+  ) {
+    return {
+      valid: false,
+      error: "This is a core system invariant already enforced by ClientForge and Dynamic Skills, so it doesn't need to be stored in memory.",
+    };
+  }
+
+  return { valid: true };
+}
+
+export function normalizeMemoryKey(content: string, explicitKey?: string, category: string = "PREFERENCE"): string {
+  if (explicitKey && explicitKey.trim()) {
+    return (
+      explicitKey
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, "_")
+        .replace(/_+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 64) || "general_preference"
+    );
+  }
+
+  const cleaned = content
+    .toLowerCase()
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const stopwords = new Set([
+    "remember", "that", "i", "we", "our", "prefer", "preference", "the", "a", "an",
+    "is", "for", "to", "in", "of", "and", "this", "next", "my", "me", "you",
+    "should", "would", "could", "be", "with", "on", "at", "by", "from", "about",
+    "please", "always", "never", "only"
+  ]);
+
+  const words = cleaned
+    .split(" ")
+    .filter((w) => w.length > 1 && !stopwords.has(w));
+
+  const slug = words.slice(0, 4).join("_");
+  const fallback = `${category.toLowerCase()}_${words[0] || "note"}`;
+  const finalKey = (slug || fallback).slice(0, 64);
+  return finalKey || "general_preference";
+}
+
 function parseMetaSafe(raw: string | null | undefined): Record<string, any> {
   if (!raw) return {};
   try {
@@ -240,6 +378,47 @@ export const HIMI_TOOL_DEFINITIONS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "save_memory",
+    description: "Persist an explicit durable USER preference or BUSINESS strategic directive. Call ONLY when the user explicitly commands you to remember or store something.",
+    input_schema: {
+      type: "object",
+      properties: {
+        content: { type: "string", description: "Durable preference or strategic directive text to remember" },
+        scope: { type: "string", enum: ["USER", "BUSINESS"], description: "Memory scope: 'USER' (personal preference for current user) or 'BUSINESS' (organization-wide strategic focus)" },
+        category: { type: "string", enum: ["PREFERENCE", "STRATEGY", "INSTRUCTION"], description: "Category: 'PREFERENCE' (drafting/formatting style), 'STRATEGY' (targeting/market focus), or 'INSTRUCTION' (operational directive)" },
+        key: { type: "string", description: "Optional topic key for deduplication and updating (e.g. 'email_length_preference', 'target_market_focus')" },
+        expires_in_days: { type: "integer", description: "Optional expiration period in days for time-bound campaign directives" },
+      },
+      required: ["content"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "forget_memory",
+    description: "Deactivate an existing active memory when the user explicitly commands you to forget or remove a remembered preference or directive.",
+    input_schema: {
+      type: "object",
+      properties: {
+        key: { type: "string", description: "Topic key of memory to deactivate (e.g. 'email_length_preference')" },
+        memory_id: { type: "string", description: "Unique ID of specific memory to deactivate" },
+        query: { type: "string", description: "Search term or phrase to find and deactivate matching active memory" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list_memories",
+    description: "Retrieve active, non-expired memories when the user asks what you remember about their preferences or business directives.",
+    input_schema: {
+      type: "object",
+      properties: {
+        scope: { type: "string", enum: ["USER", "BUSINESS"], description: "Optional scope filter: 'USER' or 'BUSINESS'" },
+        category: { type: "string", description: "Optional category filter" },
+      },
+      additionalProperties: false,
+    },
+  },
 ];
 
 
@@ -261,7 +440,11 @@ export interface HimiPendingAction {
   arguments: Record<string, any>;
 }
 
-export async function executeHimiTool(name: string, args: Record<string, any> = {}) {
+export async function executeHimiTool(
+  name: string,
+  args: Record<string, any> = {},
+  context: { userId?: string; userEmail?: string } = {}
+) {
   switch (name) {
     case "get_business_profile": {
       try {
@@ -1264,6 +1447,303 @@ export async function executeHimiTool(name: string, args: Record<string, any> = 
           recentKeyEvents,
         },
       };
+    }
+
+    case "save_memory": {
+      const rawContent = String(args.content || "").trim();
+      const scope = args.scope === "BUSINESS" ? "BUSINESS" : "USER";
+      const category = ["PREFERENCE", "STRATEGY", "INSTRUCTION"].includes(String(args.category || "").toUpperCase())
+        ? String(args.category).toUpperCase()
+        : "PREFERENCE";
+
+      const validation = validateMemoryContent(rawContent);
+      if (!validation.valid) {
+        return { ok: false, error: validation.error };
+      }
+
+      let userId: string | null = null;
+      if (scope === "USER") {
+        userId = context.userId || null;
+        if (!userId) {
+          const defaultAdmin = await prisma.adminUser.findFirst({
+            where: { isActive: true },
+            select: { id: true },
+          });
+          userId = defaultAdmin?.id || null;
+        }
+        if (!userId) {
+          return { ok: false, error: "Authenticated user context required to save user memory." };
+        }
+      }
+
+      const key = normalizeMemoryKey(rawContent, args.key, category);
+
+      let expiresAt: Date | null = null;
+      if (args.expires_in_days && Number(args.expires_in_days) > 0) {
+        const days = Math.min(Math.max(Number(args.expires_in_days), 1), 365);
+        expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+      }
+
+      try {
+        const existing = await prisma.himiMemory.findFirst({
+          where: {
+            scope,
+            key,
+            userId: scope === "USER" ? userId : null,
+            active: true,
+          },
+        });
+
+        if (existing) {
+          if (existing.content.trim() === rawContent) {
+            return {
+              ok: true,
+              action: "already_saved",
+              memoryId: existing.id,
+              key,
+              scope,
+              category,
+              response: `Remembered: ${rawContent}`,
+            };
+          }
+
+          await prisma.$transaction([
+            prisma.himiMemory.updateMany({
+              where: {
+                scope,
+                key,
+                userId: scope === "USER" ? userId : null,
+                active: true,
+              },
+              data: { active: false },
+            }),
+            prisma.himiMemory.create({
+              data: {
+                scope,
+                userId: scope === "USER" ? userId : null,
+                category,
+                key,
+                content: rawContent,
+                active: true,
+                expiresAt,
+              },
+            }),
+          ]);
+
+          return {
+            ok: true,
+            action: "updated",
+            key,
+            scope,
+            category,
+            expiresAt: expiresAt?.toISOString() || null,
+            response: `Updated memory: ${rawContent}`,
+          };
+        }
+
+        const created = await prisma.himiMemory.create({
+          data: {
+            scope,
+            userId: scope === "USER" ? userId : null,
+            category,
+            key,
+            content: rawContent,
+            active: true,
+            expiresAt,
+          },
+        });
+
+        return {
+          ok: true,
+          action: "saved",
+          memoryId: created.id,
+          key,
+          scope,
+          category,
+          expiresAt: expiresAt?.toISOString() || null,
+          response: `Remembered: ${rawContent}`,
+        };
+      } catch (err) {
+        console.error("[save_memory Error]:", err);
+        return { ok: false, error: "Failed to persist memory record." };
+      }
+    }
+
+    case "forget_memory": {
+      const memoryId = args.memory_id ? String(args.memory_id).trim() : undefined;
+      const key = args.key ? String(args.key).trim().toLowerCase() : undefined;
+      const query = args.query ? String(args.query).trim().toLowerCase() : undefined;
+      const searchTerm = (key || query || "").trim();
+
+      let userId = context.userId || null;
+      if (!userId) {
+        const defaultAdmin = await prisma.adminUser.findFirst({
+          where: { isActive: true },
+          select: { id: true },
+        });
+        userId = defaultAdmin?.id || null;
+      }
+
+      try {
+        const activeMemories = await prisma.himiMemory.findMany({
+          where: {
+            active: true,
+            OR: [
+              { scope: "BUSINESS" },
+              ...(userId ? [{ scope: "USER", userId }] : []),
+            ],
+          },
+        });
+
+        if (activeMemories.length === 0) {
+          return {
+            ok: true,
+            found: 0,
+            response: "No matching active memory found to forget.",
+          };
+        }
+
+        let matching: typeof activeMemories = [];
+
+        if (memoryId) {
+          matching = activeMemories.filter((m) => m.id === memoryId);
+        } else if (searchTerm) {
+          const normalizedSearch = normalizeMemoryKey(searchTerm, searchTerm);
+          const stopwords = new Set([
+            "the",
+            "and",
+            "about",
+            "preference",
+            "remember",
+            "forget",
+            "my",
+            "our",
+            "that",
+            "this",
+            "for",
+            "with",
+            "a",
+            "an",
+          ]);
+          const searchTokens = searchTerm
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, " ")
+            .split(/\s+/)
+            .filter((w) => w.length > 2 && !stopwords.has(w));
+
+          matching = activeMemories.filter((m) => {
+            const mKey = m.key.toLowerCase();
+            const mContent = m.content.toLowerCase();
+            const fullText = `${mKey} ${mContent}`;
+
+            if (mKey === searchTerm || mKey === normalizedSearch) return true;
+            if (mKey.includes(searchTerm) || mContent.includes(searchTerm)) return true;
+            if (searchTokens.length > 0) {
+              const matchedTokens = searchTokens.filter((token) => fullText.includes(token));
+              if (matchedTokens.length >= Math.min(2, searchTokens.length)) return true;
+            }
+            return false;
+          });
+        }
+
+        if (matching.length === 0) {
+          return {
+            ok: true,
+            found: 0,
+            response: "No matching active memory found to forget.",
+          };
+        }
+
+        const idsToDeactivate = matching.map((m) => m.id);
+        await prisma.himiMemory.updateMany({
+          where: { id: { in: idsToDeactivate } },
+          data: { active: false },
+        });
+
+        const descriptions = matching.map((m) => m.content).join(" | ");
+        return {
+          ok: true,
+          found: matching.length,
+          response: `Forgotten: ${descriptions}`,
+        };
+      } catch (err) {
+        console.error("[forget_memory Error]:", err);
+        return { ok: false, error: "Failed to deactivate memory record." };
+      }
+    }
+
+    case "list_memories": {
+      const scopeFilter = args.scope ? String(args.scope).toUpperCase() : undefined;
+      const categoryFilter = args.category ? String(args.category).toUpperCase() : undefined;
+
+      let userId = context.userId || null;
+      if (!userId) {
+        const defaultAdmin = await prisma.adminUser.findFirst({
+          where: { isActive: true },
+          select: { id: true },
+        });
+        userId = defaultAdmin?.id || null;
+      }
+
+      try {
+        const whereClause: any = {
+          active: true,
+          AND: [
+            {
+              OR: [
+                { expiresAt: null },
+                { expiresAt: { gt: new Date() } },
+              ],
+            },
+            {
+              OR: [
+                { scope: "BUSINESS" },
+                ...(userId ? [{ scope: "USER", userId }] : []),
+              ],
+            },
+          ],
+        };
+
+        if (scopeFilter === "USER" || scopeFilter === "BUSINESS") {
+          whereClause.scope = scopeFilter;
+        }
+        if (categoryFilter) {
+          whereClause.category = categoryFilter;
+        }
+
+        const memories = await prisma.himiMemory.findMany({
+          where: whereClause,
+          orderBy: [{ updatedAt: "desc" }],
+          take: 20,
+          select: {
+            id: true,
+            scope: true,
+            category: true,
+            key: true,
+            content: true,
+            expiresAt: true,
+            updatedAt: true,
+          },
+        });
+
+        if (memories.length === 0) {
+          return {
+            ok: true,
+            count: 0,
+            memories: [],
+            response: "No active memories found.",
+          };
+        }
+
+        return {
+          ok: true,
+          count: memories.length,
+          memories,
+        };
+      } catch (err) {
+        console.error("[list_memories Error]:", err);
+        return { ok: false, error: "Failed to retrieve memories." };
+      }
     }
 
     default:

@@ -53,6 +53,8 @@ export async function POST(req: Request) {
     const result = await runHimiNativeTurn({
       message: String(body.message),
       history: Array.isArray(body.history) ? body.history : undefined,
+      userId: user.id,
+      userEmail: user.email,
     });
 
     return NextResponse.json(result, { status: result.ok ? 200 : 400 });

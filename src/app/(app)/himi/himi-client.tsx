@@ -79,6 +79,9 @@ const FRIENDLY_TOOL_LABELS: Record<string, string> = {
   get_business_profile: "Business Profile",
   get_business_services: "Business Services",
   get_business_portfolio: "Business Portfolio",
+  save_memory: "Memory saved",
+  forget_memory: "Memory forgot",
+  list_memories: "Memory list",
 };
 
 

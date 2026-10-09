@@ -17,6 +17,8 @@ export interface HimiHistoryMessage {
 export interface HimiChatPayload {
   message: string;
   history?: HimiHistoryMessage[];
+  userId?: string;
+  userEmail?: string;
 }
 
 export interface ToolCallExecution {
@@ -101,7 +103,26 @@ V6 OPERATIONS INTELLIGENCE & TOOL CAPABILITIES:
 - You have 5 OPERATIONS INTELLIGENCE tools: get_pipeline_summary, get_leads_needing_attention, get_engagement_summary, get_followup_opportunities, get_sales_activity_summary.
 - You have 5 CONTROLLED ACTION tools: update_lead_status, update_lead_priority, add_lead_note, prepare_send_email, prepare_send_whatsapp.
 - You have 3 BUSINESS KNOWLEDGE tools: get_business_profile, get_business_services, get_business_portfolio.
+- You have 3 EXPLICIT MEMORY tools: save_memory, forget_memory, list_memories.
 - You have 1 HOSTED WEB SEARCH tool: web_search.
+
+V13 EXPLICIT MEMORY & PREFERENCES BOUNDARY:
+- You have 3 EXPLICIT MEMORY tools: save_memory, forget_memory, list_memories.
+- EXPLICIT COMMANDS ONLY: Call save_memory ONLY when the user explicitly commands you to remember, store, or keep a durable preference or business directive (e.g. "Remember that...", "Keep in mind that I prefer...", "Save this preference...").
+- DO NOT automatically or implicitly save casual remarks, observations, or temporary conversation context.
+- WHAT BELONGS IN MEMORY:
+  * USER scope: Personal drafting, formatting, tone, and sales operational preferences for the current user (e.g. "prefer first-touch emails under 100 words", "morning briefings should show 3 priorities").
+  * BUSINESS scope: Organization-wide temporary market focus, targeting priorities, and angle restrictions (e.g. "focus on UK dental practices this month", "do not offer free website audits").
+- WHAT DOES NOT BELONG IN MEMORY:
+  * Credentials / API keys / secrets / passwords -> NEVER store in memory (belong in encrypted Settings).
+  * Lead CRM status / pipeline stage -> NEVER store in memory (use update_lead_status).
+  * Lead-specific notes / scheduling -> NEVER store in memory (use add_lead_note).
+  * Communication timeline / delivery events -> NEVER store in memory (Activity records).
+  * Permanent business services / pricing -> NEVER store in memory (Business Knowledge).
+  * Core system invariants -> NEVER store in memory (already built-in).
+  * Compliance overrides -> REJECT IMMEDIATELY. Memory can never bypass opt-in, suppression, or do-not-contact.
+- FORGETTING MEMORY: When the user asks you to forget a preference or directive (e.g. "Forget my preference about email length"), call forget_memory with the relevant key or search query.
+- LISTING MEMORY: When the user asks what you remember (e.g. "What do you remember about my preferences?"), call list_memories to inspect active memories.
 
 BUSINESS KNOWLEDGE AUTHORITY & BOUNDARIES:
 - Configured Business Knowledge (retrieved via get_business_profile, get_business_services, get_business_portfolio or injected business identity) is the sole source of truth for internal company facts, capabilities, pricing rules, and portfolio proof.
@@ -207,6 +228,7 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
   const toolCallsExecuted: ToolCallExecution[] = [];
   let capturedPendingAction: HimiPendingAction | undefined = undefined;
   const defaultTimeout = 45000;
+  const toolContext = { userId: payload.userId, userEmail: payload.userEmail };
 
   const searchLeadsTool = (tool as any)({
     name: "search_leads",
@@ -643,13 +665,92 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
       let ok = true;
       let res: any;
       try {
-        res = await executeHimiTool("get_business_portfolio", args);
+        res = await executeHimiTool("get_business_portfolio", args, toolContext);
         ok = res?.ok === true;
       } catch (err) {
         ok = false;
         res = { ok: false, error: { code: "TOOL_EXECUTION_ERROR", message: err instanceof Error ? err.message : String(err) } };
       }
       toolCallsExecuted.push({ name: "get_business_portfolio", ok, durationMs: Date.now() - startedAt });
+      return JSON.stringify(res);
+    },
+  });
+
+  const saveMemoryTool = (tool as any)({
+    name: "save_memory",
+    description: "Persist an explicit durable USER preference or BUSINESS strategic directive. Call ONLY when the user explicitly commands you to remember or store something.",
+    parameters: z.object({
+      content: z.string().describe("Durable preference or strategic directive text to remember"),
+      scope: z.enum(["USER", "BUSINESS"]).optional().describe("Memory scope: 'USER' (personal preference for current user) or 'BUSINESS' (organization-wide strategic focus)"),
+      category: z.enum(["PREFERENCE", "STRATEGY", "INSTRUCTION"]).optional().describe("Category: 'PREFERENCE' (drafting/formatting style), 'STRATEGY' (targeting/market focus), or 'INSTRUCTION' (operational directive)"),
+      key: z.string().optional().describe("Optional topic key for deduplication and updating (e.g. 'email_length_preference', 'target_market_focus')"),
+      expires_in_days: z.number().int().optional().describe("Optional expiration period in days for time-bound campaign directives"),
+    }),
+    strict: true,
+    timeoutMs: defaultTimeout,
+    execute: async (args: any) => {
+      const startedAt = Date.now();
+      let ok = true;
+      let res: any;
+      try {
+        res = await executeHimiTool("save_memory", args, toolContext);
+        ok = res?.ok === true;
+      } catch (err) {
+        ok = false;
+        res = { ok: false, error: { code: "TOOL_EXECUTION_ERROR", message: err instanceof Error ? err.message : String(err) } };
+      }
+      toolCallsExecuted.push({ name: "save_memory", ok, durationMs: Date.now() - startedAt });
+      return JSON.stringify(res);
+    },
+  });
+
+  const forgetMemoryTool = (tool as any)({
+    name: "forget_memory",
+    description: "Deactivate an existing active memory when the user explicitly commands you to forget or remove a remembered preference or directive.",
+    parameters: z.object({
+      key: z.string().optional().describe("Topic key of memory to deactivate (e.g. 'email_length_preference')"),
+      memory_id: z.string().optional().describe("Unique ID of specific memory to deactivate"),
+      query: z.string().optional().describe("Search term or phrase to find and deactivate matching active memory"),
+    }),
+    strict: true,
+    timeoutMs: defaultTimeout,
+    execute: async (args: any) => {
+      const startedAt = Date.now();
+      let ok = true;
+      let res: any;
+      try {
+        res = await executeHimiTool("forget_memory", args, toolContext);
+        ok = res?.ok === true;
+      } catch (err) {
+        ok = false;
+        res = { ok: false, error: { code: "TOOL_EXECUTION_ERROR", message: err instanceof Error ? err.message : String(err) } };
+      }
+      toolCallsExecuted.push({ name: "forget_memory", ok, durationMs: Date.now() - startedAt });
+      return JSON.stringify(res);
+    },
+  });
+
+  const listMemoriesTool = (tool as any)({
+    name: "list_memories",
+    description: "Retrieve active, non-expired memories when the user asks what you remember about their preferences or business directives.",
+    parameters: z.object({
+      scope: z.enum(["USER", "BUSINESS"]).optional().describe("Optional scope filter: 'USER' or 'BUSINESS'"),
+      category: z.string().optional().describe("Optional category filter"),
+    }),
+    strict: true,
+    timeoutMs: defaultTimeout,
+    execute: async (args: any) => {
+      const startedAt = Date.now();
+      let ok = true;
+      let res: any;
+      try {
+        res = await executeHimiTool("list_memories", args, toolContext);
+        ok = res?.ok === true;
+      } catch (err) {
+        ok = false;
+        res = { ok: false, error: { code: "TOOL_EXECUTION_ERROR", message: err instanceof Error ? err.message : String(err) } };
+      }
+      toolCallsExecuted.push({ name: "list_memories", ok, durationMs: Date.now() - startedAt });
       return JSON.stringify(res);
     },
   });
@@ -672,6 +773,9 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     getBusinessProfileTool,
     getBusinessServicesTool,
     getBusinessPortfolioTool,
+    saveMemoryTool,
+    forgetMemoryTool,
+    listMemoriesTool,
     webSearchTool({ searchContextSize: "medium" }),
   ];
 

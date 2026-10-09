@@ -333,9 +333,9 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
 
   const getLeadsNeedingAttentionTool = (tool as any)({
     name: "get_leads_needing_attention",
-    description: "Retrieve a ranked list of leads requiring human attention with factual signals.",
+    description: "Retrieve a ranked list of active leads requiring human attention with factual signals, contactability, and channel eligibility.",
     parameters: z.object({
-      limit: z.number().int().optional().describe("Max records to return (default 15, max 50)"),
+      limit: z.number().int().optional().describe("Max records to return (default 15, max 15)"),
     }),
     strict: true,
     timeoutMs: defaultTimeout,
@@ -357,7 +357,7 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
 
   const getEngagementSummaryTool = (tool as any)({
     name: "get_engagement_summary",
-    description: "Retrieve engagement statistics (Email opens, clicks, replies, WhatsApp reads) for a timeframe.",
+    description: "Retrieve engagement statistics (Email opens, clicks, replies, WhatsApp reads) and derived rates for a timeframe.",
     parameters: z.object({
       timeframe: z.string().optional().describe("Time window (today, 7_days, 30_days)"),
     }),
@@ -381,9 +381,9 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
 
   const getFollowupOpportunitiesTool = (tool as any)({
     name: "get_followup_opportunities",
-    description: "Identify leads deserving follow-up based on CRM evidence (open/read without reply, stale contacted).",
+    description: "Identify previously contacted leads deserving follow-up based on CRM evidence (open/read without reply, stale contacted) with channel eligibility.",
     parameters: z.object({
-      limit: z.number().int().optional().describe("Max records to return (default 15, max 50)"),
+      limit: z.number().int().optional().describe("Max records to return (default 15, max 15)"),
     }),
     strict: true,
     timeoutMs: defaultTimeout,

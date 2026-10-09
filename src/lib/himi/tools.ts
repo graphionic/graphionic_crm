@@ -3,6 +3,16 @@ import { sendLeadEmail, sendLeadWhatsapp } from "@/lib/actions/send";
 import { canSendFreeform } from "@/lib/whatsapp";
 import { isSuppressed } from "@/lib/actions/leads";
 
+function parseMetaSafe(raw: string | null | undefined): Record<string, any> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 export const HIMI_TOOL_DEFINITIONS = [
   {
     name: "search_leads",
@@ -118,11 +128,11 @@ export const HIMI_TOOL_DEFINITIONS = [
   },
   {
     name: "get_leads_needing_attention",
-    description: "Retrieve a ranked list of leads requiring human attention with factual signals.",
+    description: "Retrieve a ranked list of active leads requiring human attention with factual signals, contactability, and channel eligibility.",
     input_schema: {
       type: "object",
       properties: {
-        limit: { type: "integer", description: "Max records to return (default 15, max 50)" },
+        limit: { type: "integer", description: "Max records to return (default 15, max 15)" },
       },
       additionalProperties: false,
     },
@@ -143,11 +153,11 @@ export const HIMI_TOOL_DEFINITIONS = [
   },
   {
     name: "get_followup_opportunities",
-    description: "Identify leads deserving follow-up based on CRM evidence (open/read without reply, stale contacted).",
+    description: "Identify previously contacted leads deserving follow-up based on CRM evidence (open/read without reply, stale contacted) with channel eligibility.",
     input_schema: {
       type: "object",
       properties: {
-        limit: { type: "integer", description: "Max records to return (default 15, max 50)" },
+        limit: { type: "integer", description: "Max records to return (default 15, max 15)" },
       },
       additionalProperties: false,
     },
@@ -828,7 +838,7 @@ export async function executeHimiTool(name: string, args: Record<string, any> = 
     }
 
     case "get_leads_needing_attention": {
-      const limit = Math.min(Math.max(Number(args.limit) || 15, 1), 50);
+      const limit = Math.min(Math.max(Number(args.limit) || 15, 1), 15);
 
       const leads = await prisma.lead.findMany({
         where: {
@@ -849,14 +859,15 @@ export async function executeHimiTool(name: string, args: Record<string, any> = 
         const signals: string[] = [];
         let scoreWeight = 0;
 
-        if (lead.priority === "HIGH") {
-          signals.push("HIGH priority lead");
-          scoreWeight += 25;
-        }
-
         if (lead.status === "REPLIED" || lead.lastReplyAt) {
           signals.push("Reply received (needs response)");
           scoreWeight += 50;
+        }
+
+        const failedAct = lead.activities.find((a) => a.status === "failed" || (a.error && a.error.length > 0));
+        if (failedAct) {
+          signals.push(`Outreach delivery failed (${failedAct.type})`);
+          scoreWeight += 45;
         }
 
         if (lead.status === "PROPOSAL_SENT") {
@@ -869,17 +880,6 @@ export async function executeHimiTool(name: string, args: Record<string, any> = 
           scoreWeight += 30;
         }
 
-        if ((lead.status === "NEW" || lead.status === "QUALIFIED") && lead.emailSentCount === 0 && lead.whatsappSentCount === 0) {
-          signals.push("Untouched lead (no outreach recorded)");
-          scoreWeight += 20;
-        }
-
-        const failedAct = lead.activities.find((a) => a.status === "failed" || (a.error && a.error.length > 0));
-        if (failedAct) {
-          signals.push(`Outreach delivery failed (${failedAct.type})`);
-          scoreWeight += 40;
-        }
-
         const daysSinceLastActivity = lead.activities[0]
           ? Math.floor((Date.now() - new Date(lead.activities[0].createdAt).getTime()) / (1000 * 60 * 60 * 24))
           : Math.floor((Date.now() - new Date(lead.createdAt).getTime()) / (1000 * 60 * 60 * 24));
@@ -889,9 +889,20 @@ export async function executeHimiTool(name: string, args: Record<string, any> = 
           scoreWeight += 25;
         }
 
+        if ((lead.status === "NEW" || lead.status === "QUALIFIED") && lead.emailSentCount === 0 && lead.whatsappSentCount === 0) {
+          signals.push("Untouched prospect (no outreach recorded)");
+          scoreWeight += lead.priority === "HIGH" ? 20 : 15;
+        } else if (lead.priority === "HIGH") {
+          signals.push("HIGH priority lead");
+          scoreWeight += 10;
+        }
+
         const hasEmail = Boolean(lead.email && lead.email.trim());
         const hasPhone = Boolean(lead.phone || lead.whatsapp);
         const contactability = hasEmail && hasPhone ? "both" : hasEmail ? "email_only" : hasPhone ? "phone_only" : "none";
+
+        const emailEligible = Boolean(hasEmail && lead.optedInEmail && !lead.doNotContact);
+        const whatsappEligible = Boolean(hasPhone && lead.optedInWhatsapp && !lead.doNotContact);
 
         return {
           leadId: lead.id,
@@ -899,15 +910,30 @@ export async function executeHimiTool(name: string, args: Record<string, any> = 
           status: lead.status,
           priority: lead.priority,
           score: lead.score,
+          segment: lead.segment || "UNCHECKED",
+          city: lead.city || null,
+          country: lead.country || "UK",
+          businessCategory: lead.businessCategory || null,
           contactability,
-          signals,
+          emailEligible,
+          whatsappEligible,
+          optedInEmail: lead.optedInEmail,
+          optedInWhatsapp: lead.optedInWhatsapp,
+          doNotContact: lead.doNotContact,
+          hookLine: lead.hookLine || null,
+          issues: lead.issues ? lead.issues.split(";").map((s) => s.trim()).filter(Boolean).slice(0, 3) : [],
+          attentionReasons: signals,
           scoreWeight,
+          daysSinceLastActivity,
           lastActivityAt: lead.activities[0]?.createdAt || lead.updatedAt,
+          lastEmailAt: lead.lastEmailAt || null,
+          lastWhatsappAt: lead.lastWhatsappAt || null,
+          lastReplyAt: lead.lastReplyAt || null,
         };
       });
 
       const ranked = items
-        .filter((item) => item.signals.length > 0)
+        .filter((item) => item.attentionReasons.length > 0)
         .sort((a, b) => b.scoreWeight - a.scoreWeight)
         .slice(0, limit);
 
@@ -948,6 +974,8 @@ export async function executeHimiTool(name: string, args: Record<string, any> = 
       let emailDelivered = 0;
       let emailOpened = 0;
       let emailClicked = 0;
+      let emailBounced = 0;
+      let emailComplained = 0;
       let emailFailed = 0;
 
       let waSent = 0;
@@ -955,33 +983,69 @@ export async function executeHimiTool(name: string, args: Record<string, any> = 
       let waRead = 0;
       let waFailed = 0;
 
-      let inboundCount = 0;
+      let inboundEmailReplies = 0;
+      let inboundWhatsappReplies = 0;
+      let totalInboundReplies = 0;
 
       for (const act of activities) {
+        const meta = parseMetaSafe(act.meta);
+
         if (act.direction === "IN") {
-          inboundCount++;
+          totalInboundReplies++;
+          if (act.type === "EMAIL") inboundEmailReplies++;
+          if (act.type === "WHATSAPP") inboundWhatsappReplies++;
         }
 
-        if (act.type === "EMAIL") {
-          if (act.direction === "OUT") emailSent++;
-          if (act.status === "delivered") emailDelivered++;
-          if (act.status === "failed" || act.error) emailFailed++;
-
-          if (act.meta && (act.meta.includes('"opened"') || act.meta.includes('"open"'))) {
+        if (act.type === "EMAIL" && act.direction === "OUT") {
+          emailSent++;
+          if (act.status === "delivered" || meta.deliveredAt || meta.opened || meta.clicked) {
+            emailDelivered++;
+          }
+          if (act.status === "failed" || act.error) {
+            emailFailed++;
+          }
+          if (act.status === "bounced" || meta.bouncedAt) {
+            emailBounced++;
+          }
+          if (act.status === "complained" || meta.complainedAt) {
+            emailComplained++;
+          }
+          if (meta.opened === true || (meta.openCount && meta.openCount > 0)) {
             emailOpened++;
           }
-          if (act.meta && (act.meta.includes('"clicked"') || act.meta.includes('"click"'))) {
+          if (meta.clicked === true || (meta.clickCount && meta.clickCount > 0)) {
             emailClicked++;
           }
         }
 
-        if (act.type === "WHATSAPP") {
-          if (act.direction === "OUT") waSent++;
-          if (act.status === "delivered") waDelivered++;
-          if (act.status === "read") waRead++;
-          if (act.status === "failed" || act.error) waFailed++;
+        if (act.type === "WHATSAPP" && act.direction === "OUT") {
+          waSent++;
+          if (act.status === "delivered" || act.status === "read") {
+            waDelivered++;
+          }
+          if (act.status === "read") {
+            waRead++;
+          }
+          if (act.status === "failed" || act.error) {
+            waFailed++;
+          }
         }
       }
+
+      const emailDeliveryRate = emailSent > 0 ? Number(((emailDelivered / emailSent) * 100).toFixed(1)) : null;
+      const emailOpenRate = emailDelivered > 0 ? Number(((emailOpened / emailDelivered) * 100).toFixed(1)) : null;
+      const emailClickRate = emailDelivered > 0 ? Number(((emailClicked / emailDelivered) * 100).toFixed(1)) : null;
+      const emailBounceRate = emailSent > 0 ? Number(((emailBounced / emailSent) * 100).toFixed(1)) : null;
+      const emailReplyRate = emailDelivered > 0 ? Number(((inboundEmailReplies / emailDelivered) * 100).toFixed(1)) : null;
+
+      const waDeliveryRate = waSent > 0 ? Number(((waDelivered / waSent) * 100).toFixed(1)) : null;
+      const waReadRate = waDelivered > 0 ? Number(((waRead / waDelivered) * 100).toFixed(1)) : null;
+      const waReplyRate = waDelivered > 0 ? Number(((inboundWhatsappReplies / waDelivered) * 100).toFixed(1)) : null;
+
+      const totalOutreachSent = emailSent + waSent;
+      const sampleSizeContext = totalOutreachSent < 20
+        ? `Low volume (${totalOutreachSent} total sends): early signals only. Sample size is too small for statistical conversion conclusions.`
+        : `Sufficient volume (${totalOutreachSent} total sends) for operational trend analysis.`;
 
       return {
         ok: true,
@@ -993,22 +1057,40 @@ export async function executeHimiTool(name: string, args: Record<string, any> = 
             delivered: emailDelivered,
             opened: emailOpened,
             clicked: emailClicked,
+            bounced: emailBounced,
+            complained: emailComplained,
             failed: emailFailed,
+            inboundReplies: inboundEmailReplies,
+            rates: {
+              deliveryRatePercent: emailDeliveryRate,
+              openRatePercent: emailOpenRate,
+              clickRatePercent: emailClickRate,
+              bounceRatePercent: emailBounceRate,
+              replyRatePercent: emailReplyRate,
+            },
           },
           whatsapp: {
             sent: waSent,
             delivered: waDelivered,
             read: waRead,
             failed: waFailed,
+            inboundReplies: inboundWhatsappReplies,
+            rates: {
+              deliveryRatePercent: waDeliveryRate,
+              readRatePercent: waReadRate,
+              replyRatePercent: waReplyRate,
+            },
           },
-          inboundReplies: inboundCount,
+          inboundReplies: totalInboundReplies,
+          totalOutreachSent,
+          sampleSizeContext,
           totalActivitiesInWindow: activities.length,
         },
       };
     }
 
     case "get_followup_opportunities": {
-      const limit = Math.min(Math.max(Number(args.limit) || 15, 1), 50);
+      const limit = Math.min(Math.max(Number(args.limit) || 15, 1), 15);
 
       const leads = await prisma.lead.findMany({
         where: {
@@ -1052,27 +1134,45 @@ export async function executeHimiTool(name: string, args: Record<string, any> = 
         if (lastOutbound && lastOutbound.status === "read") {
           signals.push("WhatsApp message read but no reply yet");
         }
-        if (lastOutbound && lastOutbound.meta && lastOutbound.meta.includes('"opened"')) {
-          signals.push("Email opened previously (potential engagement signal)");
+        const outboundMeta = parseMetaSafe(lastOutbound?.meta);
+        if (outboundMeta.opened === true || (outboundMeta.openCount && outboundMeta.openCount > 0)) {
+          signals.push("Email opened previously (positive engagement signal)");
         }
         if (daysSinceActivity >= 4) {
           signals.push(`No activity in ${daysSinceActivity} days`);
         }
+
+        const hasEmail = Boolean(lead.email && lead.email.trim());
+        const hasPhone = Boolean(lead.phone || lead.whatsapp);
+        const emailEligible = Boolean(hasEmail && lead.optedInEmail && !lead.doNotContact);
+        const whatsappEligible = Boolean(hasPhone && lead.optedInWhatsapp && !lead.doNotContact);
+        const lastOutreachChannel = lastOutbound?.type?.toLowerCase() || (lead.lastWhatsappAt ? "whatsapp" : lead.lastEmailAt ? "email" : "unknown");
 
         return {
           leadId: lead.id,
           companyName: lead.companyName,
           status: lead.status,
           priority: lead.priority,
+          segment: lead.segment || "UNCHECKED",
+          city: lead.city || null,
+          country: lead.country || "UK",
+          businessCategory: lead.businessCategory || null,
+          emailEligible,
+          whatsappEligible,
+          optedInEmail: lead.optedInEmail,
+          optedInWhatsapp: lead.optedInWhatsapp,
+          doNotContact: lead.doNotContact,
+          lastOutreachChannel,
           lastOutreachDate: lead.lastEmailAt || lead.lastWhatsappAt || lastOutbound?.createdAt || null,
+          lastInboundAt: lead.lastInboundAt || null,
           lastReplyDate: lead.lastReplyAt || null,
           daysSinceActivity,
-          signals,
+          followupReasons: signals,
         };
       });
 
       const filtered = opportunities
-        .filter((o) => o.signals.length > 0)
+        .filter((o) => o.followupReasons.length > 0)
         .sort((a, b) => b.daysSinceActivity - a.daysSinceActivity)
         .slice(0, limit);
 

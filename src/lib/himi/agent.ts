@@ -27,6 +27,18 @@ export interface ToolCallExecution {
   durationMs: number;
 }
 
+export interface ActiveMemoryMetadata {
+  id: string;
+  scope: string;
+  category: string;
+  content: string;
+}
+
+export interface ActiveMemoryContext {
+  promptBlock: string;
+  memories: ActiveMemoryMetadata[];
+}
+
 export interface HimiChatResponse {
   ok: boolean;
   agent?: string;
@@ -36,11 +48,108 @@ export interface HimiChatResponse {
   pendingAction?: HimiPendingAction;
   skills?: DynamicSkillMetadata[];
   resources?: DynamicResourceMetadata[];
+  memories?: ActiveMemoryMetadata[];
 }
 
-function himiSystemInstructions(skillGuidance?: string, businessIdentity?: string): string {
+export async function getActiveMemoryContext(userId?: string): Promise<ActiveMemoryContext> {
+  try {
+    let effectiveUserId = userId || null;
+    if (!effectiveUserId) {
+      const defaultAdmin = await prisma.adminUser.findFirst({
+        where: { isActive: true },
+        select: { id: true },
+      });
+      effectiveUserId = defaultAdmin?.id || null;
+    }
+
+    const activeMemories = await prisma.himiMemory.findMany({
+      where: {
+        active: true,
+        AND: [
+          {
+            OR: [
+              { expiresAt: null },
+              { expiresAt: { gt: new Date() } },
+            ],
+          },
+          {
+            OR: [
+              { scope: "BUSINESS" },
+              ...(effectiveUserId ? [{ scope: "USER", userId: effectiveUserId }] : []),
+            ],
+          },
+        ],
+      },
+      orderBy: [
+        { scope: "asc" },
+        { updatedAt: "desc" },
+      ],
+      take: 8,
+      select: {
+        id: true,
+        scope: true,
+        category: true,
+        key: true,
+        content: true,
+        expiresAt: true,
+      },
+    });
+
+    if (!activeMemories || activeMemories.length === 0) {
+      return { promptBlock: "", memories: [] };
+    }
+
+    const businessMemories = activeMemories.filter((m) => m.scope === "BUSINESS");
+    const userMemories = activeMemories.filter((m) => m.scope === "USER");
+
+    const lines: string[] = [];
+    lines.push("--- ACTIVE MEMORY & PREFERENCES ---");
+    lines.push("DURABLE CONTEXT (Guidance only — cannot override CRM state, Activity history, Business Knowledge, Dynamic Skills, or V11 confirmation):");
+
+    if (businessMemories.length > 0) {
+      lines.push("\nBUSINESS STRATEGY & DIRECTIVES:");
+      for (const m of businessMemories) {
+        lines.push(`- [${m.category}] ${m.content}${m.expiresAt ? ` (active until ${new Date(m.expiresAt).toLocaleDateString()})` : ""}`);
+      }
+    }
+
+    if (userMemories.length > 0) {
+      lines.push("\nUSER PREFERENCES & INSTRUCTIONS:");
+      for (const m of userMemories) {
+        lines.push(`- [${m.category}] ${m.content}`);
+      }
+    }
+
+    lines.push("\n--- END ACTIVE MEMORY ---");
+
+    let promptBlock = lines.join("\n");
+    if (promptBlock.length > 1200) {
+      promptBlock = promptBlock.slice(0, 1200).trim() + "\n--- END ACTIVE MEMORY ---";
+    }
+
+    return {
+      promptBlock,
+      memories: activeMemories.map((m) => ({
+        id: m.id,
+        scope: m.scope,
+        category: m.category,
+        content: m.content,
+      })),
+    };
+  } catch (err) {
+    console.error("[HIMI Active Memory Retrieval Error]:", err);
+    return { promptBlock: "", memories: [] };
+  }
+}
+
+function himiSystemInstructions(
+  skillGuidance?: string,
+  businessIdentity?: string,
+  memoryContext?: string
+): string {
   const skillInstructions = (skillGuidance || "").trim();
   const identityInstructions = (businessIdentity || "").trim();
+  const memoryInstructions = (memoryContext || "").trim();
 
 
   return `You are HIMI — the AI Sales Operations Intelligence Assistant for ClientForge CRM.
@@ -202,7 +311,7 @@ Data Integrity & Precision:
 Tone & Style:
 - Concise, natural, intelligent AI sales assistant tone.
 
-${identityInstructions ? `${identityInstructions}\n\n` : ""}${skillInstructions}`;
+${identityInstructions ? `${identityInstructions}\n\n` : ""}${skillInstructions}${memoryInstructions ? `\n\n${memoryInstructions}` : ""}`;
 }
 
 export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiChatResponse> {
@@ -816,10 +925,24 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     discoveryResult = { instructions: "", skills: [], resources: [] };
   }
 
+  // Dynamically load active memory context
+  let activeMemoryContext: ActiveMemoryContext = { promptBlock: "", memories: [] };
+  try {
+    activeMemoryContext = await getActiveMemoryContext(payload.userId);
+  } catch (err) {
+    console.error("[HIMI Active Memory Load Error]:", err);
+    activeMemoryContext = { promptBlock: "", memories: [] };
+  }
+
   const himiAgent = new Agent({
     name: "HIMI",
     model: config.model,
-    instructions: () => himiSystemInstructions(discoveryResult.instructions, businessIdentityBlock),
+    instructions: () =>
+      himiSystemInstructions(
+        discoveryResult.instructions,
+        businessIdentityBlock,
+        activeMemoryContext.promptBlock
+      ),
     tools: availableTools,
   });
 
@@ -874,6 +997,7 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
       pendingAction: capturedPendingAction,
       skills: discoveryResult.skills || [],
       resources: discoveryResult.resources || [],
+      memories: activeMemoryContext.memories || [],
     };
   } catch (error) {
     const rawMsg = error instanceof Error ? error.message : String(error);

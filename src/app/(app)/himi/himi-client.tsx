@@ -46,6 +46,13 @@ type ResourceMeta = {
   skillId: string;
 };
 
+type MemoryMeta = {
+  id: string;
+  scope: string;
+  category: string;
+  content: string;
+};
+
 type ChatMessage = {
   id: string;
   sender: "user" | "himi";
@@ -53,6 +60,7 @@ type ChatMessage = {
   toolCalls?: ToolCallMeta[];
   skills?: SkillMeta[];
   resources?: ResourceMeta[];
+  memories?: MemoryMeta[];
   isError?: boolean;
   pendingAction?: PendingAction;
   executedAction?: ExecutedAction;
@@ -297,6 +305,7 @@ export default function HimiClient() {
             toolCalls: data.toolCalls || [],
             skills: data.skills || [],
             resources: data.resources || [],
+            memories: data.memories || [],
             pendingAction: data.pendingAction,
             timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           },
@@ -614,6 +623,16 @@ export default function HimiClient() {
                           <span>
                             {msg.resources.length === 1 ? "Resource" : "Resources"}:{" "}
                             {msg.resources.map((r) => r.title).join(" · ")}
+                          </span>
+                        </div>
+                      )}
+
+                      {msg.memories && msg.memories.length > 0 && (
+                        <div className="himi-tool-badge" style={{ marginTop: 0, paddingTop: 0, borderTop: "none" }}>
+                          <span>✦</span>
+                          <span>
+                            Memory:{" "}
+                            {msg.memories.map((m) => m.content.length > 35 ? `${m.content.slice(0, 35)}…` : m.content).join(" · ")}
                           </span>
                         </div>
                       )}

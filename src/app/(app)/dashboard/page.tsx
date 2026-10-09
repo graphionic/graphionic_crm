@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { requireActiveUser } from "@/lib/session";
 import { LEAD_STATUSES, SEGMENTS, statusTone, segmentTone, countryLabel } from "@/lib/constants";
+import { getHimiDailyFocus } from "@/lib/himi/focus";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,7 @@ export default async function DashboardPage() {
     dueFollowUps,
     recentActivity,
     hot,
+    dailyFocus,
   ] = await Promise.all([
     prisma.lead.count({ where: { doNotContact: false } }),
     prisma.lead.groupBy({ by: ["status"], _count: { _all: true } }),
@@ -56,6 +58,10 @@ export default async function DashboardPage() {
       where: { segment: "NO_SITE", doNotContact: false, status: { notIn: ["WON", "LOST"] } },
       orderBy: [{ score: "desc" }, { createdAt: "desc" }],
       take: 8,
+    }),
+    getHimiDailyFocus().catch((err) => {
+      console.error("[Dashboard HIMI Focus Load Error]:", err);
+      return [];
     }),
   ]);
 
@@ -104,6 +110,70 @@ export default async function DashboardPage() {
           <div className="k">Replies (7d)</div>
           <div className="v">{repliesWeek}</div>
           <div className="d">{replyRate}% of emails sent</div>
+        </div>
+      </div>
+
+      {/* HIMI Daily Focus */}
+      <div className="card" style={{ marginBottom: 18 }}>
+        <div className="card-head">
+          <div className="hstack" style={{ gap: 8 }}>
+            <span style={{ color: "var(--brand)", fontSize: 16, fontWeight: 700 }}>✦</span>
+            <h3>HIMI — Today&apos;s Focus</h3>
+          </div>
+          <Link className="hint" href="/himi">Open HIMI →</Link>
+        </div>
+        <div className="card-body tight">
+          {dailyFocus.length === 0 ? (
+            <div className="empty" style={{ padding: "24px 16px" }}>
+              <b>You&apos;re caught up</b>
+              No priority sales actions need attention right now.
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table className="t">
+                <tbody>
+                  {dailyFocus.map((item) => (
+                    <tr key={item.id}>
+                      <td style={{ width: 120, verticalAlign: "middle" }}>
+                        <span
+                          className={`badge ${
+                            item.level === "ACTION"
+                              ? "amber"
+                              : item.level === "WATCH"
+                              ? "slate"
+                              : "blue"
+                          }`}
+                          style={{ fontWeight: 600, fontSize: 11 }}
+                        >
+                          {item.level}
+                        </span>
+                      </td>
+                      <td style={{ verticalAlign: "middle" }}>
+                        <div className="hstack" style={{ gap: 8, flexWrap: "wrap" }}>
+                          <Link className="name" href={`/leads/${item.leadId}`}>
+                            {item.companyName}
+                          </Link>
+                          {item.city || item.country ? (
+                            <span className="small muted">
+                              · {[item.city, item.country].filter(Boolean).join(", ")}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="sub" style={{ marginTop: 2 }}>
+                          {item.reason}
+                        </div>
+                      </td>
+                      <td className="right" style={{ verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                        <Link className="btn sm primary" href={item.href}>
+                          {item.ctaText} →
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
 

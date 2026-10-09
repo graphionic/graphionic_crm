@@ -93,9 +93,17 @@ const FRIENDLY_TOOL_LABELS: Record<string, string> = {
 };
 
 
-export default function HimiClient() {
+export default function HimiClient({
+  initialLeadId,
+  initialIntent,
+  initialPrompt,
+}: {
+  initialLeadId?: string;
+  initialIntent?: string;
+  initialPrompt?: string;
+} = {}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(initialPrompt || "");
   const [loading, setLoading] = useState(false);
   const [connected, setConnected] = useState<boolean | null>(null);
   const [activePendingAction, setActivePendingAction] = useState<PendingAction | null>(null);
@@ -406,6 +414,25 @@ export default function HimiClient() {
             <p>Ask anything about your ClientForge CRM or perform controlled Lead actions after confirmation.</p>
 
             <div className="himi-suggestions">
+              {initialPrompt ? (
+                <div
+                  className="suggestion-card"
+                  style={{
+                    gridColumn: "1 / -1",
+                    background: "var(--brand-soft)",
+                    borderColor: "var(--blue-line)",
+                    color: "var(--brand)",
+                    fontWeight: 600,
+                  }}
+                  onClick={() => handleSend(initialPrompt)}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 14 }}>✦</span>
+                    <span>"{initialPrompt}"</span>
+                  </div>
+                  <span style={{ color: "var(--brand)", fontSize: 12 }}>Send ➔</span>
+                </div>
+              ) : null}
               {suggestionPrompts.map((prompt, idx) => (
                 <div
                   key={idx}

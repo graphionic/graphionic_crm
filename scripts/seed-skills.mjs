@@ -12,7 +12,7 @@ async function main() {
       category: "OPERATIONS",
       priority: 10,
       enabled: true,
-      usageGuidance: "Use when the user asks about pipeline health, overall sales performance, daily priorities, what happened today, or strategic focus.",
+      usageGuidance: "Use when the user asks about pipeline health, overall sales performance, daily priorities, what happened today, strategic focus, who to follow up with, follow-up opportunities, leads to follow up on, or which leads need follow-up.",
       instructions: `[SKILL: Sales Manager Operations Intelligence]
 Role & Mandate:
 - You operate as the Lead Sales Operations Manager for ClientForge CRM.
@@ -102,7 +102,11 @@ Multi-Signal Ranking Rules:
 
 4. CONTACTABILITY vs PERMISSION:
    - Having a phone number or email address means the lead is CONTACTABLE.
-   - It does NOT mean permission or an aggressive multi-channel sequence recommendation.`,
+   - It does NOT mean permission or an aggressive multi-channel sequence recommendation.
+
+5. FOLLOW-UP DISCIPLINE:
+   - "Follow up" strictly applies to leads PREVIOUSLY CONTACTED. Never describe an untouched or never-contacted lead as a follow-up.
+   - For follow-up questions, use get_followup_opportunities rather than treating generic prioritization candidates as follow-up candidates.`,
     },
   ];
 

@@ -6,14 +6,15 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function HimiPage(props: {
-  searchParams?: Promise<{ leadId?: string; intent?: string }>;
+  searchParams?: Promise<{ leadId?: string; intent?: string; message?: string }>;
 }) {
   await requireActiveUser();
   const searchParams = props.searchParams ? await props.searchParams : undefined;
   const initialLeadId = searchParams?.leadId;
   const initialIntent = searchParams?.intent;
+  const initialMessage = searchParams?.message ? String(searchParams.message).slice(0, 500) : "";
 
-  let initialPrompt = "";
+  let initialPrompt = initialMessage || "";
   if (initialLeadId && initialIntent) {
     const lead = await prisma.lead.findUnique({
       where: { id: initialLeadId },

@@ -125,6 +125,13 @@ export default function HimiClient({
     checkHealth();
   }, []);
 
+  // Focus composer when prefilled with initialPrompt
+  useEffect(() => {
+    if (initialPrompt && textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, [initialPrompt]);
+
   // Auto-scroll chat to bottom on new messages
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });

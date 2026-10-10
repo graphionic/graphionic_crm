@@ -1,8 +1,12 @@
+import React from "react";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { requireActiveUser } from "@/lib/session";
-import { LEAD_STATUSES, SEGMENTS, statusTone, segmentTone, countryLabel } from "@/lib/constants";
 import { getHimiDailyFocus } from "@/lib/himi/focus";
+import { HimiCommandBar } from "@/components/dashboard/HimiCommandBar";
+import { LiveRefresher } from "@/components/dashboard/LiveRefresher";
+import { LiveActivityStream } from "@/components/dashboard/LiveActivityStream";
+import { PipelineRibbon } from "@/components/dashboard/PipelineRibbon";
 
 export const dynamic = "force-dynamic";
 
@@ -12,52 +16,67 @@ function startOfDay(d = new Date()) {
   return x;
 }
 
+function getGreetingTime(date = new Date()): string {
+  const hour = date.getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+function formatStrategyPill(content?: string | null): string | null {
+  if (!content) return null;
+  const cleaned = content.trim();
+  // Extract concise title if long
+  if (cleaned.toLowerCase().includes("dental")) {
+    return "✦ Active focus · UK Dental Practices";
+  }
+  return cleaned.length > 45 ? `✦ Active focus · ${cleaned.slice(0, 42)}…` : `✦ Active focus · ${cleaned}`;
+}
+
 export default async function DashboardPage() {
   const user = await requireActiveUser();
   const now = new Date();
-  const day = startOfDay();
+  const day = startOfDay(now);
   const week = new Date(now.getTime() - 7 * 864e5);
+  const firstName = user.name ? user.name.split(" ")[0] : "there";
+  const greeting = getGreetingTime(now);
 
   const [
-    total,
-    byStatus,
-    byCountry,
-    bySegment,
+    strategyMem,
+    statusCounts,
+    totalLeads,
     emailsToday,
+    waToday,
     emailsWeek,
-    waWeek,
     repliesWeek,
-    dueFollowUps,
-    recentActivity,
-    hot,
+    dueFollowUpsCount,
+    deliveryFailuresCount,
+    repliedLeadsCount,
+    recentActivities,
     dailyFocus,
   ] = await Promise.all([
-    prisma.lead.count({ where: { doNotContact: false } }),
-    prisma.lead.groupBy({ by: ["status"], _count: { _all: true } }),
-    prisma.lead.groupBy({ by: ["country"], _count: { _all: true } }),
-    prisma.lead.groupBy({ by: ["segment"], _count: { _all: true } }),
-    prisma.activity.count({ where: { type: "EMAIL", direction: "OUT", createdAt: { gte: day } } }),
-    prisma.activity.count({ where: { type: "EMAIL", direction: "OUT", createdAt: { gte: week } } }),
-    prisma.activity.count({ where: { type: "WHATSAPP", direction: "OUT", createdAt: { gte: week } } }),
-    prisma.activity.count({ where: { direction: "IN", createdAt: { gte: week } } }),
-    prisma.lead.findMany({
+    prisma.himiMemory.findFirst({
       where: {
-        nextFollowUpAt: { lte: new Date(now.getTime() + 864e5) },
-        doNotContact: false,
-        status: { notIn: ["WON", "LOST"] },
+        scope: "BUSINESS",
+        active: true,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
       },
-      orderBy: { nextFollowUpAt: "asc" },
-      take: 8,
+      orderBy: { createdAt: "desc" },
+      select: { content: true },
     }),
+    prisma.lead.groupBy({ by: ["status"], _count: { _all: true }, where: { doNotContact: false } }),
+    prisma.lead.count({ where: { doNotContact: false } }),
+    prisma.activity.count({ where: { type: "EMAIL", direction: "OUT", createdAt: { gte: day } } }),
+    prisma.activity.count({ where: { type: "WHATSAPP", direction: "OUT", createdAt: { gte: day } } }),
+    prisma.activity.count({ where: { type: "EMAIL", direction: "OUT", createdAt: { gte: week } } }),
+    prisma.activity.count({ where: { direction: "IN", createdAt: { gte: week } } }),
+    prisma.lead.count({ where: { nextFollowUpAt: { lte: now }, doNotContact: false, status: { notIn: ["WON", "LOST"] } } }),
+    prisma.activity.count({ where: { createdAt: { gte: week }, status: { in: ["failed", "bounced", "complained"] } } }),
+    prisma.lead.count({ where: { status: "REPLIED", doNotContact: false } }),
     prisma.activity.findMany({
       orderBy: { createdAt: "desc" },
-      take: 12,
-      include: { lead: { select: { id: true, companyName: true, country: true } } },
-    }),
-    prisma.lead.findMany({
-      where: { segment: "NO_SITE", doNotContact: false, status: { notIn: ["WON", "LOST"] } },
-      orderBy: [{ score: "desc" }, { createdAt: "desc" }],
-      take: 8,
+      take: 15,
+      include: { lead: { select: { id: true, companyName: true, country: true, city: true } } },
     }),
     getHimiDailyFocus().catch((err) => {
       console.error("[Dashboard HIMI Focus Load Error]:", err);
@@ -65,313 +84,212 @@ export default async function DashboardPage() {
     }),
   ]);
 
-  const statusMap = Object.fromEntries(byStatus.map((s) => [s.status, s._count._all]));
-  const segMap = Object.fromEntries(bySegment.map((s) => [s.segment ?? "UNSET", s._count._all]));
-  const countryMap = Object.fromEntries(byCountry.map((c) => [c.country, c._count._all]));
-  const maxStatus = Math.max(1, ...Object.values(statusMap));
-  const contacted = (statusMap.CONTACTED ?? 0) + (statusMap.REPLIED ?? 0) +
-    (statusMap.CALL_BOOKED ?? 0) + (statusMap.PROPOSAL_SENT ?? 0) + (statusMap.WON ?? 0);
+  const statusMap = Object.fromEntries(statusCounts.map((s) => [s.status, s._count._all]));
+  const urgentActionsCount = repliedLeadsCount + dueFollowUpsCount + (deliveryFailuresCount > 0 ? 1 : 0);
+  const outreachTodayTotal = emailsToday + waToday;
+  const activePipelineCount =
+    (statusMap.QUALIFIED ?? 0) +
+    (statusMap.CONTACTED ?? 0) +
+    (statusMap.REPLIED ?? 0) +
+    (statusMap.CALL_BOOKED ?? 0) +
+    (statusMap.PROPOSAL_SENT ?? 0);
 
-  const replyRate = emailsWeek > 0 ? ((repliesWeek / emailsWeek) * 100).toFixed(1) : "0.0";
+  const strategyPillText = formatStrategyPill(strategyMem?.content);
 
   return (
-    <>
-      <div className="page-head">
-        <div>
-          <h2>Dashboard</h2>
-          <p>
-            Welcome back{user.name ? `, ${user.name.split(" ")[0]}` : ""} — here&apos;s where
-            your outreach stands today.
-          </p>
-        </div>
-        <div className="hstack">
-          <Link className="btn" href="/import">⇪ Import CSV</Link>
-          <Link className="btn primary" href="/leads/new">＋ New lead</Link>
-        </div>
-      </div>
-
-      <div className="grid c4" style={{ marginBottom: 18 }}>
-        <div className="stat accent">
-          <div className="k">Total leads</div>
-          <div className="v">{total.toLocaleString()}</div>
-          <div className="d">{bySegment.find((s) => s.segment === "NO_SITE")?._count._all ?? 0} with no website</div>
-        </div>
-        <div className="stat">
-          <div className="k">Contacted</div>
-          <div className="v">{contacted.toLocaleString()}</div>
-          <div className="d">Any outreach sent</div>
-        </div>
-        <div className="stat">
-          <div className="k">Emails sent</div>
-          <div className="v">{emailsWeek.toLocaleString()}</div>
-          <div className="d">{emailsToday} today</div>
-        </div>
-        <div className="stat good">
-          <div className="k">Replies (7d)</div>
-          <div className="v">{repliesWeek}</div>
-          <div className="d">{replyRate}% of emails sent</div>
-        </div>
-      </div>
-
-      {/* HIMI Daily Focus */}
-      <div className="card" style={{ marginBottom: 18 }}>
-        <div className="card-head">
-          <div className="hstack" style={{ gap: 8 }}>
-            <span style={{ color: "var(--brand)", fontSize: 16, fontWeight: 700 }}>✦</span>
-            <h3>HIMI — Today&apos;s Focus</h3>
+    <div className="dash-root">
+      {/* ==============================================================
+          ZONE 1 — AI COMMAND HEADER
+          ============================================================== */}
+      <section className="dash-header-section" aria-label="AI Command Header">
+        <div className="dash-header-top">
+          <div>
+            <h1 className="dash-greeting">
+              {greeting}, {firstName}
+            </h1>
+            <p className="dash-subcopy">Your sales workspace is ready.</p>
           </div>
-          <Link className="hint" href="/himi">Open HIMI →</Link>
+          {strategyPillText ? (
+            <Link href="/settings/himi/knowledge" className="dash-strategy-pill" title="View Business Strategy">
+              <span>{strategyPillText}</span>
+            </Link>
+          ) : null}
         </div>
-        <div className="card-body tight">
-          {dailyFocus.length === 0 ? (
-            <div className="empty" style={{ padding: "24px 16px" }}>
-              <b>You&apos;re caught up</b>
-              No priority sales actions need attention right now.
+
+        {/* Command Search Bar */}
+        <HimiCommandBar />
+      </section>
+
+      {/* ==============================================================
+          ZONE 2 — SALES PULSE (4 EXECUTIVE KPIS)
+          ============================================================== */}
+      <section className="dash-pulse-grid" aria-label="Sales Pulse Metrics">
+        {/* 1. Actions */}
+        <Link href={urgentActionsCount > 0 ? "/himi?intent=review_delivery_issue" : "/leads"} className="dash-pulse-card">
+          <div className="dash-pulse-top">
+            <span className="dash-pulse-k">ACTIONS</span>
+            <span className={`dash-pulse-status-dot ${urgentActionsCount > 0 ? "warn" : "good"}`} />
+          </div>
+          <div className="dash-pulse-v">{urgentActionsCount}</div>
+          <div className="dash-pulse-d">
+            {urgentActionsCount > 0 ? `${urgentActionsCount} item${urgentActionsCount > 1 ? "s" : ""} need attention` : "All clear · No alerts"}
+          </div>
+        </Link>
+
+        {/* 2. Replies */}
+        <Link href="/leads?status=REPLIED" className="dash-pulse-card">
+          <div className="dash-pulse-top">
+            <span className="dash-pulse-k">REPLIES (7D)</span>
+            <span className="dash-pulse-icon">↓</span>
+          </div>
+          <div className="dash-pulse-v good">{repliesWeek}</div>
+          <div className="dash-pulse-d">
+            {emailsWeek > 0 ? `${((repliesWeek / emailsWeek) * 100).toFixed(1)}% of outreach` : "0 in last 7 days"}
+          </div>
+        </Link>
+
+        {/* 3. Outreach Today */}
+        <Link href="/outbox" className="dash-pulse-card">
+          <div className="dash-pulse-top">
+            <span className="dash-pulse-k">OUTREACH TODAY</span>
+            <span className="dash-pulse-icon">↑</span>
+          </div>
+          <div className="dash-pulse-v">{outreachTodayTotal}</div>
+          <div className="dash-pulse-d">
+            {emailsToday} email · {waToday} WhatsApp
+          </div>
+        </Link>
+
+        {/* 4. Active Pipeline */}
+        <Link href="/leads" className="dash-pulse-card">
+          <div className="dash-pulse-top">
+            <span className="dash-pulse-k">ACTIVE PIPELINE</span>
+            <span className="dash-pulse-icon">✦</span>
+          </div>
+          <div className="dash-pulse-v accent">{activePipelineCount}</div>
+          <div className="dash-pulse-d">
+            {totalLeads.toLocaleString()} total leads
+          </div>
+        </Link>
+      </section>
+
+      {/* ==============================================================
+          ZONE 3 — MAIN WORKSPACE (65% HIMI FOCUS / 35% LIVE ACTIVITY)
+          ============================================================== */}
+      <section className="dash-workspace" aria-label="Main Sales Workspace">
+        {/* ZONE 3A: HIMI TODAY'S FOCUS */}
+        <div className="dash-focus-card">
+          <div className="dash-card-head">
+            <div className="hstack" style={{ gap: 8 }}>
+              <span className="dash-ai-icon" aria-hidden="true">✦</span>
+              <div>
+                <h2>HIMI — Today&apos;s Focus</h2>
+                <div className="dash-card-sub">Prioritized sales work for immediate action</div>
+              </div>
             </div>
-          ) : (
-            <div className="table-wrap">
-              <table className="t">
-                <tbody>
-                  {dailyFocus.map((item) => (
-                    <tr key={item.id}>
-                      <td style={{ width: 120, verticalAlign: "middle" }}>
-                        <span
-                          className={`badge ${
-                            item.level === "ACTION"
-                              ? "amber"
-                              : item.level === "WATCH"
-                              ? "slate"
-                              : "blue"
-                          }`}
-                          style={{ fontWeight: 600, fontSize: 11 }}
-                        >
+            <Link href="/himi" className="dash-card-link">
+              Open HIMI →
+            </Link>
+          </div>
+
+          <div className="dash-focus-body">
+            {dailyFocus.length === 0 ? (
+              <div className="dash-empty-focus">
+                <span className="dash-empty-icon">✓</span>
+                <b>You&apos;re caught up</b>
+                <p>No urgent actions need attention right now. Review opportunities or run a new search.</p>
+              </div>
+            ) : (
+              <div className="dash-focus-list">
+                {dailyFocus.map((item) => {
+                  const levelClass =
+                    item.level === "ACTION" ? "action" : item.level === "WATCH" ? "watch" : "opportunity";
+
+                  return (
+                    <div key={item.id} className={`dash-focus-item ${levelClass}`}>
+                      <div className="dash-item-badge-col">
+                        <span className={`dash-level-pill ${levelClass}`}>
                           {item.level}
                         </span>
-                      </td>
-                      <td style={{ verticalAlign: "middle" }}>
-                        <div className="hstack" style={{ gap: 8, flexWrap: "wrap" }}>
-                          <Link className="name" href={`/leads/${item.leadId}`}>
+                      </div>
+
+                      <div className="dash-item-main-col">
+                        <div className="dash-item-title-row">
+                          <Link href={`/leads/${item.leadId}`} className="dash-item-company">
                             {item.companyName}
                           </Link>
                           {item.city || item.country ? (
-                            <span className="small muted">
+                            <span className="dash-item-geo">
                               · {[item.city, item.country].filter(Boolean).join(", ")}
                             </span>
                           ) : null}
                         </div>
-                        <div className="sub" style={{ marginTop: 2 }}>
-                          {item.reason}
-                        </div>
-                      </td>
-                      <td className="right" style={{ verticalAlign: "middle", whiteSpace: "nowrap" }}>
-                        <Link className="btn sm primary" href={item.href}>
-                          {item.ctaText} →
+                        <p className="dash-item-reason">{item.reason}</p>
+                      </div>
+
+                      <div className="dash-item-cta-col">
+                        <Link href={item.href} className={`dash-item-cta-btn ${levelClass}`}>
+                          <span>{item.ctaText}</span>
+                          <span className="arrow" aria-hidden="true">→</span>
                         </Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="grid c3">
-        {/* pipeline */}
-        <div className="card" style={{ gridColumn: "span 2" }}>
-          <div className="card-head">
-            <h3>Pipeline</h3>
-            <Link className="hint" href="/leads">View all leads →</Link>
-          </div>
-          <div className="card-body">
-            {LEAD_STATUSES.map((s) => {
-              const n = statusMap[s.value] ?? 0;
-              const pct = (n / maxStatus) * 100;
-              const colors: Record<string, string> = {
-                green: "var(--green)", amber: "#d97706", red: "var(--red)",
-                blue: "var(--brand)", violet: "var(--violet)", cyan: "var(--cyan)",
-                indigo: "var(--brand)", slate: "#94a3b8",
-              };
-              return (
-                <div className="bar-row" key={s.value}>
-                  <span className="lbl">{s.label}</span>
-                  <span className="track">
-                    <i style={{ width: `${pct}%`, background: colors[s.tone] ?? "var(--brand)" }} />
-                  </span>
-                  <span className="val">{n}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* segments */}
-        <div className="card">
-          <div className="card-head"><h3>By website state</h3></div>
-          <div className="card-body">
-            {SEGMENTS.map((s) => {
-              const n = segMap[s.value] ?? 0;
-              return (
-                <div className="bar-row" key={s.value}>
-                  <span className="lbl">{s.label}</span>
-                  <span className="track"><i style={{ width: `${(n / Math.max(1, total)) * 100}%`, background: "var(--brand)" }} /></span>
-                  <span className="val">{n}</span>
-                </div>
-              );
-            })}
-            <div style={{ borderTop: "1px solid var(--line-2)", marginTop: 14, paddingTop: 12 }}>
-              <div className="k small muted" style={{ marginBottom: 8, fontWeight: 700 }}>BY COUNTRY</div>
-              {Object.entries(countryMap).sort((a, b) => b[1] - a[1]).map(([c, n]) => (
-                <div className="hstack" key={c} style={{ marginBottom: 6 }}>
-                  <span className="badge">{c}</span>
-                  <span className="small muted">{countryLabel(c)}</span>
-                  <span className="spacer" />
-                  <b>{n}</b>
-                </div>
-              ))}
-              {Object.keys(countryMap).length === 0 ? <p className="muted small">No leads yet.</p> : null}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid c2">
-        {/* follow ups */}
-        <div className="card">
-          <div className="card-head">
-            <h3>Follow-ups due</h3>
-            <Link className="hint" href="/follow-ups">All →</Link>
-          </div>
-          <div className="card-body tight">
-            {dueFollowUps.length === 0 ? (
-              <div className="empty">
-                <b>Nothing due</b>
-                Set a follow-up date on a lead to see it here.
-              </div>
-            ) : (
-              <div className="table-wrap">
-                <table className="t">
-                  <tbody>
-                    {dueFollowUps.map((l) => {
-                      const overdue = l.nextFollowUpAt && l.nextFollowUpAt < now;
-                      return (
-                        <tr key={l.id}>
-                          <td>
-                            <Link className="name" href={`/leads/${l.id}`}>{l.companyName}</Link>
-                            <div className="sub">{l.contactName || l.email || "—"}</div>
-                          </td>
-                          <td className="right">
-                            <span className={`badge ${overdue ? "red" : "amber"}`}>
-                              {overdue ? "OVERDUE" : "DUE"}
-                            </span>
-                            <div className="sub">{l.nextFollowUpAt?.toLocaleDateString("en-GB")}</div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
         </div>
 
-        {/* hot leads */}
-        <div className="card">
-          <div className="card-head">
-            <h3>Hottest leads — no website</h3>
-            <span className="hint">Highest score first</span>
+        {/* ZONE 3B: LIVE ACTIVITY STREAM */}
+        <div className="dash-activity-card">
+          <div className="dash-card-head">
+            <div className="hstack" style={{ gap: 8 }}>
+              <h2>Live Activity</h2>
+            </div>
+            <LiveRefresher />
           </div>
-          <div className="card-body tight">
-            {hot.length === 0 ? (
-              <div className="empty"><b>No no-site leads</b>Import a list to get started.</div>
-            ) : (
-              <div className="table-wrap">
-                <table className="t">
-                  <tbody>
-                    {hot.map((l) => (
-                      <tr key={l.id}>
-                        <td>
-                          <Link className="name" href={`/leads/${l.id}`}>{l.companyName}</Link>
-                          <div className="sub">{l.city || l.region || "—"} · {l.businessCategory || "—"}</div>
-                        </td>
-                        <td className="right">
-                          <span className={`badge ${segmentTone(l.segment)}`}>{l.segment}</span>
-                          <div className="sub">score {l.score}</div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
 
-      {/* activity */}
-      <div className="card">
-        <div className="card-head">
-          <h3>Recent activity</h3>
-          <Link className="hint" href="/outbox">Message log →</Link>
+          <div className="dash-activity-body">
+            <LiveActivityStream activities={recentActivities as any} />
+          </div>
         </div>
-        <div className="card-body tight">
-          {recentActivity.length === 0 ? (
-            <div className="empty">
-              <b>No activity yet</b>
-              Sends, notes and status changes will appear here.
-            </div>
-          ) : (
-            <div className="table-wrap">
-              <table className="t">
-                <thead>
-                  <tr>
-                    <th>When</th>
-                    <th>Type</th>
-                    <th>Lead</th>
-                    <th>Detail</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentActivity.map((a) => (
-                    <tr key={a.id}>
-                      <td className="nowrap sub">{a.createdAt.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</td>
-                      <td>
-                        <span className={`badge ${a.type === "WHATSAPP" ? "wa" : a.direction === "IN" ? "green" : "blue"}`}>
-                          {a.direction === "IN" ? "↓ " : "↑ "}{a.type}
-                        </span>
-                      </td>
-                      <td>
-                        <Link className="name" href={`/leads/${a.lead.id}`}>{a.lead.companyName}</Link>
-                      </td>
-                      <td className="sub" style={{ maxWidth: 380, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {a.subject || a.body || "—"}
-                      </td>
-                      <td>
-                        {a.status ? (
-                          <span className={`badge ${
-                            a.status === "sent" || a.status === "delivered" || a.status === "read" || a.status === "received"
-                              ? "green"
-                              : a.status === "failed" || a.status === "bounced" || a.status === "complained"
-                              ? "red"
-                              : a.status === "delayed"
-                              ? "amber"
-                              : "slate"
-                          }`}>
-                            {a.status}
-                          </span>
-                        ) : <span className="muted">—</span>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+      </section>
+
+      {/* ==============================================================
+          ZONE 4 — COMPACT PIPELINE
+          ============================================================== */}
+      <section className="dash-pipeline-section" aria-label="Pipeline Momentum">
+        <PipelineRibbon statusMap={statusMap} totalLeads={totalLeads} />
+      </section>
+
+      {/* ==============================================================
+          ZONE 5 — QUICK ACTIONS
+          ============================================================== */}
+      <section className="dash-shortcuts-section" aria-label="Quick Actions">
+        <span className="dash-shortcuts-k">QUICK SHORTCUTS</span>
+        <div className="dash-shortcuts-grid">
+          <Link href="/leads/new" className="dash-shortcut-btn primary">
+            <span>＋</span>
+            <span>New Lead</span>
+          </Link>
+
+          <Link href="/himi" className="dash-shortcut-btn brand">
+            <span>✦</span>
+            <span>Ask HIMI</span>
+          </Link>
+
+          <Link href="/leads?status=NEW&sort=score" className="dash-shortcut-btn">
+            <span>🎯</span>
+            <span>Untouched Leads</span>
+          </Link>
+
+          <Link href="/follow-ups" className="dash-shortcut-btn">
+            <span>⏰</span>
+            <span>Follow-ups Due</span>
+          </Link>
         </div>
-      </div>
-    </>
+      </section>
+    </div>
   );
 }

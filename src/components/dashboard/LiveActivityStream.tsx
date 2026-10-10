@@ -1,6 +1,7 @@
 import React from "react";
 import Link from "next/link";
 import { parseActivityMeta } from "@/lib/resend-webhook";
+import { Icon } from "@/components/ui/Icon";
 
 export interface ActivityEventItem {
   id: string;
@@ -42,7 +43,7 @@ interface ProcessedEvent {
   id: string;
   leadId?: string;
   companyName: string;
-  icon: string;
+  iconName: "arrow-down-left" | "warning" | "sparkle" | "message" | "link" | "mail" | "arrow-up-right" | "note";
   iconTone: "green" | "blue" | "aqua" | "amber" | "red" | "purple" | "slate";
   actionText: string;
   subtext?: string;
@@ -57,7 +58,7 @@ export function LiveActivityStream({ activities }: LiveActivityStreamProps) {
     id: string;
     leadId?: string;
     companyName: string;
-    icon: string;
+    iconName: "arrow-down-left" | "warning" | "sparkle" | "message" | "link" | "mail" | "arrow-up-right" | "note";
     iconTone: "green" | "blue" | "aqua" | "amber" | "red" | "purple" | "slate";
     actionText: string;
     subtext?: string;
@@ -77,7 +78,7 @@ export function LiveActivityStream({ activities }: LiveActivityStreamProps) {
         id: act.id,
         leadId,
         companyName: company,
-        icon: "↓",
+        iconName: "arrow-down-left",
         iconTone: "green",
         actionText: `Inbound ${act.type === "WHATSAPP" ? "WhatsApp" : "email"} reply`,
         subtext: act.body ? (act.body.length > 50 ? `${act.body.slice(0, 50)}…` : act.body) : undefined,
@@ -94,7 +95,7 @@ export function LiveActivityStream({ activities }: LiveActivityStreamProps) {
         id: act.id,
         leadId,
         companyName: company,
-        icon: "⚠",
+        iconName: "warning",
         iconTone: "red",
         actionText: `${channelName} delivery failed`,
         subtext: act.error ? (act.error.length > 55 ? `${act.error.slice(0, 55)}…` : act.error) : "Message bounced or rejected",
@@ -110,7 +111,7 @@ export function LiveActivityStream({ activities }: LiveActivityStreamProps) {
         id: act.id,
         leadId,
         companyName: company,
-        icon: "✦",
+        iconName: "sparkle",
         iconTone: "purple",
         actionText: act.body || "Status updated",
         timeAgo,
@@ -125,7 +126,7 @@ export function LiveActivityStream({ activities }: LiveActivityStreamProps) {
         id: act.id,
         leadId,
         companyName: company,
-        icon: "◍",
+        iconName: "message",
         iconTone: "aqua",
         actionText: "Read your WhatsApp",
         timeAgo,
@@ -139,7 +140,7 @@ export function LiveActivityStream({ activities }: LiveActivityStreamProps) {
         id: act.id,
         leadId,
         companyName: company,
-        icon: "🔗",
+        iconName: "link",
         iconTone: "purple",
         actionText: "Clicked link in email",
         timeAgo,
@@ -154,7 +155,7 @@ export function LiveActivityStream({ activities }: LiveActivityStreamProps) {
         id: act.id,
         leadId,
         companyName: company,
-        icon: "✉",
+        iconName: "mail",
         iconTone: "blue",
         actionText: "Opened your email",
         subtext: meta.openCount && meta.openCount > 1 ? `Opened ${meta.openCount} times` : undefined,
@@ -171,7 +172,7 @@ export function LiveActivityStream({ activities }: LiveActivityStreamProps) {
         id: act.id,
         leadId,
         companyName: company,
-        icon: "↑",
+        iconName: "arrow-up-right",
         iconTone: isWa ? "aqua" : "slate",
         actionText: `${isWa ? "WhatsApp" : "Email"} outreach sent`,
         timeAgo,
@@ -186,7 +187,7 @@ export function LiveActivityStream({ activities }: LiveActivityStreamProps) {
         id: act.id,
         leadId,
         companyName: company,
-        icon: "📝",
+        iconName: "note",
         iconTone: "slate",
         actionText: "Note recorded",
         subtext: act.body ? (act.body.length > 45 ? `${act.body.slice(0, 45)}…` : act.body) : undefined,
@@ -208,7 +209,6 @@ export function LiveActivityStream({ activities }: LiveActivityStreamProps) {
       prev.eventTypeKey === item.eventTypeKey
     ) {
       prev.count += 1;
-      // Keep earliest/latest subtext context
       continue;
     }
 
@@ -234,7 +234,11 @@ export function LiveActivityStream({ activities }: LiveActivityStreamProps) {
       {finalEvents.map((evt) => (
         <div key={evt.id} className="dash-activity-item">
           <span className={`dash-event-icon ${evt.iconTone}`} aria-hidden="true">
-            {evt.icon}
+            {evt.iconName === "sparkle" ? (
+              <span style={{ fontSize: 10, fontWeight: 700, lineHeight: 1 }}>✦</span>
+            ) : (
+              <Icon name={evt.iconName} size={11} strokeWidth={2.4} />
+            )}
           </span>
           <div className="dash-event-main">
             <div className="dash-event-line">

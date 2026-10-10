@@ -1,5 +1,6 @@
 import React from "react";
 import Link from "next/link";
+import { Icon } from "@/components/ui/Icon";
 
 interface PipelineRibbonProps {
   statusMap: Record<string, number>;
@@ -7,13 +8,13 @@ interface PipelineRibbonProps {
 }
 
 const STAGES = [
-  { key: "NEW", label: "New", color: "var(--brand)", link: "/leads?status=NEW" },
-  { key: "QUALIFIED", label: "Qualified", color: "var(--cyan)", link: "/leads?status=QUALIFIED" },
-  { key: "CONTACTED", label: "Contacted", color: "var(--amber)", link: "/leads?status=CONTACTED" },
-  { key: "REPLIED", label: "Replied", color: "var(--green)", link: "/leads?status=REPLIED" },
-  { key: "CALL_BOOKED", label: "Call Booked", color: "var(--violet)", link: "/leads?status=CALL_BOOKED" },
-  { key: "PROPOSAL_SENT", label: "Proposal", color: "var(--accent)", link: "/leads?status=PROPOSAL_SENT" },
-  { key: "WON", label: "Won", color: "var(--green)", link: "/leads?status=WON" },
+  { key: "NEW", label: "New", color: "var(--brand, #49339A)", link: "/leads?status=NEW" },
+  { key: "QUALIFIED", label: "Qualified", color: "var(--cyan, #62BDD4)", link: "/leads?status=QUALIFIED" },
+  { key: "CONTACTED", label: "Contacted", color: "var(--amber, #F4BE52)", link: "/leads?status=CONTACTED" },
+  { key: "REPLIED", label: "Replied", color: "var(--green, #4FAE91)", link: "/leads?status=REPLIED" },
+  { key: "CALL_BOOKED", label: "Call Booked", color: "var(--violet, #7C3AED)", link: "/leads?status=CALL_BOOKED" },
+  { key: "PROPOSAL_SENT", label: "Proposal", color: "var(--accent, #F4BE52)", link: "/leads?status=PROPOSAL_SENT" },
+  { key: "WON", label: "Won", color: "var(--green, #4FAE91)", link: "/leads?status=WON" },
 ];
 
 export function PipelineRibbon({ statusMap, totalLeads }: PipelineRibbonProps) {
@@ -22,12 +23,13 @@ export function PipelineRibbon({ statusMap, totalLeads }: PipelineRibbonProps) {
   return (
     <div className="dash-pipeline-card">
       <div className="dash-pipeline-head">
-        <div className="hstack" style={{ gap: 8 }}>
+        <div className="dash-pipeline-title-group">
           <span className="dash-section-k">PIPELINE MOMENTUM</span>
           <span className="dash-section-count">· {totalLeads.toLocaleString()} leads</span>
         </div>
         <Link href="/leads" className="dash-pipeline-link">
-          All leads →
+          <span>All leads</span>
+          <Icon name="arrow-right" size={11} strokeWidth={2.2} />
         </Link>
       </div>
 

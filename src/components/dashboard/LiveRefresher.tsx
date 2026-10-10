@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { Icon } from "@/components/ui/Icon";
 
 export function LiveRefresher() {
   const router = useRouter();
@@ -10,7 +11,6 @@ export function LiveRefresher() {
 
   // Format relative updated text
   useEffect(() => {
-    let updateTimer: NodeJS.Timeout;
     const interval = setInterval(() => {
       setLastUpdated("just now");
     }, 15000);
@@ -71,7 +71,7 @@ export function LiveRefresher() {
         aria-label="Refresh live activity"
         disabled={isPending}
       >
-        ↻
+        <Icon name="refresh" size={12} strokeWidth={2.2} />
       </button>
     </div>
   );

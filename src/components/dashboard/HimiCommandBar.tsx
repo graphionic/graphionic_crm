@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Icon } from "@/components/ui/Icon";
 
 export function HimiCommandBar() {
   const router = useRouter();
@@ -43,7 +44,7 @@ export function HimiCommandBar() {
           aria-label="Submit command to HIMI"
         >
           <span>Ask</span>
-          <span className="arrow" aria-hidden="true">➔</span>
+          <Icon name="arrow-right" size={13} strokeWidth={2.2} />
         </button>
       </form>
 
@@ -55,7 +56,7 @@ export function HimiCommandBar() {
             className="dash-chip"
             onClick={() => handleChipClick(chip)}
           >
-            <span>✦</span>
+            <span className="dash-chip-sparkle" aria-hidden="true">✦</span>
             <span>{chip}</span>
           </button>
         ))}

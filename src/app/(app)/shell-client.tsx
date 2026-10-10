@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import React, { useState } from "react";
 
 export function NavLink({
   href,
@@ -12,13 +12,13 @@ export function NavLink({
   tone,
 }: {
   href: string;
-  icon: string;
+  icon: React.ReactNode;
   label: string;
   badge?: number;
   tone?: string;
 }) {
   const pathname = usePathname();
-  const exactOnly = href === "/dashboard" || href === "/settings";
+  const exactOnly = href === "/dashboard" || href === "/settings" || href === "/design-system";
   const active = exactOnly
     ? pathname === href
     : pathname === href || pathname.startsWith(href + "/");

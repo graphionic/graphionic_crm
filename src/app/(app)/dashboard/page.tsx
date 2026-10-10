@@ -7,6 +7,7 @@ import { HimiCommandBar } from "@/components/dashboard/HimiCommandBar";
 import { LiveRefresher } from "@/components/dashboard/LiveRefresher";
 import { LiveActivityStream } from "@/components/dashboard/LiveActivityStream";
 import { PipelineRibbon } from "@/components/dashboard/PipelineRibbon";
+import { Icon } from "@/components/ui/Icon";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,7 @@ function formatStrategyPill(content?: string | null): string | null {
   if (cleaned.toLowerCase().includes("dental")) {
     return "✦ Active focus · UK Dental Practices";
   }
-  return cleaned.length > 40 ? `✦ Active focus · ${cleaned.slice(0, 38)}…` : `✦ Active focus · ${cleaned}`;
+  return cleaned.length > 36 ? `✦ Active focus · ${cleaned.slice(0, 34)}…` : `✦ Active focus · ${cleaned}`;
 }
 
 export default async function DashboardPage() {
@@ -38,7 +39,7 @@ export default async function DashboardPage() {
   const day = startOfDay(now);
   const week = new Date(now.getTime() - 7 * 864e5);
 
-  // Derive natural display name from AdminUser (preserving truthful database state)
+  // Derive natural display name from AdminUser
   const displayName = user.name ? user.name.replace(/\s+Admin$/i, "").trim() : "there";
   const greeting = getGreetingTime(now);
 
@@ -100,88 +101,97 @@ export default async function DashboardPage() {
   return (
     <div className="dash-root">
       {/* ==============================================================
-          ZONE 1 — AI COMMAND HEADER
+          ZONE 1 — HIMI INTELLIGENCE HEADER / COMMAND AREA
           ============================================================== */}
-      <section className="dash-header-section" aria-label="AI Command Header">
+      <section className="dash-header-section" aria-label="AI Command Center Header">
         <div className="dash-header-top">
-          <div>
+          <div className="dash-header-greeting-col">
             <h1 className="dash-greeting">
               {greeting}, {displayName}
             </h1>
             <p className="dash-subcopy">Your sales workspace is ready.</p>
           </div>
-          {strategyPillText ? (
-            <Link href="/settings/himi/knowledge" className="dash-strategy-pill" title="View Business Strategy">
-              <span>{strategyPillText}</span>
+
+          <div className="dash-header-actions-col">
+            {strategyPillText ? (
+              <Link href="/settings/himi/knowledge" className="dash-strategy-pill" title="View Business Strategy">
+                <span>{strategyPillText}</span>
+              </Link>
+            ) : null}
+
+            <Link href="/leads/new" className="dash-primary-btn" title="Create a new lead">
+              <Icon name="plus" size={13} strokeWidth={2.4} />
+              <span>New Lead</span>
             </Link>
-          ) : null}
+          </div>
         </div>
 
-        {/* Command Search Bar */}
+        {/* Command Omnibar */}
         <HimiCommandBar />
       </section>
 
       {/* ==============================================================
-          ZONE 2 — SALES PULSE (4 EXECUTIVE KPIS)
+          ZONE 2 — INTEGRATED SALES PULSE STRIP (1 Surface, 4 Metric Regions)
           ============================================================== */}
-      <section className="dash-pulse-grid" aria-label="Sales Pulse Metrics">
-        {/* 1. Actions */}
-        <Link href={urgentActionsCount > 0 ? "/himi?intent=review_delivery_issue" : "/leads"} className="dash-pulse-card">
-          <div className="dash-pulse-top">
+      <section className="dash-pulse-strip" aria-label="Sales Pulse Metrics">
+        {/* Metric 1: Actions */}
+        <Link
+          href={urgentActionsCount > 0 ? "/himi?intent=review_delivery_issue" : "/leads"}
+          className="dash-pulse-cell"
+        >
+          <div className="dash-pulse-meta">
             <span className="dash-pulse-k">ACTIONS</span>
-            <span className={`dash-pulse-status-dot ${urgentActionsCount > 0 ? "warn" : "good"}`} />
+            <span className={`dash-pulse-dot ${urgentActionsCount > 0 ? "warn" : "good"}`} />
           </div>
-          <div className="dash-pulse-v">{urgentActionsCount}</div>
-          <div className="dash-pulse-d">
+          <div className="dash-pulse-val">{urgentActionsCount}</div>
+          <div className="dash-pulse-sub">
             {urgentActionsCount > 0 ? `${urgentActionsCount} item${urgentActionsCount > 1 ? "s" : ""} need attention` : "All clear · No alerts"}
           </div>
         </Link>
 
-        {/* 2. Replies */}
-        <Link href="/leads?status=REPLIED" className="dash-pulse-card">
-          <div className="dash-pulse-top">
+        {/* Metric 2: Replies */}
+        <Link href="/leads?status=REPLIED" className="dash-pulse-cell">
+          <div className="dash-pulse-meta">
             <span className="dash-pulse-k">REPLIES (7D)</span>
-            <span className="dash-pulse-icon">↓</span>
+            <span className={`dash-pulse-dot ${repliesWeek > 0 ? "good" : "neutral"}`} />
           </div>
-          <div className="dash-pulse-v good">{repliesWeek}</div>
-          <div className="dash-pulse-d">
+          <div className={`dash-pulse-val ${repliesWeek > 0 ? "good" : ""}`}>{repliesWeek}</div>
+          <div className="dash-pulse-sub">
             {emailsWeek > 0 ? `${((repliesWeek / emailsWeek) * 100).toFixed(1)}% response rate` : "0 in last 7 days"}
           </div>
         </Link>
 
-        {/* 3. Outreach Today */}
-        <Link href="/outbox" className="dash-pulse-card">
-          <div className="dash-pulse-top">
+        {/* Metric 3: Outreach Today */}
+        <Link href="/outbox" className="dash-pulse-cell">
+          <div className="dash-pulse-meta">
             <span className="dash-pulse-k">OUTREACH TODAY</span>
-            <span className="dash-pulse-icon">↑</span>
           </div>
-          <div className="dash-pulse-v">{outreachTodayTotal}</div>
-          <div className="dash-pulse-d">
+          <div className="dash-pulse-val">{outreachTodayTotal}</div>
+          <div className="dash-pulse-sub">
             {emailsToday} email · {waToday} WhatsApp
           </div>
         </Link>
 
-        {/* 4. Active Pipeline */}
-        <Link href="/leads" className="dash-pulse-card">
-          <div className="dash-pulse-top">
+        {/* Metric 4: Active Pipeline */}
+        <Link href="/leads" className="dash-pulse-cell">
+          <div className="dash-pulse-meta">
             <span className="dash-pulse-k">ACTIVE PIPELINE</span>
-            <span className="dash-pulse-icon">✦</span>
           </div>
-          <div className="dash-pulse-v accent">{activePipelineCount}</div>
-          <div className="dash-pulse-d">
+          <div className="dash-pulse-val accent">{activePipelineCount}</div>
+          <div className="dash-pulse-sub">
             {totalLeads.toLocaleString()} total leads
           </div>
         </Link>
       </section>
 
       {/* ==============================================================
-          ZONE 3 — MAIN WORKSPACE (65% HIMI FOCUS / 35% LIVE ACTIVITY)
+          ZONE 3 — MAIN WORKSPACE (65% HIMI TODAY'S FOCUS / 35% LIVE ACTIVITY)
           ============================================================== */}
       <section className="dash-workspace" aria-label="Main Sales Workspace">
-        {/* ZONE 3A: HIMI TODAY'S FOCUS */}
+        {/* Zone 3A: HIMI Today's Focus (65%) */}
         <div className="dash-focus-card">
           <div className="dash-card-head">
-            <div className="hstack" style={{ gap: 8 }}>
+            <div className="dash-card-title-group">
               <span className="dash-ai-icon" aria-hidden="true">✦</span>
               <div>
                 <h2>HIMI — Today&apos;s Focus</h2>
@@ -189,49 +199,52 @@ export default async function DashboardPage() {
               </div>
             </div>
             <Link href="/himi" className="dash-card-link">
-              Open HIMI →
+              <span>Open HIMI</span>
+              <Icon name="arrow-right" size={11} strokeWidth={2.2} />
             </Link>
           </div>
 
           <div className="dash-focus-body">
             {dailyFocus.length === 0 ? (
               <div className="dash-empty-focus">
-                <span className="dash-empty-icon">✓</span>
+                <span className="dash-empty-icon">
+                  <Icon name="check" size={16} strokeWidth={2.5} />
+                </span>
                 <b>You&apos;re caught up</b>
                 <p>No urgent actions need attention right now. Review opportunities or run a new search.</p>
               </div>
             ) : (
-              <div className="dash-focus-list">
+              <div className="dash-focus-feed">
                 {dailyFocus.map((item) => {
                   const levelClass =
                     item.level === "ACTION" ? "action" : item.level === "WATCH" ? "watch" : "opportunity";
 
                   return (
-                    <div key={item.id} className={`dash-focus-item ${levelClass}`}>
-                      <div className="dash-item-badge-col">
+                    <div key={item.id} className={`dash-focus-row ${levelClass}`}>
+                      <div className="dash-focus-badge-cell">
                         <span className={`dash-level-pill ${levelClass}`}>
                           {item.level}
                         </span>
                       </div>
 
-                      <div className="dash-item-main-col">
-                        <div className="dash-item-title-row">
-                          <Link href={`/leads/${item.leadId}`} className="dash-item-company">
+                      <div className="dash-focus-main-cell">
+                        <div className="dash-focus-title-line">
+                          <Link href={`/leads/${item.leadId}`} className="dash-focus-company">
                             {item.companyName}
                           </Link>
                           {item.city || item.country ? (
-                            <span className="dash-item-geo">
+                            <span className="dash-focus-geo">
                               · {[item.city, item.country].filter(Boolean).join(", ")}
                             </span>
                           ) : null}
                         </div>
-                        <p className="dash-item-reason">{item.reason}</p>
+                        <p className="dash-focus-reason">{item.reason}</p>
                       </div>
 
-                      <div className="dash-item-cta-col">
-                        <Link href={item.href} className={`dash-item-cta-btn ${levelClass}`}>
+                      <div className="dash-focus-cta-cell">
+                        <Link href={item.href} className={`dash-focus-cta-btn ${levelClass}`}>
                           <span>{item.ctaText}</span>
-                          <span className="arrow" aria-hidden="true">→</span>
+                          <Icon name="arrow-right" size={11} strokeWidth={2.2} />
                         </Link>
                       </div>
                     </div>
@@ -242,10 +255,10 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        {/* ZONE 3B: LIVE ACTIVITY STREAM */}
+        {/* Zone 3B: Live Activity Stream (35%) */}
         <div className="dash-activity-card">
           <div className="dash-card-head">
-            <div className="hstack" style={{ gap: 8 }}>
+            <div className="dash-card-title-group">
               <h2>Live Activity</h2>
             </div>
             <LiveRefresher />
@@ -258,38 +271,10 @@ export default async function DashboardPage() {
       </section>
 
       {/* ==============================================================
-          ZONE 4 — COMPACT PIPELINE
+          SUPPORTING CONTEXT — PIPELINE MOMENTUM
           ============================================================== */}
       <section className="dash-pipeline-section" aria-label="Pipeline Momentum">
         <PipelineRibbon statusMap={statusMap} totalLeads={totalLeads} />
-      </section>
-
-      {/* ==============================================================
-          ZONE 5 — QUICK ACTIONS
-          ============================================================== */}
-      <section className="dash-shortcuts-section" aria-label="Quick Actions">
-        <span className="dash-shortcuts-k">SHORTCUTS</span>
-        <div className="dash-shortcuts-grid">
-          <Link href="/leads/new" className="dash-shortcut-btn primary">
-            <span>＋</span>
-            <span>New Lead</span>
-          </Link>
-
-          <Link href="/himi" className="dash-shortcut-btn brand">
-            <span>✦</span>
-            <span>Ask HIMI</span>
-          </Link>
-
-          <Link href="/leads?status=NEW&sort=score" className="dash-shortcut-btn">
-            <span>🎯</span>
-            <span>Untouched Leads</span>
-          </Link>
-
-          <Link href="/follow-ups" className="dash-shortcut-btn">
-            <span>⏰</span>
-            <span>Follow-ups Due</span>
-          </Link>
-        </div>
       </section>
     </div>
   );

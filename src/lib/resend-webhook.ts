@@ -299,7 +299,7 @@ export async function handleResendLifecycleEvent(
 
       if (isPermanent) {
         const rawTo = event.data?.to;
-        const recipientEmail = (Array.isArray(rawTo) ? rawTo[0] : rawTo) || activity.lead.email || "";
+        const recipientEmail = (Array.isArray(rawTo) ? rawTo[0] : rawTo) || activity.lead?.email || "";
         const cleanEmail = recipientEmail.toLowerCase().trim();
 
         if (cleanEmail) {
@@ -312,10 +312,12 @@ export async function handleResendLifecycleEvent(
         }
 
         // Revoke email opt-in (do not set global doNotContact to true so WhatsApp remains unblocked)
-        await prisma.lead.update({
-          where: { id: activity.leadId },
-          data: { optedInEmail: false },
-        });
+        if (activity.leadId) {
+          await prisma.lead.update({
+            where: { id: activity.leadId },
+            data: { optedInEmail: false },
+          });
+        }
       }
       break;
     }
@@ -335,7 +337,7 @@ export async function handleResendLifecycleEvent(
       });
 
       const rawTo = event.data?.to;
-      const recipientEmail = (Array.isArray(rawTo) ? rawTo[0] : rawTo) || activity.lead.email || "";
+      const recipientEmail = (Array.isArray(rawTo) ? rawTo[0] : rawTo) || activity.lead?.email || "";
       const cleanEmail = recipientEmail.toLowerCase().trim();
 
       if (cleanEmail) {
@@ -348,10 +350,12 @@ export async function handleResendLifecycleEvent(
       }
 
       // Revoke email opt-in
-      await prisma.lead.update({
-        where: { id: activity.leadId },
-        data: { optedInEmail: false },
-      });
+      if (activity.leadId) {
+        await prisma.lead.update({
+          where: { id: activity.leadId },
+          data: { optedInEmail: false },
+        });
+      }
       break;
     }
 

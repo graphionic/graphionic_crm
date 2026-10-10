@@ -12,9 +12,9 @@ export const dynamic = "force-dynamic";
  *  GET  — Meta's verification handshake (hub.challenge)
  *  POST — inbound messages + delivery statuses
  *
- * Inbound messages are the important part: they set lastInboundAt on the lead,
- * which OPENS the 24-hour free-form window and lets you reply normally instead
- * of only through approved templates.
+ * Inbound messages:
+ * - Matched leads: updates lastInboundAt on the lead (opening 24h free-form window) and records IN activity.
+ * - Unknown contacts: records IN activity with leadId: null, phone, and profile name so it appears in Inbox.
  */
 
 export async function GET(req: NextRequest) {
@@ -34,7 +34,11 @@ type WaPayload = {
   entry?: Array<{
     changes?: Array<{
       value?: {
-        metadata?: { phone_number_id?: string };
+        metadata?: { phone_number_id?: string; display_phone_number?: string };
+        contacts?: Array<{
+          profile?: { name?: string };
+          wa_id?: string;
+        }>;
         messages?: Array<{
           from?: string;
           id?: string;
@@ -42,6 +46,11 @@ type WaPayload = {
           text?: { body?: string };
           button?: { text?: string };
           interactive?: { button_reply?: { title?: string }; list_reply?: { title?: string } };
+          image?: { caption?: string };
+          video?: { caption?: string };
+          audio?: { id?: string };
+          document?: { filename?: string; caption?: string };
+          voice?: { id?: string };
         }>;
         statuses?: Array<{
           id?: string;
@@ -67,15 +76,38 @@ export async function POST(req: NextRequest) {
     // ---------- inbound messages ----------
     for (const m of value.messages ?? []) {
       const fromRaw = m.from || "";
-      const text =
+      if (!fromRaw) continue;
+
+      // Inbound Deduplication via Meta message ID
+      if (m.id) {
+        const existing = await prisma.activity.findFirst({
+          where: { externalId: m.id },
+          select: { id: true },
+        });
+        if (existing) continue;
+      }
+
+      let text =
         m.text?.body ||
         m.button?.text ||
         m.interactive?.button_reply?.title ||
-        m.interactive?.list_reply?.title ||
-        `[${m.type || "message"} received]`;
+        m.interactive?.list_reply?.title;
+
+      if (!text) {
+        if (m.type === "image") text = m.image?.caption ? `[Image: ${m.image.caption}]` : "[Image received]";
+        else if (m.type === "video") text = m.video?.caption ? `[Video: ${m.video.caption}]` : "[Video received]";
+        else if (m.type === "audio" || m.type === "voice") text = "[Voice message received]";
+        else if (m.type === "document") text = m.document?.filename ? `[Document: ${m.document.filename}]` : "[Document received]";
+        else if (m.type === "location") text = "[Location received]";
+        else if (m.type === "contacts") text = "[Contact card received]";
+        else text = `[${m.type || "message"} received]`;
+      }
+
+      const normFrom = normalisePhone(fromRaw);
+      const profileName = value.contacts?.find((c) => c.wa_id === fromRaw)?.profile?.name || value.contacts?.[0]?.profile?.name || null;
 
       // Match on the last 9 digits so 447700900123 finds +44 7700 900123
-      const tail = normalisePhone(fromRaw).slice(-9);
+      const tail = normFrom.slice(-9);
       const lead = tail
         ? await prisma.lead.findFirst({
             where: {
@@ -102,6 +134,8 @@ export async function POST(req: NextRequest) {
         await prisma.activity.create({
           data: {
             leadId: lead.id,
+            phone: normFrom,
+            contactName: profileName || undefined,
             type: "WHATSAPP",
             direction: "IN",
             channel: "whatsapp_cloud",
@@ -114,8 +148,8 @@ export async function POST(req: NextRequest) {
         // Auto-suppress obvious opt-outs — required by Meta policy and PECR
         if (/\b(stop|unsubscribe|remove me|don'?t message|opt out)\b/i.test(text)) {
           await prisma.suppression.upsert({
-            where: { value: fromRaw.toLowerCase() },
-            create: { value: fromRaw.toLowerCase(), reason: "Opted out via WhatsApp" },
+            where: { value: normFrom.toLowerCase() },
+            create: { value: normFrom.toLowerCase(), reason: "Opted out via WhatsApp" },
             update: { reason: "Opted out via WhatsApp" },
           });
           await prisma.lead.update({
@@ -125,10 +159,35 @@ export async function POST(req: NextRequest) {
           await prisma.activity.create({
             data: {
               leadId: lead.id,
+              phone: normFrom,
               type: "STATUS",
               direction: "OUT",
               body: "Auto-suppressed: contact asked to stop. All channels blocked.",
             },
+          });
+        }
+      } else {
+        // Unknown external sender — persist directly to Activity without creating a fake Lead
+        await prisma.activity.create({
+          data: {
+            leadId: null,
+            phone: normFrom,
+            contactName: profileName || undefined,
+            type: "WHATSAPP",
+            direction: "IN",
+            channel: "whatsapp_cloud",
+            body: text,
+            status: "received",
+            externalId: m.id ?? null,
+          },
+        });
+
+        // Check suppression for unknown sender
+        if (/\b(stop|unsubscribe|remove me|don'?t message|opt out)\b/i.test(text)) {
+          await prisma.suppression.upsert({
+            where: { value: normFrom.toLowerCase() },
+            create: { value: normFrom.toLowerCase(), reason: "Opted out via WhatsApp" },
+            update: { reason: "Opted out via WhatsApp" },
           });
         }
       }

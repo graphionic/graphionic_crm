@@ -102,8 +102,17 @@ export default async function OutboxPage({
                           <span className={`badge ${a.type === "WHATSAPP" ? "wa" : "blue"}`}>{a.type}</span>
                         </td>
                         <td>
-                          <Link className="name" href={`/leads/${a.lead.id}`}>{a.lead.companyName}</Link>
-                          <div className="sub">{a.lead.country}</div>
+                          {a.lead ? (
+                            <>
+                              <Link className="name" href={`/leads/${a.lead.id}`}>{a.lead.companyName}</Link>
+                              <div className="sub">{a.lead.country}</div>
+                            </>
+                          ) : (
+                            <>
+                              <span className="name">{a.contactName || a.phone || "Direct Contact"}</span>
+                              <div className="sub">{a.phone || "No Lead"}</div>
+                            </>
+                          )}
                         </td>
                         <td className="sub" style={{ maxWidth: 340 }}>
                           {a.subject ? <div style={{ fontWeight: 600, color: "var(--ink)" }}>{a.subject}</div> : null}
@@ -130,7 +139,11 @@ export default async function OutboxPage({
                             ) : null}
                           </div>
                         </td>
-                        <td className="right"><Link className="btn sm" href={`/leads/${a.lead.id}`}>Open</Link></td>
+                        <td className="right">
+                          {a.lead ? (
+                            <Link className="btn sm" href={`/leads/${a.lead.id}`}>Open</Link>
+                          ) : null}
+                        </td>
                       </tr>
                     );
                   })}

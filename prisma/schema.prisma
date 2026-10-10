@@ -97,9 +97,11 @@ model Lead {
 
 // ---------------------------------------------------------------- timeline
 model Activity {
-  id     String @id @default(cuid())
-  leadId String
-  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  id          String   @id @default(cuid())
+  leadId      String?
+  lead        Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  phone       String?
+  contactName String?
 
   type         String // EMAIL | WHATSAPP | CALL | NOTE | STATUS | TASK
   direction    String  @default("OUT") // OUT | IN
@@ -117,6 +119,7 @@ model Activity {
   @@index([leadId])
   @@index([createdAt])
   @@index([type])
+  @@index([phone])
 }
 
 // ---------------------------------------------------------------- settings

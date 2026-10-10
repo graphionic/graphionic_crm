@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireActiveUser } from "@/lib/session";
 import { sendEmail } from "@/lib/mailer";
-import { canSendFreeform, sendTemplate, sendText } from "@/lib/whatsapp";
+import { canSendFreeform, normalisePhone, sendTemplate, sendText } from "@/lib/whatsapp";
 import { isSuppressed } from "./leads";
 
 /**
@@ -142,9 +142,13 @@ export async function sendLeadWhatsapp(
       ? await sendTemplate(to, opts.templateName || "", opts.language || "en", templateParams)
       : await sendText(to, opts.text || "");
 
+  const normTo = normalisePhone(to);
+
   await prisma.activity.create({
     data: {
       leadId,
+      phone: normTo,
+      contactName: lead.contactName || lead.companyName || null,
       type: "WHATSAPP",
       direction: "OUT",
       channel: "whatsapp_cloud",

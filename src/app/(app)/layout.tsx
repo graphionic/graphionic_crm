@@ -37,6 +37,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           />
 
           <div className="sect">Engagement</div>
+          <NavLink href="/inbox" icon={<Icon name="message" size={17} />} label="WhatsApp Inbox" />
           <NavLink href="/follow-ups" icon={<Icon name="clock" size={17} />} label="Follow-ups" badge={dueCount || undefined} tone="amber" />
           <NavLink href="/outbox" icon={<Icon name="outbox" size={17} />} label="Outbox" />
           <NavLink href="/import" icon={<Icon name="import" size={17} />} label="Import" />

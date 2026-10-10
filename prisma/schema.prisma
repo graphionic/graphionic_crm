@@ -13,15 +13,16 @@ datasource db {
 
 // ---------------------------------------------------------------- auth
 model AdminUser {
-  id           String       @id @default(cuid())
-  email        String       @unique
-  name         String?
-  passwordHash String
-  isActive     Boolean      @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  memories     HimiMemory[]
+  id            String             @id @default(cuid())
+  email         String             @unique
+  name          String?
+  passwordHash  String
+  isActive      Boolean            @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  memories      HimiMemory[]
+  conversations HimiConversation[]
 }
 
 // ---------------------------------------------------------------- leads
@@ -260,6 +261,30 @@ model HimiMemory {
   @@index([userId, active])
   @@index([key])
   @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------- himi conversation history
+model HimiConversation {
+  id        String        @id @default(cuid())
+  userId    String
+  user      AdminUser     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  messages  HimiMessage[]
+
+  @@index([userId, updatedAt])
+}
+
+model HimiMessage {
+  id             String           @id @default(cuid())
+  conversationId String
+  conversation   HimiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String           // USER | ASSISTANT
+  content        String           @db.Text
+  createdAt      DateTime         @default(now())
+
+  @@index([conversationId, createdAt])
 }
 
 

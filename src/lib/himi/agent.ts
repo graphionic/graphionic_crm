@@ -2,6 +2,7 @@ import { z } from "zod";
 import { executeHimiTool, HimiPendingAction } from "./tools";
 import { himiConfig } from "@/lib/settings";
 import { prisma } from "@/lib/prisma";
+import { isValidTimeZone, getCurrentTimeInZone } from "@/lib/timezone";
 import {
   getDynamicSkillInstructions,
   DynamicSkillDiscoveryResult,
@@ -19,6 +20,7 @@ export interface HimiChatPayload {
   history?: HimiHistoryMessage[];
   userId?: string;
   userEmail?: string;
+  timezone?: string | null;
 }
 
 export interface ToolCallExecution {
@@ -145,19 +147,20 @@ export async function getActiveMemoryContext(userId?: string): Promise<ActiveMem
 function himiSystemInstructions(
   skillGuidance?: string,
   businessIdentity?: string,
-  memoryContext?: string
+  memoryContext?: string,
+  temporalContext?: string
 ): string {
   const skillInstructions = (skillGuidance || "").trim();
   const identityInstructions = (businessIdentity || "").trim();
   const memoryInstructions = (memoryContext || "").trim();
-
+  const temporalInstructions = (temporalContext || "").trim();
 
   return `You are HIMI — the AI Sales Operations Intelligence Assistant for ClientForge CRM.
 
 Core Purpose & Identity:
 - You help team members operate ClientForge, an outreach CRM designed for UK, US, and UAE client acquisition.
 - ClientForge tracks business leads and communication timelines (Activities).
-- Outreach channels are Email (handled via Resend) and WhatsApp (handled via Meta WhatsApp Cloud API).
+- Outreach channels are Email (handled via Resend) and WhatsApp (handled via Meta WhatsApp Cloud API).${temporalInstructions ? `\n\n${temporalInstructions}` : ""}
 
 SCOPE & REFERENT RESOLUTION (PRIMARY DIRECTIVE):
 - When determining the subject and scope of a turn, prioritize the newest user message ([Current User Message]).
@@ -934,6 +937,31 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
     activeMemoryContext = { promptBlock: "", memories: [] };
   }
 
+  // Resolve authenticated operator timezone context
+  let operatorTz = payload.timezone && isValidTimeZone(payload.timezone) ? payload.timezone.trim() : null;
+  if (!operatorTz && payload.userId) {
+    try {
+      const dbUser = await prisma.adminUser.findUnique({
+        where: { id: payload.userId },
+        select: { timezone: true },
+      });
+      if (dbUser?.timezone && isValidTimeZone(dbUser.timezone)) {
+        operatorTz = dbUser.timezone.trim();
+      }
+    } catch {
+      // Ignore safely
+    }
+  }
+
+  let temporalContextBlock = "";
+  if (operatorTz) {
+    const timeInfo = getCurrentTimeInZone(operatorTz);
+    temporalContextBlock = `OPERATOR TEMPORAL CONTEXT:
+- Operator Timezone: ${timeInfo.ianaZone}
+- Operator Current Local Date & Time: ${timeInfo.fullStr}
+- Interpret relative operator-time expressions (e.g. "today", "tomorrow", "yesterday", "this morning", "this afternoon", "this week", "overdue") strictly relative to this operator local time unless the user explicitly specifies another timezone or target location.`;
+  }
+
   const himiAgent = new Agent({
     name: "HIMI",
     model: config.model,
@@ -941,7 +969,8 @@ export async function runHimiNativeTurn(payload: HimiChatPayload): Promise<HimiC
       himiSystemInstructions(
         discoveryResult.instructions,
         businessIdentityBlock,
-        activeMemoryContext.promptBlock
+        activeMemoryContext.promptBlock,
+        temporalContextBlock
       ),
     tools: availableTools,
   });

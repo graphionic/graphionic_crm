@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { requireActiveUser } from "@/lib/session";
 import { parseActivityMeta } from "@/lib/resend-webhook";
+import { formatInTimeZone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,7 @@ export default async function OutboxPage({
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  await requireActiveUser();
+  const user = await requireActiveUser();
   const sp = await searchParams;
   const type = sp.type || "";
   const page = Math.max(1, Number(sp.page || 1));
@@ -97,7 +98,7 @@ export default async function OutboxPage({
 
                     return (
                       <tr key={a.id}>
-                        <td className="sub nowrap">{a.createdAt.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</td>
+                        <td className="sub nowrap">{formatInTimeZone(a.createdAt, user.timezone)}</td>
                         <td>
                           <span className={`badge ${a.type === "WHATSAPP" ? "wa" : "blue"}`}>{a.type}</span>
                         </td>
@@ -128,7 +129,7 @@ export default async function OutboxPage({
                               {a.status || "—"}
                             </span>
                             {meta.opened ? (
-                              <span className="badge blue" title={meta.firstOpenedAt ? `First opened: ${new Date(meta.firstOpenedAt).toLocaleString("en-GB")}` : undefined}>
+                              <span className="badge blue" title={meta.firstOpenedAt ? `First opened: ${formatInTimeZone(meta.firstOpenedAt, user.timezone)}` : undefined}>
                                 Opened{meta.openCount && meta.openCount > 1 ? ` (${meta.openCount})` : ""}
                               </span>
                             ) : null}

@@ -15,7 +15,12 @@ function secret(): Uint8Array {
   return new TextEncoder().encode(s);
 }
 
-export type SessionUser = { id: string; email: string; name: string | null };
+export type SessionUser = {
+  id: string;
+  email: string;
+  name: string | null;
+  timezone?: string | null;
+};
 
 export async function createSession(user: SessionUser) {
   const token = await new SignJWT({ email: user.email, name: user.name })
@@ -74,11 +79,11 @@ export async function requireActiveUser(): Promise<SessionUser> {
   const user = await requireUser();
   const dbUser = await prisma.adminUser.findUnique({
     where: { id: user.id },
-    select: { id: true, email: true, name: true, isActive: true },
+    select: { id: true, email: true, name: true, isActive: true, timezone: true },
   });
   if (!dbUser || !dbUser.isActive) {
     await destroySession();
     redirect("/login");
   }
-  return { id: dbUser.id, email: dbUser.email, name: dbUser.name };
+  return { id: dbUser.id, email: dbUser.email, name: dbUser.name, timezone: dbUser.timezone };
 }

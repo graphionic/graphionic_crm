@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { sendLeadEmail, sendLeadWhatsapp } from "@/lib/actions/send";
 import { canSendFreeform } from "@/lib/whatsapp";
 import { isSuppressed } from "@/lib/actions/leads";
+import { isValidTimeZone } from "@/lib/timezone";
 
 export function detectSecretInText(text: string): boolean {
   if (!text) return false;
@@ -2056,9 +2057,29 @@ export async function executeConfirmedHimiAction(
         return { ok: false, error: "Note content exceeds maximum length of 5000 characters." };
       }
 
+      let noteDate = new Date().toISOString().split("T")[0];
+      if (actorEmail) {
+        try {
+          const actorUser = await prisma.adminUser.findUnique({
+            where: { email: actorEmail },
+            select: { timezone: true },
+          });
+          if (actorUser?.timezone && isValidTimeZone(actorUser.timezone)) {
+            noteDate = new Intl.DateTimeFormat("en-CA", {
+              timeZone: actorUser.timezone.trim(),
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+            }).format(new Date());
+          }
+        } catch {
+          // Fallback safely to ISO UTC date
+        }
+      }
+
       const existingNotes = lead.notes ? lead.notes.trim() : "";
       const updatedNotes = existingNotes
-        ? `${existingNotes}\n\n[HIMI Note ${new Date().toISOString().split("T")[0]}]: ${noteText}`
+        ? `${existingNotes}\n\n[HIMI Note ${noteDate}]: ${noteText}`
         : noteText;
 
       await prisma.lead.update({

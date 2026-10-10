@@ -18,6 +18,7 @@ model AdminUser {
   name          String?
   passwordHash  String
   isActive      Boolean            @default(true)
+  timezone      String?
   lastLoginAt   DateTime?
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt

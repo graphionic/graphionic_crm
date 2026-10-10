@@ -140,6 +140,7 @@ export async function POST(req: Request) {
       history: historyPayload.length > 0 ? historyPayload : undefined,
       userId: user.id,
       userEmail: user.email,
+      timezone: user.timezone,
     });
 
     // Persist ASSISTANT message if successful

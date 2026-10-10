@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireActiveUser } from "@/lib/session";
 import { setSettings } from "@/lib/settings";
+import { isValidTimeZone } from "@/lib/timezone";
 import { verifyMail } from "@/lib/mailer";
 import { listTemplates, verifyWhatsapp } from "@/lib/whatsapp";
 import { verifyDns } from "@/lib/dns";
@@ -186,4 +187,47 @@ export async function saveHimiSettings(fd: FormData) {
     return { ok: false, message: `Save failed: ${(e as Error).message}` };
   }
 }
+
+export async function saveOperatorTimezone(fd: FormData) {
+  const user = await requireActiveUser();
+  const tz = String(fd.get("timezone") ?? "").trim();
+
+  if (!tz) {
+    return { ok: false, message: "Please select a valid timezone." };
+  }
+
+  if (!isValidTimeZone(tz)) {
+    return { ok: false, message: `"${tz}" is not a valid IANA timezone identifier.` };
+  }
+
+  try {
+    await prisma.adminUser.update({
+      where: { id: user.id },
+      data: { timezone: tz },
+    });
+    revalidatePath("/settings/regional");
+    revalidatePath("/settings");
+    revalidatePath("/himi");
+    return { ok: true, message: `Timezone updated to ${tz}.` };
+  } catch (e) {
+    return { ok: false, message: `Failed to save timezone: ${(e as Error).message}` };
+  }
+}
+
+export async function clearOperatorTimezone() {
+  const user = await requireActiveUser();
+  try {
+    await prisma.adminUser.update({
+      where: { id: user.id },
+      data: { timezone: null },
+    });
+    revalidatePath("/settings/regional");
+    revalidatePath("/settings");
+    revalidatePath("/himi");
+    return { ok: true, message: "Timezone preference cleared." };
+  } catch (e) {
+    return { ok: false, message: `Failed to clear timezone: ${(e as Error).message}` };
+  }
+}
+
 

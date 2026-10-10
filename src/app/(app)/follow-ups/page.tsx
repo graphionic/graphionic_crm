@@ -2,11 +2,12 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { requireActiveUser } from "@/lib/session";
 import { statusTone, segmentTone } from "@/lib/constants";
+import { formatDateInZone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
 export default async function FollowUpsPage() {
-  await requireActiveUser();
+  const user = await requireActiveUser();
   const now = new Date();
 
   const [overdue, today, upcoming, noFollowUp] = await Promise.all([
@@ -76,7 +77,7 @@ export default async function FollowUpsPage() {
                     <td>
                       {l.nextFollowUpAt ? (
                         <span className={`badge ${tone}`}>
-                          {l.nextFollowUpAt.toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
+                          {formatDateInZone(l.nextFollowUpAt, user.timezone, { day: "2-digit", month: "short" })}
                         </span>
                       ) : <span className="muted">—</span>}
                     </td>

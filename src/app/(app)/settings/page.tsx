@@ -6,7 +6,7 @@ import { getSettings } from "@/lib/settings";
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  await requireActiveUser();
+  const user = await requireActiveUser();
   const [s, suppressions, templates, counts] = await Promise.all([
     getSettings(),
     prisma.suppression.count(),
@@ -118,6 +118,13 @@ export default async function SettingsPage() {
           status={`${templates} saved`}
           statusOk={templates > 0}
         />
+        <Card
+          href="/settings/regional"
+          title="Timezone &amp; Regional"
+          desc="Set your personal operational timezone for consistent CRM timestamp display and HIMI relative temporal understanding."
+          status={user.timezone || "Not configured"}
+          statusOk={Boolean(user.timezone)}
+        />
       </div>
 
 
@@ -126,6 +133,7 @@ export default async function SettingsPage() {
         <div className="card-body">
           <dl className="kv">
             <dt>Leads</dt><dd><b>{counts.toLocaleString()}</b></dd>
+            <dt>Your Timezone</dt><dd>{user.timezone ? <b>{user.timezone}</b> : <span className="muted">not configured</span>}</dd>
             <dt>HIMI Agent</dt><dd>{himiOk ? "enabled" : "not configured"}</dd>
             <dt>HIMI Model</dt><dd>{s.openai_model || process.env.OPENAI_MODEL || "gpt-5-mini"}</dd>
             <dt>Mail provider</dt><dd>{s.mail_provider || "smtp"}</dd>

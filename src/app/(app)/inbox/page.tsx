@@ -7,13 +7,14 @@ export const revalidate = 0;
 export default async function InboxPage(props: {
   searchParams?: Promise<{ phone?: string; leadId?: string }>;
 }) {
-  await requireActiveUser();
+  const user = await requireActiveUser();
   const searchParams = props.searchParams ? await props.searchParams : undefined;
 
   return (
     <InboxClient
       initialPhone={searchParams?.phone}
       initialLeadId={searchParams?.leadId}
+      operatorTimezone={user.timezone || null}
     />
   );
 }

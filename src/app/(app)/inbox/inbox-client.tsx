@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/ui/Icon";
+import { formatDateInZone, formatTimeInZone } from "@/lib/timezone";
 
 type ConversationSummary = {
   key: string;
@@ -64,9 +65,11 @@ type ConversationDetail = {
 export default function InboxClient({
   initialPhone,
   initialLeadId,
+  operatorTimezone,
 }: {
   initialPhone?: string;
   initialLeadId?: string;
+  operatorTimezone?: string | null;
 } = {}) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -265,7 +268,7 @@ export default function InboxClient({
                 <div className="inbox-conv-top">
                   <span className="inbox-conv-name">{c.displayName}</span>
                   <span className="inbox-conv-time">
-                    {new Date(c.latestAt).toLocaleDateString([], {
+                    {formatDateInZone(c.latestAt, operatorTimezone, {
                       month: "short",
                       day: "numeric",
                     })}
@@ -391,7 +394,7 @@ export default function InboxClient({
 
                     <div className="inbox-msg-meta">
                       <span>
-                        {new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        {formatTimeInZone(m.createdAt, operatorTimezone, { hour: "2-digit", minute: "2-digit" })}
                       </span>
                       {m.direction === "OUT" && (
                         <span>

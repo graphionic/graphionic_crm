@@ -9,6 +9,7 @@ import { CopyButton } from "@/components/CopyButton";
 import { Composer, WaSender, QuickActions } from "./lead-client";
 import { isSuppressed } from "@/lib/actions/leads";
 import { parseActivityMeta } from "@/lib/resend-webhook";
+import { formatInTimeZone, formatDateInZone } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -245,13 +246,13 @@ export default async function LeadDetailPage({
                 <dt>WA opt-in</dt>
                 <dd>{lead.optedInWhatsapp ? <span className="badge green">Yes</span> : <span className="badge red">No</span>}</dd>
                 <dt>Last email</dt>
-                <dd>{lead.lastEmailAt ? lead.lastEmailAt.toLocaleString("en-GB") : "—"}</dd>
+                <dd>{lead.lastEmailAt ? formatInTimeZone(lead.lastEmailAt, user.timezone) : "—"}</dd>
                 <dt>Last WhatsApp</dt>
-                <dd>{lead.lastWhatsappAt ? lead.lastWhatsappAt.toLocaleString("en-GB") : "—"}</dd>
+                <dd>{lead.lastWhatsappAt ? formatInTimeZone(lead.lastWhatsappAt, user.timezone) : "—"}</dd>
                 <dt>Last inbound</dt>
-                <dd>{lead.lastInboundAt ? lead.lastInboundAt.toLocaleString("en-GB") : "never"}</dd>
+                <dd>{lead.lastInboundAt ? formatInTimeZone(lead.lastInboundAt, user.timezone) : "never"}</dd>
                 <dt>Created</dt>
-                <dd>{lead.createdAt.toLocaleDateString("en-GB")}</dd>
+                <dd>{formatDateInZone(lead.createdAt, user.timezone)}</dd>
               </dl>
               {lead.notes ? (
                 <>
@@ -294,7 +295,7 @@ export default async function LeadDetailPage({
                       </span>
                       {a.status ? <span className={`badge ${statusClass}`}>{a.status}</span> : null}
                       {meta.opened ? (
-                        <span className="badge blue" title={meta.firstOpenedAt ? `First opened: ${new Date(meta.firstOpenedAt).toLocaleString("en-GB")}` : undefined}>
+                        <span className="badge blue" title={meta.firstOpenedAt ? `First opened: ${formatInTimeZone(meta.firstOpenedAt, user.timezone)}` : undefined}>
                           Opened{meta.openCount && meta.openCount > 1 ? ` (${meta.openCount})` : ""}
                         </span>
                       ) : null}
@@ -304,7 +305,7 @@ export default async function LeadDetailPage({
                         </span>
                       ) : null}
                       {a.templateName ? <span className="badge slate">{a.templateName}</span> : null}
-                      <span className="t-when">{a.createdAt.toLocaleString("en-GB")}</span>
+                      <span className="t-when">{formatInTimeZone(a.createdAt, user.timezone)}</span>
                     </div>
                     {a.subject ? <div style={{ fontWeight: 600, fontSize: 13.5 }}>{a.subject}</div> : null}
                     {a.body ? <div className="t-body">{a.body}</div> : null}

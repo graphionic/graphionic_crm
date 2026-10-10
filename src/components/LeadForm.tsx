@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { BUSINESS_CATEGORIES, COUNTRIES, LEAD_STATUSES, SEGMENTS } from "@/lib/constants";
+import { POPULAR_TIMEZONES, getAllSupportedTimezones } from "@/lib/timezone";
 
 export type LeadFormValues = Record<string, string | number | boolean | Date | null | undefined>;
 
@@ -88,6 +89,29 @@ export function LeadForm({
             <label className="f">
               <span>Industry / sector</span>
               <input name="industry" defaultValue={val(initial.industry)} />
+            </label>
+            <label className="f" style={{ gridColumn: "1 / -1" }}>
+              <span>Timezone (Optional Manual Override)</span>
+              <select name="timezone" defaultValue={val(initial.timezone) || ""}>
+                <option value="">— Automatic from location —</option>
+                <optgroup label="Popular Outreach Zones">
+                  {POPULAR_TIMEZONES.map((tz) => (
+                    <option key={tz} value={tz}>
+                      {tz}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="All Supported IANA Timezones">
+                  {getAllSupportedTimezones().map((tz) => (
+                    <option key={tz} value={tz}>
+                      {tz}
+                    </option>
+                  ))}
+                </optgroup>
+              </select>
+              <span className="hint">
+                Leave blank to automatically resolve from city/country, or choose an explicit IANA timezone.
+              </span>
             </label>
           </div>
         </div>

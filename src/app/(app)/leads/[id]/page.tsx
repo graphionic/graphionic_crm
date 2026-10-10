@@ -10,6 +10,7 @@ import { Composer, WaSender, QuickActions } from "./lead-client";
 import { isSuppressed } from "@/lib/actions/leads";
 import { parseActivityMeta } from "@/lib/resend-webhook";
 import { formatInTimeZone, formatDateInZone } from "@/lib/timezone";
+import { LiveLocalTime } from "@/components/LiveLocalTime";
 
 export const dynamic = "force-dynamic";
 
@@ -235,6 +236,8 @@ export default async function LeadDetailPage({
                 </dd>
                 <dt>Address</dt>
                 <dd>{lead.address || "—"}{lead.postcode ? `, ${lead.postcode}` : ""}</dd>
+                <dt>Local time</dt>
+                <dd><LiveLocalTime timezone={lead.timezone} format="full" /></dd>
                 <dt>Company no.</dt>
                 <dd>{lead.companyNumber || "—"}</dd>
                 <dt>Source</dt>

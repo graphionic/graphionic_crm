@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireActiveUser } from "@/lib/session";
+import { isValidTimeZone } from "@/lib/timezone";
+import { resolveLeadTimezone } from "@/lib/lead-timezone";
 
 /** Normalise a phone/email into suppression-list form. */
 function norm(v: string) {
@@ -20,6 +22,7 @@ const LeadInput = z.object({
   region: z.string().optional().default(""),
   address: z.string().optional().default(""),
   postcode: z.string().optional().default(""),
+  timezone: z.string().optional().default(""),
   companyNumber: z.string().optional().default(""),
   contactName: z.string().optional().default(""),
   contactRole: z.string().optional().default(""),
@@ -67,9 +70,15 @@ export async function createLead(fd: FormData) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const d = parsed.data;
+
+  // Resolve timezone: use valid manual override if supplied, else auto-resolve from location
+  const manualTz = d.timezone && isValidTimeZone(d.timezone) ? d.timezone.trim() : null;
+  const resolvedTz = manualTz || resolveLeadTimezone({ country: d.country, city: d.city, region: d.region });
+
   const lead = await prisma.lead.create({
     data: {
       ...d,
+      timezone: resolvedTz,
       email: d.email || null,
       phone: d.phone || null,
       nextFollowUpAt: d.nextFollowUpAt ? new Date(d.nextFollowUpAt) : null,
@@ -99,10 +108,15 @@ export async function updateLead(id: string, fd: FormData) {
   const before = await prisma.lead.findUnique({ where: { id } });
   if (!before) return { error: "Lead not found" };
 
+  // Resolve timezone: use valid manual override if supplied, else auto-resolve from location
+  const manualTz = d.timezone && isValidTimeZone(d.timezone) ? d.timezone.trim() : null;
+  const resolvedTz = manualTz || resolveLeadTimezone({ country: d.country, city: d.city, region: d.region });
+
   await prisma.lead.update({
     where: { id },
     data: {
       ...d,
+      timezone: resolvedTz,
       email: d.email || null,
       phone: d.phone || null,
       nextFollowUpAt: d.nextFollowUpAt ? new Date(d.nextFollowUpAt) : null,

@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { sendLeadEmail, sendLeadWhatsapp } from "@/lib/actions/send";
 import { canSendFreeform } from "@/lib/whatsapp";
 import { isSuppressed } from "@/lib/actions/leads";
-import { isValidTimeZone } from "@/lib/timezone";
+import { isValidTimeZone, formatTimeInZone } from "@/lib/timezone";
 
 export function detectSecretInText(text: string): boolean {
   if (!text) return false;
@@ -614,6 +614,7 @@ export async function executeHimiTool(
           businessCategory: true,
           country: true,
           city: true,
+          timezone: true,
           website: true,
           websiteStatus: true,
           segment: true,
@@ -636,7 +637,12 @@ export async function executeHimiTool(
         },
       });
 
-      return { ok: true, count: leads.length, data: leads };
+      const formattedLeads = leads.map((l) => ({
+        ...l,
+        localTime: l.timezone ? formatTimeInZone(new Date(), l.timezone) : null,
+      }));
+
+      return { ok: true, count: formattedLeads.length, data: formattedLeads };
     }
 
     case "get_lead_details": {
@@ -655,7 +661,13 @@ export async function executeHimiTool(
       if (!lead) {
         return { ok: false, error: { code: "LEAD_NOT_FOUND", message: `No lead found with ID ${args.lead_id}` } };
       }
-      return { ok: true, data: lead };
+      return {
+        ok: true,
+        data: {
+          ...lead,
+          localTime: lead.timezone ? formatTimeInZone(new Date(), lead.timezone) : null,
+        },
+      };
     }
 
     case "get_lead_activity": {
@@ -1097,6 +1109,8 @@ export async function executeHimiTool(
           segment: lead.segment || "UNCHECKED",
           city: lead.city || null,
           country: lead.country || "UK",
+          timezone: lead.timezone || null,
+          localTime: lead.timezone ? formatTimeInZone(new Date(), lead.timezone) : null,
           businessCategory: lead.businessCategory || null,
           contactability,
           emailEligible,
@@ -1340,6 +1354,8 @@ export async function executeHimiTool(
           segment: lead.segment || "UNCHECKED",
           city: lead.city || null,
           country: lead.country || "UK",
+          timezone: lead.timezone || null,
+          localTime: lead.timezone ? formatTimeInZone(new Date(), lead.timezone) : null,
           businessCategory: lead.businessCategory || null,
           emailEligible,
           whatsappEligible,

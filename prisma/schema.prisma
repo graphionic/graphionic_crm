@@ -39,6 +39,7 @@ model Lead {
   region           String?
   address          String?
   postcode         String?
+  timezone         String? // IANA identifier e.g. "Europe/London", "America/New_York"
   companyNumber    String? // Companies House / registry number
   companyUrl       String?
 

@@ -23,7 +23,7 @@ function checkFreeformWindow(lastInboundAt: Date | null | undefined) {
   if (hours > 24) {
     return { allowed: false, reason: "EXPIRED_WINDOW", hoursLeft: 0 };
   }
-  return { allowed: true, hoursLeft: Math.max(0, Math.floor(24 - hours)) };
+  return { allowed: true, hoursLeft: Math.max(0, Math.round(24 - hours)) };
 }
 
 async function main() {
@@ -212,9 +212,10 @@ async function main() {
   const adminUserSample = await prisma.adminUser.findFirst();
   assert(adminUserSample !== undefined, "AdminUser query executed cleanly");
 
-  // Verify Lead table does NOT have timezone
+  // Verify Lead table has timezone but NOT provenance fields
   const leadFields = Object.keys((prisma.lead as any).fields || {});
-  assert(!leadFields.includes("timezone"), "Lead model does NOT have a timezone field (Roadmap #4 deferred)");
+  assert(leadFields.includes("timezone"), "Lead model has timezone field (Roadmap #4 implemented)");
+  assert(!leadFields.includes("timezoneSource"), "Lead model does NOT have timezoneSource field");
 
   // Verify AdminUser does NOT have extraneous fields
   const userFields = Object.keys((prisma.adminUser as any).fields || {});

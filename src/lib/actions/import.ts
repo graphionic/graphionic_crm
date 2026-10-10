@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireActiveUser } from "@/lib/session";
+import { resolveLeadTimezone } from "@/lib/lead-timezone";
 import { parseCsv, mapRow, guessCountry } from "@/lib/csv";
 
 export type ImportResult = {
@@ -51,15 +52,23 @@ export async function importLeadsCsv(csvText: string): Promise<ImportResult> {
         guessCountry(r.address || "") ||
         "UK";
 
+      const resolvedCountry = country === "UNI" ? "UK" : country;
+      const timezone = resolveLeadTimezone({
+        country: resolvedCountry,
+        city: r.city || null,
+        region: r.region || null,
+      });
+
       const data = {
         companyName: r.companyName!,
         businessCategory: r.businessCategory || null,
         industry: r.industry || null,
-        country: country === "UNI" ? "UK" : country,
+        country: resolvedCountry,
         city: r.city || null,
         region: r.region || null,
         address: r.address || null,
         postcode: r.postcode || null,
+        timezone,
         companyNumber: r.companyNumber || null,
         companyUrl: r.companyUrl || null,
         website: r.website || null,

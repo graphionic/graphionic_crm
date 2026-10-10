@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { requireActiveUser } from "@/lib/session";
 import { LEAD_STATUSES, SEGMENTS, COUNTRIES, statusTone, segmentTone } from "@/lib/constants";
+import { LiveLocalTime } from "@/components/LiveLocalTime";
 import type { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -177,7 +178,10 @@ export default async function LeadsPage({
                         {l.contactName ? <div>{l.contactName}</div> : <span className="muted">—</span>}
                         <div className="sub">{l.email || l.phone || "no contact details"}</div>
                       </td>
-                      <td><span className="badge">{l.country}</span></td>
+                      <td>
+                        <span className="badge">{l.country}</span>
+                        <LiveLocalTime timezone={l.timezone} format="compact" />
+                      </td>
                       <td>
                         <span className={`badge ${segmentTone(l.segment)}`}>{l.segment || "—"}</span>
                         {l.website ? (

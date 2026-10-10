@@ -24,10 +24,10 @@ export function PipelineRibbon({ statusMap, totalLeads }: PipelineRibbonProps) {
       <div className="dash-pipeline-head">
         <div className="hstack" style={{ gap: 8 }}>
           <span className="dash-section-k">PIPELINE MOMENTUM</span>
-          <span className="dash-section-count">{totalLeads.toLocaleString()} active leads</span>
+          <span className="dash-section-count">· {totalLeads.toLocaleString()} leads</span>
         </div>
-        <Link href="/leads" className="hint small">
-          View all leads →
+        <Link href="/leads" className="dash-pipeline-link">
+          All leads →
         </Link>
       </div>
 

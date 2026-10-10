@@ -38,7 +38,7 @@ function formatRelativeTime(date: Date, now: Date = new Date()): string {
   return new Date(date).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 }
 
-interface FormattedEvent {
+interface ProcessedEvent {
   id: string;
   leadId?: string;
   companyName: string;
@@ -47,64 +47,81 @@ interface FormattedEvent {
   actionText: string;
   subtext?: string;
   timeAgo: string;
+  count: number;
+  eventTypeKey: string;
 }
 
 export function LiveActivityStream({ activities }: LiveActivityStreamProps) {
   const now = new Date();
-  const formattedEvents: FormattedEvent[] = [];
-
-  // Deduplicate and format high-signal events
-  let lastFailureLeadId: string | null = null;
-  let consecutiveFailureCount = 0;
+  const rawList: {
+    id: string;
+    leadId?: string;
+    companyName: string;
+    icon: string;
+    iconTone: "green" | "blue" | "aqua" | "amber" | "red" | "purple" | "slate";
+    actionText: string;
+    subtext?: string;
+    timeAgo: string;
+    eventTypeKey: string;
+  }[] = [];
 
   for (const act of activities) {
-    if (formattedEvents.length >= 7) break;
     const company = act.lead?.companyName || "Unknown contact";
     const leadId = act.lead?.id;
     const meta = parseActivityMeta(act.meta);
     const timeAgo = formatRelativeTime(act.createdAt, now);
 
-    // Inbound reply
+    // 1. Inbound reply (High priority)
     if (act.direction === "IN") {
-      formattedEvents.push({
+      rawList.push({
         id: act.id,
         leadId,
         companyName: company,
         icon: "↓",
         iconTone: "green",
         actionText: `Inbound ${act.type === "WHATSAPP" ? "WhatsApp" : "email"} reply`,
-        subtext: act.body ? (act.body.length > 55 ? `${act.body.slice(0, 55)}…` : act.body) : undefined,
+        subtext: act.body ? (act.body.length > 50 ? `${act.body.slice(0, 50)}…` : act.body) : undefined,
         timeAgo,
+        eventTypeKey: `reply_${act.type}`,
       });
       continue;
     }
 
-    // Delivery failure
+    // 2. Delivery failure (High priority / Cautionary)
     if (act.status === "failed" || act.status === "bounced" || act.status === "complained" || act.error) {
-      if (leadId && leadId === lastFailureLeadId) {
-        consecutiveFailureCount++;
-        continue;
-      }
-      lastFailureLeadId = leadId || null;
-      consecutiveFailureCount = 1;
-
       const channelName = act.type === "WHATSAPP" ? "WhatsApp" : "Email";
-      formattedEvents.push({
+      rawList.push({
         id: act.id,
         leadId,
         companyName: company,
         icon: "⚠",
         iconTone: "red",
         actionText: `${channelName} delivery failed`,
-        subtext: act.error ? (act.error.length > 60 ? `${act.error.slice(0, 60)}…` : act.error) : "Message bounced or rejected",
+        subtext: act.error ? (act.error.length > 55 ? `${act.error.slice(0, 55)}…` : act.error) : "Message bounced or rejected",
         timeAgo,
+        eventTypeKey: `fail_${act.type}`,
       });
       continue;
     }
 
-    // WhatsApp read
+    // 3. Meaningful status change
+    if (act.type === "STATUS") {
+      rawList.push({
+        id: act.id,
+        leadId,
+        companyName: company,
+        icon: "✦",
+        iconTone: "purple",
+        actionText: act.body || "Status updated",
+        timeAgo,
+        eventTypeKey: "status_change",
+      });
+      continue;
+    }
+
+    // 4. WhatsApp read / Email clicked
     if (act.type === "WHATSAPP" && act.status === "read") {
-      formattedEvents.push({
+      rawList.push({
         id: act.id,
         leadId,
         companyName: company,
@@ -112,13 +129,28 @@ export function LiveActivityStream({ activities }: LiveActivityStreamProps) {
         iconTone: "aqua",
         actionText: "Read your WhatsApp",
         timeAgo,
+        eventTypeKey: "wa_read",
       });
       continue;
     }
 
-    // Email opened
+    if (act.type === "EMAIL" && (meta.clicked || act.status === "clicked")) {
+      rawList.push({
+        id: act.id,
+        leadId,
+        companyName: company,
+        icon: "🔗",
+        iconTone: "purple",
+        actionText: "Clicked link in email",
+        timeAgo,
+        eventTypeKey: "email_clicked",
+      });
+      continue;
+    }
+
+    // 5. Email opened
     if (act.type === "EMAIL" && (meta.opened || act.status === "opened")) {
-      formattedEvents.push({
+      rawList.push({
         id: act.id,
         leadId,
         companyName: company,
@@ -127,28 +159,15 @@ export function LiveActivityStream({ activities }: LiveActivityStreamProps) {
         actionText: "Opened your email",
         subtext: meta.openCount && meta.openCount > 1 ? `Opened ${meta.openCount} times` : undefined,
         timeAgo,
+        eventTypeKey: "email_opened",
       });
       continue;
     }
 
-    // Email clicked
-    if (act.type === "EMAIL" && (meta.clicked || act.status === "clicked")) {
-      formattedEvents.push({
-        id: act.id,
-        leadId,
-        companyName: company,
-        icon: "🔗",
-        iconTone: "purple",
-        actionText: "Clicked link in email",
-        timeAgo,
-      });
-      continue;
-    }
-
-    // Outreach sent
+    // 6. Outreach sent / delivered
     if (act.direction === "OUT" && (act.type === "EMAIL" || act.type === "WHATSAPP")) {
       const isWa = act.type === "WHATSAPP";
-      formattedEvents.push({
+      rawList.push({
         id: act.id,
         leadId,
         companyName: company,
@@ -156,40 +175,52 @@ export function LiveActivityStream({ activities }: LiveActivityStreamProps) {
         iconTone: isWa ? "aqua" : "slate",
         actionText: `${isWa ? "WhatsApp" : "Email"} outreach sent`,
         timeAgo,
+        eventTypeKey: `outreach_${act.type}`,
       });
       continue;
     }
 
-    // Status change
-    if (act.type === "STATUS") {
-      formattedEvents.push({
-        id: act.id,
-        leadId,
-        companyName: company,
-        icon: "✦",
-        iconTone: "purple",
-        actionText: act.body || "Status updated",
-        timeAgo,
-      });
-      continue;
-    }
-
-    // Note added
+    // 7. Note added
     if (act.type === "NOTE") {
-      formattedEvents.push({
+      rawList.push({
         id: act.id,
         leadId,
         companyName: company,
         icon: "📝",
         iconTone: "slate",
         actionText: "Note recorded",
-        subtext: act.body ? (act.body.length > 50 ? `${act.body.slice(0, 50)}…` : act.body) : undefined,
+        subtext: act.body ? (act.body.length > 45 ? `${act.body.slice(0, 45)}…` : act.body) : undefined,
         timeAgo,
+        eventTypeKey: "note",
       });
     }
   }
 
-  if (formattedEvents.length === 0) {
+  // Group consecutive equivalent events for the same lead and event type
+  const groupedEvents: ProcessedEvent[] = [];
+  for (const item of rawList) {
+    const prev = groupedEvents[groupedEvents.length - 1];
+    if (
+      prev &&
+      prev.leadId &&
+      item.leadId &&
+      prev.leadId === item.leadId &&
+      prev.eventTypeKey === item.eventTypeKey
+    ) {
+      prev.count += 1;
+      // Keep earliest/latest subtext context
+      continue;
+    }
+
+    groupedEvents.push({
+      ...item,
+      count: 1,
+    });
+  }
+
+  const finalEvents = groupedEvents.slice(0, 6);
+
+  if (finalEvents.length === 0) {
     return (
       <div className="dash-empty-feed">
         <b>No recent activity</b>
@@ -200,7 +231,7 @@ export function LiveActivityStream({ activities }: LiveActivityStreamProps) {
 
   return (
     <div className="dash-activity-list">
-      {formattedEvents.map((evt) => (
+      {finalEvents.map((evt) => (
         <div key={evt.id} className="dash-activity-item">
           <span className={`dash-event-icon ${evt.iconTone}`} aria-hidden="true">
             {evt.icon}
@@ -215,6 +246,11 @@ export function LiveActivityStream({ activities }: LiveActivityStreamProps) {
                 <span className="dash-event-lead">{evt.companyName}</span>
               )}
               <span className="dash-event-action">{evt.actionText}</span>
+              {evt.count > 1 ? (
+                <span className="dash-event-count-badge" title={`${evt.count} repeated events`}>
+                  {evt.count}×
+                </span>
+              ) : null}
             </div>
             {evt.subtext ? <div className="dash-event-sub">{evt.subtext}</div> : null}
           </div>

@@ -26,11 +26,10 @@ function getGreetingTime(date = new Date()): string {
 function formatStrategyPill(content?: string | null): string | null {
   if (!content) return null;
   const cleaned = content.trim();
-  // Extract concise title if long
   if (cleaned.toLowerCase().includes("dental")) {
     return "✦ Active focus · UK Dental Practices";
   }
-  return cleaned.length > 45 ? `✦ Active focus · ${cleaned.slice(0, 42)}…` : `✦ Active focus · ${cleaned}`;
+  return cleaned.length > 40 ? `✦ Active focus · ${cleaned.slice(0, 38)}…` : `✦ Active focus · ${cleaned}`;
 }
 
 export default async function DashboardPage() {
@@ -38,7 +37,9 @@ export default async function DashboardPage() {
   const now = new Date();
   const day = startOfDay(now);
   const week = new Date(now.getTime() - 7 * 864e5);
-  const firstName = user.name ? user.name.split(" ")[0] : "there";
+
+  // Derive natural display name from AdminUser (preserving truthful database state)
+  const displayName = user.name ? user.name.replace(/\s+Admin$/i, "").trim() : "there";
   const greeting = getGreetingTime(now);
 
   const [
@@ -75,7 +76,7 @@ export default async function DashboardPage() {
     prisma.lead.count({ where: { status: "REPLIED", doNotContact: false } }),
     prisma.activity.findMany({
       orderBy: { createdAt: "desc" },
-      take: 15,
+      take: 20,
       include: { lead: { select: { id: true, companyName: true, country: true, city: true } } },
     }),
     getHimiDailyFocus().catch((err) => {
@@ -105,7 +106,7 @@ export default async function DashboardPage() {
         <div className="dash-header-top">
           <div>
             <h1 className="dash-greeting">
-              {greeting}, {firstName}
+              {greeting}, {displayName}
             </h1>
             <p className="dash-subcopy">Your sales workspace is ready.</p>
           </div>
@@ -144,7 +145,7 @@ export default async function DashboardPage() {
           </div>
           <div className="dash-pulse-v good">{repliesWeek}</div>
           <div className="dash-pulse-d">
-            {emailsWeek > 0 ? `${((repliesWeek / emailsWeek) * 100).toFixed(1)}% of outreach` : "0 in last 7 days"}
+            {emailsWeek > 0 ? `${((repliesWeek / emailsWeek) * 100).toFixed(1)}% response rate` : "0 in last 7 days"}
           </div>
         </Link>
 
@@ -267,7 +268,7 @@ export default async function DashboardPage() {
           ZONE 5 — QUICK ACTIONS
           ============================================================== */}
       <section className="dash-shortcuts-section" aria-label="Quick Actions">
-        <span className="dash-shortcuts-k">QUICK SHORTCUTS</span>
+        <span className="dash-shortcuts-k">SHORTCUTS</span>
         <div className="dash-shortcuts-grid">
           <Link href="/leads/new" className="dash-shortcut-btn primary">
             <span>＋</span>

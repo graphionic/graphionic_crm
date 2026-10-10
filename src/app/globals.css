@@ -505,16 +505,14 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
   gap: 8px;
 }
 
-
-
 /* ============================================================
-   ClientForge AI Sales Command Center Dashboard
+   ClientForge AI Sales Command Center Dashboard (Polished)
    ============================================================ */
 
 .dash-root {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 14px;
   max-width: 1400px;
   margin: 0 auto;
 }
@@ -523,41 +521,42 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 .dash-header-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .dash-header-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 14px;
   flex-wrap: wrap;
 }
 
 .dash-greeting {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--ink);
   margin: 0;
+  line-height: 1.25;
 }
 
 .dash-subcopy {
-  font-size: 13.5px;
+  font-size: 12.5px;
   color: var(--ink-2);
-  margin: 2px 0 0;
+  margin: 1px 0 0;
 }
 
 .dash-strategy-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
+  gap: 5px;
+  padding: 4px 12px;
   background: var(--brand-soft);
   color: var(--brand);
   border: 1px solid var(--blue-line);
   border-radius: 999px;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 500;
   text-decoration: none;
   transition: all 0.15s ease;
@@ -572,19 +571,19 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 .dash-command-wrap {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .dash-command-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  padding: 8px 14px 8px 18px;
-  box-shadow: var(--shadow);
-  transition: all 0.2s ease;
+  padding: 4px 8px 4px 14px;
+  box-shadow: 0 1px 2px rgba(21, 25, 39, 0.03);
+  transition: all 0.15s ease;
 }
 
 .dash-command-bar:focus-within {
@@ -594,7 +593,7 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 
 .dash-command-icon {
   color: var(--brand);
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 700;
   flex: none;
 }
@@ -605,9 +604,9 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
   outline: none;
   background: transparent;
   font-family: inherit;
-  font-size: 14.5px;
+  font-size: 13.5px;
   color: var(--ink);
-  height: 38px;
+  height: 34px;
   padding: 0;
 }
 
@@ -618,14 +617,14 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 .dash-command-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   background: var(--brand);
   color: #ffffff;
   border: none;
-  border-radius: 8px;
-  padding: 0 16px;
-  height: 36px;
-  font-size: 13px;
+  border-radius: 6px;
+  padding: 0 13px;
+  height: 30px;
+  font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
   font-family: inherit;
@@ -638,14 +637,14 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 
 .dash-command-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
 .dash-chips {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
   padding-left: 2px;
 }
@@ -653,13 +652,13 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 .dash-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 11px;
+  gap: 4px;
+  padding: 3px 10px;
   background: var(--panel);
   border: 1px solid var(--line-2);
   border-radius: 999px;
   color: var(--ink-2);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 500;
   cursor: pointer;
   font-family: inherit;
@@ -668,7 +667,7 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 
 .dash-chip span:first-child {
   color: var(--brand);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .dash-chip:hover {
@@ -681,15 +680,15 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 .dash-pulse-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  gap: 12px;
 }
 
 .dash-pulse-card {
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  padding: 16px 18px;
-  box-shadow: var(--shadow);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-card);
+  padding: 12px 14px;
+  box-shadow: 0 1px 2px rgba(21, 25, 39, 0.03);
   display: flex;
   flex-direction: column;
   text-decoration: none;
@@ -698,20 +697,20 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 
 .dash-pulse-card:hover {
   text-decoration: none;
-  border-color: var(--brand);
+  border-color: var(--line);
   transform: translateY(-1px);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow);
 }
 
 .dash-pulse-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .dash-pulse-k {
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -719,14 +718,14 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 
 .dash-pulse-icon {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--muted);
   font-weight: 600;
 }
 
 .dash-pulse-status-dot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   display: inline-block;
 }
@@ -740,7 +739,7 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 
 .dash-pulse-v {
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 600;
   color: var(--ink);
   line-height: 1.2;
@@ -755,31 +754,34 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 
 .dash-pulse-d {
-  font-size: 12.5px;
+  font-size: 11.5px;
   color: var(--muted);
-  margin-top: 4px;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Zone 3 — Main Workspace */
 .dash-workspace {
   display: grid;
-  grid-template-columns: 64% 36%;
-  gap: 18px;
+  grid-template-columns: 63% 37%;
+  gap: 14px;
   align-items: stretch;
 }
 
 .dash-focus-card,
 .dash-activity-card {
   background: var(--panel);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-2);
   border-radius: var(--radius-card);
-  box-shadow: var(--shadow);
+  box-shadow: 0 1px 2px rgba(21, 25, 39, 0.03);
   display: flex;
   flex-direction: column;
 }
 
 .dash-card-head {
-  padding: 16px 20px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--line-2);
   display: flex;
   align-items: center;
@@ -788,14 +790,14 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 
 .dash-card-head h2 {
-  font-size: 16px;
+  font-size: 14.5px;
   font-weight: 600;
   color: var(--ink);
   margin: 0;
 }
 
 .dash-card-sub {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--muted);
   font-weight: 400;
   margin-top: 1px;
@@ -803,12 +805,12 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 
 .dash-ai-icon {
   color: var(--brand);
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 700;
 }
 
 .dash-card-link {
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--brand);
   text-decoration: none;
@@ -820,7 +822,7 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* Zone 3A — Focus Items */
 .dash-focus-body {
-  padding: 12px 16px;
+  padding: 10px 14px;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -830,15 +832,15 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 .dash-focus-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .dash-focus-item {
   display: grid;
-  grid-template-columns: 110px 1fr auto;
+  grid-template-columns: 100px 1fr auto;
   align-items: center;
-  gap: 14px;
-  padding: 12px 14px;
+  gap: 12px;
+  padding: 10px 12px;
   border-radius: 8px;
   border: 1px solid var(--line-2);
   background: var(--soft);
@@ -848,7 +850,7 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 .dash-focus-item:hover {
   border-color: var(--line);
   background: #ffffff;
-  box-shadow: 0 2px 6px rgba(21, 25, 39, 0.04);
+  box-shadow: 0 1px 4px rgba(21, 25, 39, 0.04);
 }
 
 .dash-focus-item.action {
@@ -856,7 +858,7 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 
 .dash-focus-item.watch {
-  border-left: 3px solid var(--ink-2);
+  border-left: 3px solid #60697a;
 }
 
 .dash-focus-item.opportunity {
@@ -867,9 +869,9 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 3px 8px;
-  border-radius: 6px;
-  font-size: 11px;
+  padding: 2.5px 7px;
+  border-radius: 4px;
+  font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -906,7 +908,7 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 
 .dash-item-company {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--ink);
   text-decoration: none;
@@ -918,25 +920,25 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 
 .dash-item-geo {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--muted);
 }
 
 .dash-item-reason {
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--ink-2);
-  margin: 2px 0 0;
-  line-height: 1.45;
+  margin: 1px 0 0;
+  line-height: 1.4;
 }
 
 .dash-item-cta-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 14px;
-  height: 34px;
+  gap: 4px;
+  padding: 0 12px;
+  height: 30px;
   border-radius: 6px;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 500;
   text-decoration: none;
   font-family: inherit;
@@ -979,7 +981,7 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 
 .dash-empty-focus {
   text-align: center;
-  padding: 32px 16px;
+  padding: 24px 16px;
   color: var(--ink-2);
 }
 
@@ -987,46 +989,46 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: var(--green-soft);
   color: var(--green);
-  font-size: 18px;
+  font-size: 16px;
   font-weight: bold;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .dash-empty-focus b {
   display: block;
-  font-size: 14.5px;
+  font-size: 13.5px;
   color: var(--ink);
   margin-bottom: 2px;
 }
 
 .dash-empty-focus p {
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--muted);
   margin: 0;
 }
 
 /* Zone 3B — Live Activity Stream */
 .dash-activity-body {
-  padding: 8px 16px;
+  padding: 6px 14px;
   flex: 1;
 }
 
 .dash-live-badge {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  font-size: 12px;
+  gap: 6px;
+  font-size: 11.5px;
   color: var(--muted);
 }
 
 .dash-live-dot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--green);
   box-shadow: 0 0 0 2px var(--green-soft);
@@ -1043,7 +1045,7 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
   border: none;
   cursor: pointer;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 13px;
   padding: 2px 4px;
   border-radius: 4px;
   transition: transform 0.2s ease, color 0.15s ease;
@@ -1065,8 +1067,8 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 .dash-activity-item {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 10px 0;
+  gap: 9px;
+  padding: 8px 0;
   border-bottom: 1px solid var(--line-2);
 }
 
@@ -1075,13 +1077,13 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 
 .dash-event-icon {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   flex: none;
   margin-top: 1px;
@@ -1101,7 +1103,7 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 
 .dash-event-line {
-  font-size: 13px;
+  font-size: 12.5px;
   line-height: 1.4;
   color: var(--ink);
 }
@@ -1110,7 +1112,7 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
   font-weight: 600;
   color: var(--ink);
   text-decoration: none;
-  margin-right: 5px;
+  margin-right: 4px;
 }
 
 .dash-event-lead:hover {
@@ -1122,8 +1124,20 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
   color: var(--ink-2);
 }
 
+.dash-event-count-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  background: var(--brand-soft);
+  color: var(--brand);
+  margin-left: 5px;
+}
+
 .dash-event-sub {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--muted);
   margin-top: 1px;
   white-space: nowrap;
@@ -1132,7 +1146,7 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 
 .dash-event-time {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--muted);
   white-space: nowrap;
   flex: none;
@@ -1140,26 +1154,32 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 
 .dash-empty-feed {
   text-align: center;
-  padding: 36px 16px;
+  padding: 24px 16px;
   color: var(--muted);
 }
 
 .dash-empty-feed b {
   display: block;
   color: var(--ink-2);
-  margin-bottom: 3px;
+  margin-bottom: 2px;
+  font-size: 13px;
+}
+
+.dash-empty-feed p {
+  font-size: 11.5px;
+  margin: 0;
 }
 
 /* Zone 4 — Compact Pipeline Ribbon */
 .dash-pipeline-card {
   background: var(--panel);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-2);
   border-radius: var(--radius-card);
-  padding: 14px 18px;
-  box-shadow: var(--shadow);
+  padding: 10px 14px;
+  box-shadow: 0 1px 2px rgba(21, 25, 39, 0.03);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .dash-pipeline-head {
@@ -1169,7 +1189,7 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 
 .dash-section-k {
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1177,13 +1197,23 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 
 .dash-section-count {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--ink-2);
   font-weight: 500;
 }
 
+.dash-pipeline-link {
+  font-size: 11.5px;
+  color: var(--brand);
+  text-decoration: none;
+}
+
+.dash-pipeline-link:hover {
+  text-decoration: underline;
+}
+
 .dash-pipeline-track {
-  height: 6px;
+  height: 5px;
   background: var(--line-2);
   border-radius: 999px;
   overflow: hidden;
@@ -1201,18 +1231,18 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
 .dash-pipeline-stage {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: 6px;
+  gap: 5px;
+  padding: 3px 6px;
+  border-radius: 5px;
   text-decoration: none;
-  font-size: 12.5px;
+  font-size: 11.5px;
   color: var(--ink);
   transition: background 0.15s ease;
 }
@@ -1223,12 +1253,12 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 
 .dash-pipeline-stage.muted {
-  opacity: 0.55;
+  opacity: 0.5;
 }
 
 .dash-stage-dot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
 }
 
@@ -1246,17 +1276,17 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 .dash-shortcuts-section {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
   flex-wrap: wrap;
-  padding: 12px 18px;
+  padding: 8px 14px;
   background: var(--panel);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-2);
   border-radius: var(--radius-card);
-  box-shadow: var(--shadow);
+  box-shadow: 0 1px 2px rgba(21, 25, 39, 0.03);
 }
 
 .dash-shortcuts-k {
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1266,7 +1296,7 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 .dash-shortcuts-grid {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
   flex: 1;
 }
@@ -1274,14 +1304,14 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
 .dash-shortcut-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 14px;
-  height: 36px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
+  gap: 5px;
+  padding: 0 12px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
   background: var(--panel);
   color: var(--ink);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   text-decoration: none;
   transition: all 0.15s ease;
@@ -1329,24 +1359,24 @@ table.t .num { text-align: right; font-variant-numeric: tabular-nums; }
   }
   .dash-focus-item {
     grid-template-columns: 1fr;
-    gap: 8px;
+    gap: 6px;
   }
   .dash-item-cta-btn {
     width: 100%;
     justify-content: center;
-    height: 44px;
+    height: 40px;
   }
   .dash-command-btn {
-    height: 44px;
+    height: 40px;
   }
   .dash-shortcuts-grid {
     width: 100%;
   }
   .dash-shortcut-btn {
     flex: 1;
-    min-width: 140px;
+    min-width: 120px;
     justify-content: center;
-    height: 44px;
+    height: 40px;
   }
 }
 
